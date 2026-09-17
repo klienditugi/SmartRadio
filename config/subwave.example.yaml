@@ -1,0 +1,69 @@
+# Example configuration — copy to `config/subwave.yaml`
+#
+# Substitute via environment variables (`${OLLAMA_MODEL}`) or SUBWAVE_* / OLLAMA_* /
+# NAVIDROME_* / SLSKD_* overrides. Secrets are files in `paths.secrets_dir`.
+# Do not commit live URLs or credentials.
+
+server:
+  host: "127.0.0.1"
+  port: 8788
+
+database:
+  path: "./data/subwave.sqlite"
+
+paths:
+  secrets_dir: "./secrets"
+  downloads: "./data/downloads"
+  staging: "./data/staging"
+  library: "./data/library"
+
+files:
+  allowed_extensions: [".mp3", ".flac", ".m4a", ".ogg", ".wav"]
+  max_bytes: 209715200
+
+auth:
+  admin_username: "admin"
+  session_ttl_hours: 24
+  cookie_name: "subwave_session"
+
+worker:
+  id: "worker-1"
+  poll_ms: 500
+  lease_ms: 30000
+  max_attempts: 5
+
+policy:
+  require_electronic: true
+  require_station_match: true
+  min_confidence: 0.55
+  allowed_genres: []
+  blocked_artists: []
+  blocked_terms: []
+
+# External Ollama only. Never install/update/pull models from this app.
+llm:
+  provider: ollama
+  base_url: "${OLLAMA_BASE_URL}"
+  model: "${OLLAMA_MODEL}"
+  timeout_ms: 120000
+  verify_status: verified
+
+library:
+  provider: navidrome
+  base_url: "${NAVIDROME_URL}"
+  username: "${NAVIDROME_USER}"
+  client_name: "subwave-ai"
+  api_version: "1.16.1"
+  verify_status: verified
+
+# Opaque base URL (production may already include `/api`).
+radio:
+  provider: subwave
+  base_url: "${SUBWAVE_RADIO_URL}"
+  admin_user: "${SUBWAVE_RADIO_ADMIN_USER}"
+  verify_status: verified
+
+acquisition:
+  provider: slskd
+  base_url: "${SLSKD_URL}"
+  verify_status: verified

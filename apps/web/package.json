@@ -1,0 +1,9 @@
+{
+  "name": "@subwave-ai/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Placeholder UI package. Bot4 owns the React application.",
+  "scripts": {
+    "dev": "echo 'apps/web is a placeholder — Bot4 owns the React UI'"
+  }
+}
