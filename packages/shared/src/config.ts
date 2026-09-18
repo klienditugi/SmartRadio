@@ -163,18 +163,35 @@ export type LoadConfigOptions = {
   secretsDir?: string;
 };
 
+function findWorkspaceRoot(start = process.cwd()): string {
+  let dir = path.resolve(start);
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(path.join(dir, "pnpm-workspace.yaml"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.resolve(start);
+}
+
+function resolveFromRoot(filePath: string): string {
+  if (path.isAbsolute(filePath)) return filePath;
+  return path.resolve(findWorkspaceRoot(), filePath);
+}
+
 function resolveConfigPath(env: NodeJS.ProcessEnv, explicit?: string): string {
   if (explicit) return path.resolve(explicit);
-  if (env.SUBWAVE_CONFIG) return path.resolve(env.SUBWAVE_CONFIG);
-  const local = path.resolve(process.cwd(), "config/subwave.yaml");
+  if (env.SUBWAVE_CONFIG) return resolveFromRoot(env.SUBWAVE_CONFIG);
+  const root = findWorkspaceRoot();
+  const local = path.join(root, "config/subwave.yaml");
   if (existsSync(local)) return local;
-  return path.resolve(process.cwd(), "config/subwave.example.yaml");
+  return path.join(root, "config/subwave.example.yaml");
 }
 
 export function writableConfigPath(env: NodeJS.ProcessEnv = process.env, explicit?: string): string {
   if (explicit) return path.resolve(explicit);
-  if (env.SUBWAVE_CONFIG) return path.resolve(env.SUBWAVE_CONFIG);
-  return path.resolve(process.cwd(), "config/subwave.yaml");
+  if (env.SUBWAVE_CONFIG) return resolveFromRoot(env.SUBWAVE_CONFIG);
+  return path.join(findWorkspaceRoot(), "config/subwave.yaml");
 }
 
 export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
