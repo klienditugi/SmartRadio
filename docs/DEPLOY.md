@@ -4,6 +4,8 @@ This document describes how to install the software **in this repository**. It d
 
 ## Clone story
 
+The GitHub remote/repo may be named SmartRadio. Clone into the local directory **`subwave-ai`**:
+
 ```bash
 git clone <repo-url> subwave-ai
 cd subwave-ai
@@ -42,7 +44,7 @@ sudo ./install.sh --non-interactive
 | `./update.sh` | `git pull`, `pnpm install`, rebuild UI, restart this project's services |
 | `./uninstall.sh` | Stop this project's units/compose. `--purge --force` deletes clone data/secrets/.env only |
 | `./backup.sh` | Archive config, secrets, SQLite. `--include-library` adds music (large) |
-| `./restore.sh [--force] backup.tar.gz` | Extract into the clone |
+| `./restore.sh [--force] backup.tar.gz` | Extract into the `subwave-ai` clone |
 | `./doctor.sh` | Host + API diagnostics (`GET /api/v1/doctor`) |
 
 ## Local development (no installer)

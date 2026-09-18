@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../auth";
+import { approveActionCopy } from "../adminActions";
 import type { AcquisitionRow, JobRow, RequestEventRow, RequestRow } from "../types";
 
 type Detail = {
@@ -44,8 +45,15 @@ export function RequestDetailPage() {
   }
 
   const req = data?.request;
+  const approveCopy = req ? approveActionCopy(req.status) : null;
   const download = data?.acquisitions?.[0];
   const pct = download?.progress != null ? Math.round(download.progress * 100) : null;
+
+  async function onApprove() {
+    if (!req || !approveCopy) return;
+    if (approveCopy.confirm && !window.confirm(approveCopy.confirm)) return;
+    await act("approve");
+  }
 
   return (
     <>
@@ -62,8 +70,14 @@ export function RequestDetailPage() {
       {error ? <div className="error">{error}</div> : null}
       {admin && req ? (
         <div className="row" style={{ marginBottom: "1rem" }}>
-          <button className="btn" type="button" onClick={() => void act("approve")}>
-            Approve
+          <button
+            className="btn"
+            type="button"
+            title={approveCopy?.title}
+            aria-label={approveCopy?.title}
+            onClick={() => void onApprove()}
+          >
+            {approveCopy?.label}
           </button>
           <button className="btn danger" type="button" onClick={() => void act("reject")}>
             Reject
@@ -81,6 +95,12 @@ export function RequestDetailPage() {
             Cancel
           </button>
         </div>
+      ) : null}
+      {admin && req?.status === "REJECTED" ? (
+        <p className="muted" style={{ marginTop: "-0.4rem", marginBottom: "1rem" }}>
+          Override to APPROVED is an explicit operator override. It skips reclassification and keeps the existing
+          classification.
+        </p>
       ) : null}
       {download ? (
         <div className="card" style={{ marginBottom: "1rem" }}>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Health diagnostics for Sub Wave AI. Complements GET /api/v1/doctor.
+# Health diagnostics for Sub Wave AI. Run from the local clone directory named subwave-ai.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091

@@ -1,6 +1,7 @@
 # Docker Compose notes
 #
-# Required host paths (set in `.env` next to the clone, not in this file):
+# Run from the local clone directory named subwave-ai.
+# Required host paths (set in `.env` next to that clone, not in this file):
 #   SUBWAVE_DATA_DIR=/absolute/host/data
 #   SUBWAVE_LIBRARY_DIR=/absolute/host/music
 #   SUBWAVE_SECRETS_DIR=/absolute/host/secrets

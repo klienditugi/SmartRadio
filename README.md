@@ -2,7 +2,7 @@
 
 Operator console + backend for Sub Wave AI Radio Automation.
 
-The Git remote is the SmartRadio repository. Clone the working tree as **`subwave-ai`**:
+The GitHub remote/repo is **SmartRadio**. The local clone directory and install path are always **`subwave-ai`**:
 
 ```bash
 git clone <repo-url> subwave-ai

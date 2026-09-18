@@ -2,7 +2,7 @@
 
 ## Backend / shared (Vitest, Node)
 
-From the clone root:
+From the `subwave-ai` clone root:
 
 ```bash
 pnpm install

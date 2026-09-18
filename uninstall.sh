@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop Sub Wave AI services. Default keeps data/library/secrets.
+# Stop Sub Wave AI services in the local clone directory named subwave-ai. Default keeps data/library/secrets.
 # Does not uninstall or stop Ollama or any unrelated host service.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,7 +15,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       echo "Usage: ./uninstall.sh [--purge] [--force]"
       echo "Stops and disables subwave-api/worker (systemd) or the compose project."
-      echo "Does not modify Ollama. --purge deletes this clone's data/secrets/.env after confirm."
+      echo "Does not modify Ollama. --purge deletes the subwave-ai clone's data/secrets/.env after confirm."
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -47,7 +47,7 @@ fi
 
 if [[ "${PURGE}" -eq 1 ]]; then
   if [[ "${FORCE}" -ne 1 ]]; then
-    die "refusing --purge without --force (would delete data/secrets/.env in this clone)"
+    die "refusing --purge without --force (would delete data/secrets/.env in the subwave-ai clone)"
   fi
   warn "removing ${ROOT}/data ${ROOT}/secrets ${ROOT}/.env ${ROOT}/config/subwave.yaml"
   rm -rf "${ROOT}/data"

@@ -1,4 +1,4 @@
-# Sub Wave AI production compose.
+# Sub Wave AI production compose (run from the local clone directory named subwave-ai).
 # Music/data live on the HOST. Never use only container-writable layers for the library.
 #
 # Required host env (no defaults for live URLs/models):

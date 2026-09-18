@@ -1,6 +1,7 @@
 [Unit]
 Description=Sub Wave AI worker
 After=network.target subwave-api.service
+# WorkingDirectory is the subwave-ai clone (install.sh substitutes @ROOT@).
 # Ollama is external and is not a dependency of this unit.
 
 [Service]

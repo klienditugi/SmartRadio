@@ -1,4 +1,4 @@
-# Shared helpers for Sub Wave AI ops scripts.
+# Shared helpers for Sub Wave AI ops scripts. Run from the local clone directory named subwave-ai.
 # Ollama is EXTERNAL. These scripts must never install, update, pull, or manage it.
 
 SUBWAVE_OPS_LOADED=1

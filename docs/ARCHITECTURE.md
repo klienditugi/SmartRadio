@@ -1,6 +1,6 @@
 # Architecture — Sub Wave AI Radio Automation (backend foundation)
 
-This repository delivers the **backend foundation** for Sub Wave AI. The product tree name is `subwave-ai`. The Git remote may still be named SmartRadio.
+This repository delivers the **backend foundation** for Sub Wave AI. The local clone directory and install path are always `subwave-ai`. The GitHub remote/repo name remains SmartRadio.
 
 Ollama is **external only**. The app never installs, updates, or pulls Ollama or any model. Model names are configuration, never source defaults.
 

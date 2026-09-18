@@ -1,4 +1,4 @@
-# Example configuration — copy to `config/subwave.yaml`
+# Example configuration — copy to `config/subwave.yaml` in the local clone directory named subwave-ai.
 #
 # Substitute via environment variables (`${OLLAMA_MODEL}`) or SUBWAVE_* / OLLAMA_* /
 # NAVIDROME_* / SLSKD_* overrides. Secrets are files in `paths.secrets_dir`.

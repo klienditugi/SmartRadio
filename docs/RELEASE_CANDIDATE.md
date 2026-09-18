@@ -7,12 +7,12 @@ This branch adds the operator UI, production installer, and Compose/systemd pack
 - Responsive Vite/React console (`apps/web`) consuming `/api/v1`
 - First-run / settings wizard (no hard-coded production IPs, credentials, ports, or model names)
 - Dashboard, request/job queue with canonical states, download progress snapshot, errors/logs, disk
-- Auth + admin actions: retry, cancel, approve, reject, reclassify, retry acquisition, Navidrome scan, radio playlist refresh (enqueue-only)
+- Auth + admin actions: retry, cancel, approve, reject, reclassify, retry acquisition, Navidrome scan, radio playlist refresh (enqueue-only). `REJECTED → APPROVED` is labeled in the UI as an **operator override that skips reclassification**.
 - Root `install.sh`, `update.sh`, `uninstall.sh`, `backup.sh`, `restore.sh`, `doctor.sh`
 - `deploy/docker-compose.yml` + `deploy/Dockerfile` with **host-mounted** data and library
 - Tests for API extras, progress extraction, UI helpers, ops script contracts
 
-Clone story remains:
+Clone story remains (GitHub remote/repo: SmartRadio; local directory: **`subwave-ai`**):
 
 ```bash
 git clone <repo-url> subwave-ai
@@ -24,7 +24,7 @@ Ollama is never installed, updated, or pulled.
 
 ## Backend deltas for Bot2 review (additive)
 
-- `REJECTED` remains cancel-terminal but may go to `RECEIVED` (reclassify) or `APPROVED` (admin override)
+- `REJECTED` remains cancel-terminal but may go to `RECEIVED` (reclassify) or `APPROVED` (operator override; skips reclassification)
 - `CLASSIFYING → RECEIVED`, `APPROVED → REJECTED`
 - Job type `refresh_playlist`
 - `index_library` without `request_id` = standalone Navidrome `startScan` / `getScanStatus`

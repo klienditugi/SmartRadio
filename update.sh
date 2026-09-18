@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update Sub Wave AI in place. Never touches Ollama. Never overwrites secrets/config/data
+# Update Sub Wave AI in the local clone directory named subwave-ai. Never touches Ollama. Never overwrites secrets/config/data
 # unless git itself would; yaml/secrets/data are gitignored.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

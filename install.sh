@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Production installer for Sub Wave AI (subwave-ai).
-# Clone story: git clone <repo> subwave-ai && cd subwave-ai && sudo ./install.sh
+# Production installer for Sub Wave AI.
+# Clone story (local directory is always subwave-ai; GitHub remote may be SmartRadio):
+#   git clone <repo-url> subwave-ai && cd subwave-ai && sudo ./install.sh
 #
 # NEVER installs, updates, pulls, or manages Ollama/Qwen.
 # Does not deploy to Oracle Cloud. Does not blindly overwrite existing units.
@@ -20,7 +21,7 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [--mode systemd|compose] [--non-interactive] [--force] [--skip-build]
 
-Configures Sub Wave AI in this clone directory (subwave-ai).
+Configures Sub Wave AI in the local clone directory named subwave-ai.
 
   --mode systemd   Host Node processes + systemd units (default on Linux)
   --mode compose   Docker Compose with host-mounted data/library

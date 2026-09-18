@@ -2,6 +2,8 @@
 
 Vite + React operator console for Sub Wave AI. Talks to `/api/v1` (same origin in production; Vite proxy in development).
 
+Develop from the local clone directory named `subwave-ai` (GitHub remote/repo may be SmartRadio).
+
 ```bash
 pnpm install
 pnpm dev:api      # terminal 1

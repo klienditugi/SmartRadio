@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Backup config, secrets, SQLite, and optionally the music library.
+# Backup config, secrets, SQLite, and optionally the music library from the subwave-ai clone.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -49,7 +49,7 @@ if [[ "${INCLUDE_LIBRARY}" -eq 1 ]]; then
         LIST+=("${lib#${ROOT}/}")
         ;;
       *)
-        warn "library ${lib} is outside the clone; not packed (copy it separately). SQLite/config/secrets are still in the archive."
+        warn "library ${lib} is outside the subwave-ai clone; not packed (copy it separately). SQLite/config/secrets are still in the archive."
         ;;
     esac
   fi

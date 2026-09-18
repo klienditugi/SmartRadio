@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restore a backup created by backup.sh into this clone.
+# Restore a backup created by backup.sh into the local clone directory named subwave-ai.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -12,7 +12,7 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE=1; shift ;;
     -h|--help)
       echo "Usage: ./restore.sh [--force] <backup.tar.gz>"
-      echo "Extracts into the clone directory. Does not start Ollama or overwrite host services."
+      echo "Extracts into the subwave-ai clone directory. Does not start Ollama or overwrite host services."
       exit 0
       ;;
     *)
@@ -31,6 +31,6 @@ fi
 
 tar -tzf "${ARCHIVE}" >/dev/null
 tar -xzf "${ARCHIVE}" -C "${ROOT}"
-info "restored ${ARCHIVE} into ${ROOT}"
+info "restored ${ARCHIVE} into the subwave-ai clone at ${ROOT}"
 info "restart API/worker (./update.sh or systemctl restart subwave-api subwave-worker)"
 info "Ollama was not modified."

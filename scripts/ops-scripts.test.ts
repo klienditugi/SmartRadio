@@ -27,8 +27,9 @@ describe("ops scripts", () => {
 
   it("keeps the clone → install.sh story and compose host mounts", () => {
     const install = read("install.sh");
-    expect(install).toMatch(/git clone/);
-    expect(install).toMatch(/subwave-ai/);
+    expect(install).toMatch(/git clone <repo-url> subwave-ai/);
+    expect(install).toMatch(/cd subwave-ai/);
+    expect(install).toMatch(/sudo \.\/install\.sh/);
     expect(install).toMatch(/never install/i);
     const compose = read("deploy/docker-compose.yml");
     expect(compose).toMatch(/SUBWAVE_LIBRARY_DIR/);
