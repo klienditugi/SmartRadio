@@ -42,6 +42,8 @@ export function restartStatusForJob(type: JobType): RequestStatus | null {
       return "IMPORTING";
     case "queue_radio":
       return "ALREADY_AVAILABLE";
+    case "refresh_playlist":
+      return null;
     default:
       return null;
   }

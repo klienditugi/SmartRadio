@@ -8,6 +8,7 @@ import {
   handleImportLibrary,
   handleIndexLibrary,
   handleQueueRadio,
+  handleRefreshPlaylist,
   handleValidateFile,
 } from "./processors/files.js";
 import { handleHealthProbe } from "./processors/health.js";
@@ -22,6 +23,7 @@ const HANDLERS: Record<JobType, JobHandler> = {
   index_library: handleIndexLibrary,
   queue_radio: handleQueueRadio,
   health_probe: handleHealthProbe,
+  refresh_playlist: handleRefreshPlaylist,
 };
 
 export async function processJob(ctx: WorkerContext, job: JobRow): Promise<void> {

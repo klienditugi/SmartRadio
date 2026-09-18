@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import type { RuntimeConfig } from "@subwave-ai/shared";
@@ -8,12 +9,16 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerRequestRoutes } from "./routes/requests.js";
 import { registerAdminRoutes } from "./routes/admin.js";
+import { registerOpsRoutes } from "./routes/ops.js";
+import { registerSetupRoutes } from "./routes/setup.js";
 import { seedAdmin, syncProviders } from "./context.js";
+import { registerWebUi } from "./web.js";
 
 export type BuildAppOptions = {
   config: RuntimeConfig;
   db: Db;
   logger?: boolean;
+  serveWeb?: boolean;
 };
 
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
@@ -24,13 +29,20 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   app.decorate("db", opts.db);
 
   await app.register(cookie);
+  const origin = process.env.SUBWAVE_WEB_ORIGIN;
+  if (origin) {
+    await app.register(cors, {
+      origin,
+      credentials: true,
+    });
+  }
   await app.register(swagger, {
     openapi: {
       info: {
         title: "Sub Wave AI API",
-        version: "0.1.0",
+        version: "0.4.0",
         description:
-          "Backend foundation for Sub Wave AI Radio Automation. API is sync+enqueue; workers own LLM/library/acquire/radio/health.",
+          "Sub Wave AI Radio Automation. API is sync+enqueue; workers own LLM/library/acquire/radio/health. Web UI is served from the same origin when apps/web/dist is present.",
       },
       tags: [
         { name: "auth" },
@@ -50,14 +62,19 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     async (scoped) => {
       await registerHealthRoutes(scoped);
       await registerAuthRoutes(scoped);
+      await registerSetupRoutes(scoped);
       await registerRequestRoutes(scoped);
       await registerAdminRoutes(scoped);
+      await registerOpsRoutes(scoped);
     },
     { prefix: "/api/v1" },
   );
 
   await seedAdmin(opts.db, opts.config);
   syncProviders(opts.db, opts.config);
+  if (opts.serveWeb !== false) {
+    await registerWebUi(app);
+  }
   await app.ready();
   return app;
 }

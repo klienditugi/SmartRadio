@@ -1,21 +1,25 @@
 {
   "name": "subwave-ai",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "Sub Wave AI Radio Automation — backend foundation",
+  "description": "Sub Wave AI Radio Automation — operator UI, API, worker, and install/ops",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "packageManager": "pnpm@10.33.3",
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.typecheck.json --pretty",
-    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json --pretty",
+    "build": "tsc --noEmit -p tsconfig.typecheck.json --pretty && pnpm --filter @subwave-ai/web build",
+    "build:web": "pnpm --filter @subwave-ai/web build",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json --pretty && pnpm --filter @subwave-ai/web typecheck",
     "test": "vitest run",
+    "test:web": "pnpm --filter @subwave-ai/web test",
     "test:watch": "vitest",
     "dev:api": "pnpm --filter @subwave-ai/api dev",
     "dev:worker": "pnpm --filter @subwave-ai/worker dev",
+    "dev:web": "pnpm --filter @subwave-ai/web dev",
     "openapi": "pnpm --filter @subwave-ai/api openapi",
+    "doctor": "bash ./doctor.sh",
     "clean": "rm -rf apps/*/dist packages/*/dist *.tsbuildinfo apps/*/*.tsbuildinfo packages/*/*.tsbuildinfo"
   },
   "devDependencies": {

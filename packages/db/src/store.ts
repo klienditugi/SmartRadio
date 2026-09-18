@@ -166,7 +166,12 @@ export function getRequest(db: Db, id: string): RequestRow | undefined {
   return db.prepare("SELECT * FROM requests WHERE id = ?").get(id) as RequestRow | undefined;
 }
 
-export function listRequests(db: Db, limit = 50): RequestRow[] {
+export function listRequests(db: Db, limit = 50, status?: RequestStatus): RequestRow[] {
+  if (status) {
+    return db
+      .prepare("SELECT * FROM requests WHERE status = ? ORDER BY created_at DESC LIMIT ?")
+      .all(status, limit) as RequestRow[];
+  }
   return db.prepare("SELECT * FROM requests ORDER BY created_at DESC LIMIT ?").all(limit) as RequestRow[];
 }
 
@@ -518,4 +523,160 @@ export function insertAcquisitionItem(
     ts,
   );
   return id;
+}
+
+export type AcquisitionItemRow = {
+  id: string;
+  request_id: string;
+  provider_id: string | null;
+  remote_user: string | null;
+  filename: string | null;
+  status: string;
+  progress: number | null;
+  local_path: string | null;
+  staging_path: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export function listAcquisitionItems(db: Db, requestId?: string, limit = 100): AcquisitionItemRow[] {
+  if (requestId) {
+    return db
+      .prepare("SELECT * FROM acquisition_items WHERE request_id = ? ORDER BY created_at DESC LIMIT ?")
+      .all(requestId, limit) as AcquisitionItemRow[];
+  }
+  return db
+    .prepare("SELECT * FROM acquisition_items ORDER BY created_at DESC LIMIT ?")
+    .all(limit) as AcquisitionItemRow[];
+}
+
+export function updateAcquisitionItem(
+  db: Db,
+  id: string,
+  patch: Partial<
+    Pick<AcquisitionItemRow, "status" | "progress" | "remote_user" | "filename" | "local_path" | "staging_path">
+  >,
+): void {
+  const existing = db.prepare("SELECT * FROM acquisition_items WHERE id = ?").get(id) as AcquisitionItemRow | undefined;
+  if (!existing) throw new Error(`acquisition item not found: ${id}`);
+  const next = {
+    ...existing,
+    ...patch,
+    updated_at: now(),
+  };
+  db.prepare(
+    `UPDATE acquisition_items
+     SET status = @status, progress = @progress, remote_user = @remote_user, filename = @filename,
+         local_path = @local_path, staging_path = @staging_path, updated_at = @updated_at
+     WHERE id = @id`,
+  ).run(next);
+}
+
+export type LibraryMatchRow = {
+  id: string;
+  request_id: string;
+  provider_id: string | null;
+  song_id: string;
+  artist: string | null;
+  title: string | null;
+  path: string | null;
+  score: number | null;
+  created_at: number;
+};
+
+export function listLibraryMatches(db: Db, requestId: string): LibraryMatchRow[] {
+  return db
+    .prepare("SELECT * FROM library_matches WHERE request_id = ? ORDER BY created_at DESC")
+    .all(requestId) as LibraryMatchRow[];
+}
+
+export type LlmCallRow = {
+  id: string;
+  request_id: string | null;
+  provider_id: string | null;
+  model: string;
+  prompt: string;
+  response_json: string | null;
+  parsed_ok: number;
+  latency_ms: number | null;
+  error: string | null;
+  created_at: number;
+};
+
+export function listLlmCalls(db: Db, opts: { requestId?: string; limit?: number; errorsOnly?: boolean } = {}): LlmCallRow[] {
+  const limit = opts.limit ?? 100;
+  if (opts.requestId) {
+    return db
+      .prepare("SELECT * FROM llm_calls WHERE request_id = ? ORDER BY created_at DESC LIMIT ?")
+      .all(opts.requestId, limit) as LlmCallRow[];
+  }
+  if (opts.errorsOnly) {
+    return db
+      .prepare("SELECT * FROM llm_calls WHERE error IS NOT NULL OR parsed_ok = 0 ORDER BY created_at DESC LIMIT ?")
+      .all(limit) as LlmCallRow[];
+  }
+  return db.prepare("SELECT * FROM llm_calls ORDER BY created_at DESC LIMIT ?").all(limit) as LlmCallRow[];
+}
+
+export type JobAttemptRow = {
+  id: string;
+  job_id: string;
+  started_at: number;
+  finished_at: number | null;
+  success: number | null;
+  error: string | null;
+  log: string | null;
+};
+
+export function listJobAttempts(db: Db, jobId?: string, limit = 100): JobAttemptRow[] {
+  if (jobId) {
+    return db
+      .prepare("SELECT * FROM job_attempts WHERE job_id = ? ORDER BY started_at DESC LIMIT ?")
+      .all(jobId, limit) as JobAttemptRow[];
+  }
+  return db
+    .prepare("SELECT * FROM job_attempts ORDER BY started_at DESC LIMIT ?")
+    .all(limit) as JobAttemptRow[];
+}
+
+export function listRecentRequestEvents(db: Db, limit = 100): RequestEventRow[] {
+  return db.prepare("SELECT * FROM request_events ORDER BY created_at DESC LIMIT ?").all(limit) as RequestEventRow[];
+}
+
+export function listJobsWithErrors(db: Db, limit = 100): JobRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM jobs
+       WHERE error IS NOT NULL OR status IN ('failed')
+       ORDER BY updated_at DESC LIMIT ?`,
+    )
+    .all(limit) as JobRow[];
+}
+
+export function countRequestsByStatus(db: Db): Record<string, number> {
+  const rows = db.prepare("SELECT status, COUNT(*) AS n FROM requests GROUP BY status").all() as {
+    status: string;
+    n: number;
+  }[];
+  const out: Record<string, number> = {};
+  for (const row of rows) out[row.status] = row.n;
+  return out;
+}
+
+export function countJobsByStatus(db: Db): Record<string, number> {
+  const rows = db.prepare("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status").all() as {
+    status: string;
+    n: number;
+  }[];
+  const out: Record<string, number> = {};
+  for (const row of rows) out[row.status] = row.n;
+  return out;
+}
+
+export function cancelJob(db: Db, jobId: string): JobRow | undefined {
+  const job = getJob(db, jobId);
+  if (!job) return undefined;
+  if (job.status !== "queued" && job.status !== "running") return job;
+  db.prepare("UPDATE jobs SET status = 'cancelled', lease_until = NULL, updated_at = ? WHERE id = ?").run(now(), jobId);
+  return getJob(db, jobId);
 }

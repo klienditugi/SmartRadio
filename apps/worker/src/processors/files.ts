@@ -67,7 +67,12 @@ export const handleImportLibrary: JobHandler = async (ctx, job) => {
 };
 
 export const handleIndexLibrary: JobHandler = async (ctx, job) => {
-  if (!job.request_id) throw new Error("index_library job missing request_id");
+  // Standalone admin scan (no request_id) — Navidrome startScan/getScanStatus only.
+  if (!job.request_id) {
+    await ctx.providers.library.startScan();
+    const status = await ctx.providers.library.getScanStatus();
+    return { indexed: true, standalone: true, scan: status };
+  }
   const request = getRequest(ctx.db, job.request_id);
   if (!request) throw new Error("request not found");
   if (request.status === "IMPORTING") {
@@ -79,6 +84,11 @@ export const handleIndexLibrary: JobHandler = async (ctx, job) => {
   await ctx.providers.library.getScanStatus();
   transitionRequest(ctx.db, { requestId: request.id, to: "READY", actor: ctx.workerId });
   return { indexed: true };
+};
+
+export const handleRefreshPlaylist: JobHandler = async (ctx) => {
+  const result = await ctx.providers.radio.refreshPlaylist();
+  return { refreshed: true, result };
 };
 
 export const handleQueueRadio: JobHandler = async (ctx, job) => {

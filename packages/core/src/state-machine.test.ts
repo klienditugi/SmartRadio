@@ -25,13 +25,21 @@ describe("request state machine", () => {
     expect(canTransition("INDEXING", "READY")).toBe(true);
   });
 
-  it("forbids skipping states and mutating terminals", () => {
+  it("forbids skipping states and mutating READY/CANCELLED", () => {
     expect(canTransition("RECEIVED", "APPROVED")).toBe(false);
     expect(canTransition("CLASSIFYING", "READY")).toBe(false);
     expect(canTransition("READY", "CLASSIFYING")).toBe(false);
-    expect(canTransition("REJECTED", "APPROVED")).toBe(false);
     expect(canTransition("CANCELLED", "RECEIVED")).toBe(false);
     expect(() => assertTransition("RECEIVED", "READY")).toThrow(IllegalTransitionError);
+  });
+
+  it("allows admin override and reclassify from REJECTED / CLASSIFYING", () => {
+    expect(canTransition("REJECTED", "APPROVED")).toBe(true);
+    expect(canTransition("REJECTED", "RECEIVED")).toBe(true);
+    expect(canTransition("CLASSIFYING", "RECEIVED")).toBe(true);
+    expect(canTransition("APPROVED", "REJECTED")).toBe(true);
+    expect(canTransition("REJECTED", "FAILED")).toBe(false);
+    expect(canTransition("REJECTED", "CANCELLED")).toBe(false);
   });
 
   it("allows FAILED and CANCELLED from every non-terminal status only", () => {
@@ -39,6 +47,14 @@ describe("request state machine", () => {
       if (status === "FAILED") {
         expect(canTransition(status, "RECEIVED")).toBe(true);
         expect(canTransition(status, "CANCELLED")).toBe(false);
+        continue;
+      }
+      if (status === "REJECTED") {
+        // Still cancel-terminal, but operators may reclassify or override.
+        expect(canTransition(status, "FAILED")).toBe(false);
+        expect(canTransition(status, "CANCELLED")).toBe(false);
+        expect(canTransition(status, "RECEIVED")).toBe(true);
+        expect(canTransition(status, "APPROVED")).toBe(true);
         continue;
       }
       if (isTerminalStatus(status)) {

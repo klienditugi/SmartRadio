@@ -20,3 +20,5 @@ export type { OllamaProviderOptions } from "./llm/ollama.js";
 export type { NavidromeProviderOptions } from "./library/navidrome.js";
 export type { SubWaveProviderOptions } from "./radio/subwave.js";
 export type { SoulseekProviderOptions } from "./acquisition/slskd.js";
+export { extractTransferProgress } from "./acquisition/progress.js";
+export type { TransferProgress } from "./acquisition/progress.js";

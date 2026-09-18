@@ -1,0 +1,9 @@
+node_modules
+.git
+data
+secrets
+*.sqlite
+.env
+backups
+apps/web/dist
+**/*.tsbuildinfo

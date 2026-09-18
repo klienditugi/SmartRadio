@@ -1,4 +1,7 @@
 # INTEGRATION.md — Sub Wave AI Radio Automation (Bot3 VERIFIED)
+#
+# Local clone directory is always `subwave-ai` (GitHub remote/repo may be SmartRadio):
+#   git clone <repo-url> subwave-ai && cd subwave-ai && sudo ./install.sh
 
 Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 

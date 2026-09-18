@@ -1,6 +1,6 @@
 # Secrets directory
 
-Place one secret per file. Do not commit real values.
+Place one secret per file in the local clone directory named `subwave-ai`. Do not commit real values.
 
 | File | Used by |
 | --- | --- |

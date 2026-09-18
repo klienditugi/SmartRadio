@@ -29,7 +29,7 @@ export type { Classification } from "./classification.js";
 
 export { PathTraversalError, assertInsideRoot, safeJoin, isAllowedAudioExtension } from "./paths.js";
 
-export { SECRET_FILES, loadSecrets, readSecretFile } from "./secrets.js";
+export { SECRET_FILES, loadSecrets, readSecretFile, writeSecretFile } from "./secrets.js";
 export type { LoadedSecrets } from "./secrets.js";
 
 export {
@@ -40,5 +40,9 @@ export {
   parseAppConfig,
   loadConfig,
   publicSettings,
+  serializeAppConfig,
+  writeAppConfig,
+  mergeAppConfigPatch,
+  writableConfigPath,
 } from "./config.js";
-export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions } from "./config.js";
+export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions, AppConfigPatch } from "./config.js";

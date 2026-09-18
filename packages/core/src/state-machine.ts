@@ -6,9 +6,11 @@ import { isTerminalStatus, type RequestStatus } from "@subwave-ai/shared";
  */
 const GRAPH: Record<RequestStatus, readonly RequestStatus[]> = {
   RECEIVED: ["CLASSIFYING", "FAILED", "CANCELLED"],
-  CLASSIFYING: ["REJECTED", "APPROVED", "FAILED", "CANCELLED"],
-  REJECTED: [],
-  APPROVED: ["CHECKING_LIBRARY", "FAILED", "CANCELLED"],
+  CLASSIFYING: ["REJECTED", "APPROVED", "RECEIVED", "FAILED", "CANCELLED"],
+  // REJECTED stays cancel-terminal (TERMINAL_STATUSES) but operators may reclassify
+  // (→ RECEIVED) or override station policy (→ APPROVED). Bot2 review: additive.
+  REJECTED: ["RECEIVED", "APPROVED"],
+  APPROVED: ["CHECKING_LIBRARY", "REJECTED", "FAILED", "CANCELLED"],
   CHECKING_LIBRARY: ["ALREADY_AVAILABLE", "SEARCHING", "FAILED", "CANCELLED"],
   ALREADY_AVAILABLE: ["QUEUED", "READY", "FAILED", "CANCELLED"],
   SEARCHING: ["QUEUED", "FAILED", "CANCELLED"],
