@@ -92,6 +92,7 @@ describe("request operator API", () => {
     const scan = await app.inject({ method: "POST", url: "/api/v1/admin/library/scan", headers });
     expect(scan.statusCode).toBe(201);
     expect(scan.json().job.type).toBe("index_library");
+    expect(String(scan.json().note)).toMatch(/ops-only/i);
   });
 
   it("retries acquisition only from FAILED", async () => {

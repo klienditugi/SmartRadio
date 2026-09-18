@@ -12,7 +12,7 @@ type Overview = {
   recent_jobs: JobRow[];
   providers: ProviderRow[];
   disk: { volumes: DiskSnapshot[]; ok: boolean };
-  doctor: { ok: boolean; ollama: string; notes: string[] };
+  doctor: { ok: boolean; ollama: string; acquire_unavailable?: boolean; notes: string[] };
 };
 
 export function DashboardPage() {
@@ -65,8 +65,8 @@ export function DashboardPage() {
             <button className="btn" type="button" onClick={() => void probe()}>
               Enqueue health probe
             </button>
-            <button className="btn" type="button" onClick={() => void scan()}>
-              Navidrome scan
+            <button className="btn" type="button" onClick={() => void scan()} title="Optional ops action. Happy path does not require SmartRadio to trigger Navidrome scans.">
+              Navidrome scan (ops only)
             </button>
             <button className="btn" type="button" onClick={() => void refreshPlaylist()}>
               Refresh radio playlist
@@ -87,6 +87,7 @@ export function DashboardPage() {
         <div className="card">
           <div className="muted">Doctor</div>
           <div className="stat">{data?.doctor.ok ? "ok" : "check"}</div>
+          {data?.doctor.acquire_unavailable ? <div className="muted">acquire_unavailable</div> : null}
         </div>
       </div>
       <div className="grid two" style={{ marginTop: "1rem" }}>

@@ -76,6 +76,12 @@ export function replaceRuntimeConfig(app: FastifyInstance, next: RuntimeConfig):
   }
 }
 
+export function acquisitionUnavailable(config: RuntimeConfig): boolean {
+  const url = config.acquisition.base_url.trim();
+  const key = (config.secrets.slskdApiKey ?? "").trim();
+  return config.acquisition.verify_status !== "verified" || url.length === 0 || key.length === 0;
+}
+
 export function doctorReport(db: Db, config: RuntimeConfig) {
   let dbOk = true;
   try {
@@ -85,12 +91,14 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
   }
   const disk = diskReport(config);
   const modelConfigured = Boolean(config.llm.model);
+  const acquire_unavailable = acquisitionUnavailable(config);
   return {
     ok: dbOk && modelConfigured && disk.ok,
     database: dbOk,
     disk,
     bind: { host: config.server.host, port: config.server.port },
     ollama: "external-only",
+    acquire_unavailable,
     config: publicSettings(config),
     settings: listSettings(db),
     providers: listProviders(db),
@@ -99,6 +107,11 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
       "Ollama is never installed, updated, or pulled by this process.",
       "Live URLs/credentials are placeholders unless provided via yaml/env/secrets.",
       "Music library/downloads/staging must be host-mounted persistent paths, never only in an ephemeral container.",
+      "Navidrome is passive on the happy path; startScan/admin index is ops-only.",
+      "SUB/WAVE REQUEST_ACCEPTED / TRACK_READY notify binding is NEEDS_SERVER_INSPECTION. Do not invent an endpoint.",
+      ...(acquire_unavailable
+        ? ["AcquisitionProvider is optional until a verified download daemon exists (acquire_unavailable)."]
+        : []),
     ],
   };
 }

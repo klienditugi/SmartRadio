@@ -7,5 +7,9 @@
 #   SUBWAVE_SECRETS_DIR=/absolute/host/secrets
 #   SUBWAVE_CONFIG_DIR=/absolute/host/config   # contains subwave.yaml
 #
+# Live Oracle examples (operator config only, never compose defaults):
+#   SUBWAVE_DOWNLOADS_DIR=/music/downloads   # acquisition landing/staging
+#   SUBWAVE_LIBRARY_DIR=/music/library       # final library; Navidrome scanner is passive
+#
 # Music must never live only in the container writable layer.
-# Ollama is not started here.
+# Ollama is not started here. Acquisition is optional until a verified daemon exists.

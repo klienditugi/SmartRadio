@@ -13,6 +13,7 @@ export interface MusicLibraryProvider {
   readonly verifyStatus: VerifyStatus;
   search3(query: string, opts?: { songCount?: number; songOffset?: number }): Promise<LibrarySong[]>;
   getSong(id: string): Promise<LibrarySong | null>;
+  /** Ops-only. Not required on the A3 happy path (Navidrome scanner is passive). */
   startScan(opts?: { fullScan?: boolean }): Promise<unknown>;
   getScanStatus(): Promise<unknown>;
   health(): Promise<ProviderHealth>;

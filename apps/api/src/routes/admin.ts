@@ -97,7 +97,10 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/admin/library/scan", { schema: { tags: ["admin"] }, preHandler: requireAdmin }, async (_request, reply) => {
     const job = enqueueJob(app.db, { type: "index_library", payload: { standalone: true } });
-    return reply.code(201).send({ job, note: "Worker will call Navidrome startScan/getScanStatus." });
+    return reply.code(201).send({
+      job,
+      note: "Ops-only. Worker may call Navidrome startScan/getScanStatus. Not required for the A3 happy path — Navidrome’s ~1min scanner discovers files in the library dir.",
+    });
   });
 
   app.post("/admin/health-probe", { schema: { tags: ["admin"] }, preHandler: requireAdmin }, async (_request, reply) => {

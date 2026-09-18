@@ -109,6 +109,7 @@ export class NavidromeProvider implements MusicLibraryProvider {
     return song ? asSong(song) : null;
   }
 
+  /** Ops-only index trigger. A3 happy path relies on Navidrome’s own ~1min scanner. */
   async startScan(opts?: { fullScan?: boolean }): Promise<unknown> {
     return this.unwrap(await this.rest("startScan", { fullScan: opts?.fullScan }));
   }

@@ -66,10 +66,16 @@ pnpm --filter @subwave-ai/web dev
 
 API bind defaults to `127.0.0.1` (`SUBWAVE_API_HOST` / `SUBWAVE_API_PORT`). After a UI build, the API also serves the console from `/`. OpenAPI: `/api/v1/docs`.
 
-## Request states
+## Request states (Amendment A3)
 
-`RECEIVED → CLASSIFYING → REJECTED|APPROVED → CHECKING_LIBRARY → ALREADY_AVAILABLE|SEARCHING → QUEUED → DOWNLOADING → DOWNLOAD_COMPLETE → VALIDATING → IMPORTING → INDEXING → READY` plus `FAILED` and `CANCELLED`.
+Semantic pipeline:
 
-Station policy is application code. The LLM never approves tracks, never runs a shell, and never writes config.
+`REQUESTED` → `CLASSIFYING` → `APPROVED`/`REJECTED` → acquisition/download → `/music/downloads` → validation → `/music/library` → announce/queue through SUB/WAVE
 
-Provider contracts: [docs/INTEGRATION.md](docs/INTEGRATION.md). Release-candidate gaps: [docs/RELEASE_CANDIDATE.md](docs/RELEASE_CANDIDATE.md). How to run tests: [docs/TESTING.md](docs/TESTING.md).
+Implementation status `RECEIVED` is semantic `REQUESTED` (the code enum is not renamed). Finer statuses still exist: `CHECKING_LIBRARY`, `ALREADY_AVAILABLE`, `SEARCHING`, `QUEUED`, `DOWNLOADING`, `DOWNLOAD_COMPLETE`, `VALIDATING`, `IMPORTING`, leftover `INDEXING`, `READY`, plus `FAILED` and `CANCELLED`.
+
+Navidrome is **passive** on the happy path: once a validated file is in the library directory, its ~1 minute scanner discovers it. Admin `startScan` is ops-only. `INDEXING` is not required for the primary workflow.
+
+Station policy is application code. The LLM never approves tracks, never runs a shell, and never writes config. SmartRadio does not own DJ personality/voice — SUB/WAVE does. Radio notify for `REQUEST_ACCEPTED` / `TRACK_READY` is **SERVER INSPECTION REQUIRED**.
+
+Provider contracts: [docs/INTEGRATION.md](docs/INTEGRATION.md). Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Release-candidate gaps: [docs/RELEASE_CANDIDATE.md](docs/RELEASE_CANDIDATE.md). How to run tests: [docs/TESTING.md](docs/TESTING.md).
