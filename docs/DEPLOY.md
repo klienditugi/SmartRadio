@@ -1,0 +1,71 @@
+# Deployment — Sub Wave AI (`subwave-ai`)
+
+This document describes how to install the software **in this repository**. It does not execute or prescribe an Oracle Cloud deployment.
+
+## Clone story
+
+```bash
+git clone <repo-url> subwave-ai
+cd subwave-ai
+sudo ./install.sh
+```
+
+`install.sh` checks OS/arch/resources, creates persistent directories, writes `.env` / `config/subwave.yaml` / `secrets/` from **your** answers (no hard-coded production IPs, credentials, or model names), installs Node dependencies, builds the web UI, and installs systemd units **or** Compose.
+
+Ollama is **external**. The installer never installs, updates, pulls, or otherwise manages Ollama or any LLM weights.
+
+After install it prints the web UI URL (API + UI on the same origin when `apps/web/dist` exists).
+
+## Modes
+
+| Mode | When | Music / data |
+| --- | --- | --- |
+| `./install.sh` (systemd, default) | Linux host with Node 20+ | Host paths under `data/` or `SUBWAVE_LIBRARY_DIR` |
+| `./install.sh --mode compose` | Docker available | **Required** host mounts: `SUBWAVE_DATA_DIR`, `SUBWAVE_LIBRARY_DIR`, `SUBWAVE_SECRETS_DIR` |
+
+Compose never stores the library only in an ephemeral container layer.
+
+Non-interactive:
+
+```bash
+sudo ./install.sh --non-interactive
+# supply SUBWAVE_* / OLLAMA_* / NAVIDROME_* / SLSKD_* in the environment or `.env`
+```
+
+`--force` replaces **this project's** systemd units. It will not rewrite unrelated host services.
+
+## Ops scripts
+
+| Script | Purpose |
+| --- | --- |
+| `./install.sh` | First install |
+| `./update.sh` | `git pull`, `pnpm install`, rebuild UI, restart this project's services |
+| `./uninstall.sh` | Stop this project's units/compose. `--purge --force` deletes clone data/secrets/.env only |
+| `./backup.sh` | Archive config, secrets, SQLite. `--include-library` adds music (large) |
+| `./restore.sh [--force] backup.tar.gz` | Extract into the clone |
+| `./doctor.sh` | Host + API diagnostics (`GET /api/v1/doctor`) |
+
+## Local development (no installer)
+
+```bash
+cp .env.example .env
+cp config/subwave.example.yaml config/subwave.yaml
+mkdir -p secrets data/downloads data/staging data/library
+# write secret files listed in secrets/README.md
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm --filter @subwave-ai/web test
+pnpm dev:api          # 127.0.0.1:8788
+pnpm --filter @subwave-ai/web dev   # Vite proxies /api
+pnpm dev:worker
+```
+
+OpenAPI: `http://127.0.0.1:8788/api/v1/docs`
+
+## Health
+
+- `GET /api/v1/health` — process up
+- `GET /api/v1/ready` — SQLite readable
+- `GET /api/v1/doctor` — config, providers, disk, notes (Ollama remains `external-only`)
+- `./doctor.sh` — same plus systemd/disk/CLI checks

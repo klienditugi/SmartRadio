@@ -1,78 +1,75 @@
 # Sub Wave AI (`subwave-ai`)
 
-Backend foundation for Sub Wave AI Radio Automation.
+Operator console + backend for Sub Wave AI Radio Automation.
 
 The Git remote is the SmartRadio repository. Clone the working tree as **`subwave-ai`**:
 
 ```bash
 git clone <repo-url> subwave-ai
 cd subwave-ai
+sudo ./install.sh
 ```
 
-Ollama is an **external** service. This project never installs, updates, or pulls Ollama or any model (including Qwen). Configure `base_url` and `model` only.
+That is the supported production install path. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
-The React UI and production `install.sh` (install/update/backup/doctor) are owned by Bot4. `./install.sh` in this repo is a stub.
+Ollama is an **external** service. This project never installs, updates, or pulls Ollama or any model (including Qwen). Configure `OLLAMA_BASE_URL` and `OLLAMA_MODEL` only — there is no default model name.
 
 ## Layout
 
 ```
-apps/api          Fastify API + OpenAPI (`127.0.0.1` by default)
+apps/api          Fastify API + OpenAPI (`127.0.0.1` by default) + optional static UI
 apps/worker       Job processors (LLM, library, acquisition, radio, health)
-apps/web          Placeholder — Bot4 owns the UI
+apps/web          Vite/React operator console
 packages/core     Request state machine + deterministic station policy
 packages/db       SQLite schema, migrations, job lease
 packages/providers  Ollama, Navidrome, SUB/WAVE, slskd (verified endpoints only)
 packages/shared   Types, config schema, path safety
-config/           Example YAML
-docs/             Architecture, integration spec, OpenAPI
+config/           Example YAML (copy; do not commit live values)
+deploy/           systemd units, Docker/Compose (host-mounted music/data)
+docs/             Architecture, integration spec, OpenAPI, deploy, RC notes
 ```
 
-## Prerequisites
+## Production ops
 
-- Node.js 20+
-- pnpm 10+
-- An external Ollama daemon if you want live classification (not required for unit tests)
+| Script | Role |
+| --- | --- |
+| `./install.sh` | OS/arch/resource checks, deps, dirs, secrets, systemd or Compose |
+| `./update.sh` | Pull, rebuild UI, restart this project's services |
+| `./uninstall.sh` | Stop this project only (`--purge --force` removes clone data) |
+| `./backup.sh` / `./restore.sh` | Config, secrets, SQLite; optional `--include-library` |
+| `./doctor.sh` | CLI diagnostics + `/api/v1/doctor` |
 
-## Configure
+Compose: `./install.sh --mode compose` with host paths `SUBWAVE_DATA_DIR` and `SUBWAVE_LIBRARY_DIR`. Music must not live only in an ephemeral container.
+
+## Local development
 
 ```bash
 cp .env.example .env
 cp config/subwave.example.yaml config/subwave.yaml
 mkdir -p secrets data/downloads data/staging data/library
-# put secrets in files, not in git:
-#   secrets/admin_password
-#   secrets/session_secret
-#   secrets/navidrome_password
-#   secrets/subwave_admin_password
-#   secrets/slskd_api_key
-```
-
-Set `OLLAMA_MODEL` to whatever model is already present on the external Ollama host. There is no default model name.
-
-Live URLs and credentials stay in yaml / env / `secrets/`. Nothing in source hard-codes IPs, passwords, API keys, ports, or library paths.
-
-## Run API + worker locally
-
-```bash
+# secrets/admin_password, session_secret, navidrome_password,
+# subwave_admin_password, slskd_api_key
 pnpm install
 pnpm typecheck
 pnpm test
-pnpm --filter @subwave-ai/api openapi   # writes docs/openapi.json
+pnpm --filter @subwave-ai/web test
+pnpm --filter @subwave-ai/web build
 ```
 
-In two terminals:
+Terminals:
 
 ```bash
 pnpm dev:api
 pnpm dev:worker
+pnpm --filter @subwave-ai/web dev
 ```
 
-API bind defaults to `127.0.0.1` (`SUBWAVE_API_HOST` / `SUBWAVE_API_PORT`). OpenAPI UI: `http://127.0.0.1:<port>/api/v1/docs`.
-
-The API is sync+enqueue only. Workers own LLM calls, Navidrome, slskd, SUB/WAVE, and live health probes.
-
-Music files flow `downloads → staging → validation → library` on persistent paths. Do not keep the library only in an ephemeral container filesystem.
+API bind defaults to `127.0.0.1` (`SUBWAVE_API_HOST` / `SUBWAVE_API_PORT`). After a UI build, the API also serves the console from `/`. OpenAPI: `/api/v1/docs`.
 
 ## Request states
 
-`RECEIVED → CLASSIFYING → REJECTED|APPROVED → CHECKING_LIBRARY → ALREADY_AVAILABLE|SEARCHING → QUEUED → DOWNLOADING → DOWNLOAD_COMPLETE → VALIDATING → IMPORTING → INDEXING → READY` plus `FAILED` and `CANCELLED`. Transitions are enforced in `packages/core` and audited in `request_events`.
+`RECEIVED → CLASSIFYING → REJECTED|APPROVED → CHECKING_LIBRARY → ALREADY_AVAILABLE|SEARCHING → QUEUED → DOWNLOADING → DOWNLOAD_COMPLETE → VALIDATING → IMPORTING → INDEXING → READY` plus `FAILED` and `CANCELLED`.
+
+Station policy is application code. The LLM never approves tracks, never runs a shell, and never writes config.
+
+Provider contracts: [docs/INTEGRATION.md](docs/INTEGRATION.md). Release-candidate gaps: [docs/RELEASE_CANDIDATE.md](docs/RELEASE_CANDIDATE.md). How to run tests: [docs/TESTING.md](docs/TESTING.md).

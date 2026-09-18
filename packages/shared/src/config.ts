@@ -1,6 +1,6 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { loadSecrets, type LoadedSecrets } from "./secrets.js";
 
@@ -171,6 +171,12 @@ function resolveConfigPath(env: NodeJS.ProcessEnv, explicit?: string): string {
   return path.resolve(process.cwd(), "config/subwave.example.yaml");
 }
 
+export function writableConfigPath(env: NodeJS.ProcessEnv = process.env, explicit?: string): string {
+  if (explicit) return path.resolve(explicit);
+  if (env.SUBWAVE_CONFIG) return path.resolve(env.SUBWAVE_CONFIG);
+  return path.resolve(process.cwd(), "config/subwave.yaml");
+}
+
 export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
   const env = options.env ?? process.env;
   const configPath = resolveConfigPath(env, options.configPath);
@@ -238,5 +244,85 @@ export function publicSettings(config: RuntimeConfig) {
       subwave_admin_password: Boolean(config.secrets.subwaveAdminPassword),
       slskd_api_key: Boolean(config.secrets.slskdApiKey),
     },
+    paths: {
+      downloads: config.paths.downloads,
+      staging: config.paths.staging,
+      library: config.paths.library,
+      secrets_dir: config.paths.secrets_dir,
+      database: config.database.path,
+    },
   };
+}
+
+export type AppConfigPatch = {
+  server?: Partial<AppConfig["server"]>;
+  database?: Partial<AppConfig["database"]>;
+  paths?: Partial<Pick<AppConfig["paths"], "downloads" | "staging" | "library">>;
+  files?: Partial<AppConfig["files"]>;
+  auth?: Partial<Pick<AppConfig["auth"], "admin_username" | "session_ttl_hours">>;
+  policy?: Partial<AppConfig["policy"]>;
+  llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms">>;
+  library?: Partial<Pick<AppConfig["library"], "base_url" | "username">>;
+  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user">>;
+  acquisition?: Partial<Pick<AppConfig["acquisition"], "base_url">>;
+};
+
+export function mergeAppConfigPatch(base: AppConfig, patch: AppConfigPatch): AppConfig {
+  const next = structuredClone(base) as AppConfig;
+  if (patch.server) Object.assign(next.server, patch.server);
+  if (patch.database) Object.assign(next.database, patch.database);
+  if (patch.paths) Object.assign(next.paths, patch.paths);
+  if (patch.files) Object.assign(next.files, patch.files);
+  if (patch.auth) Object.assign(next.auth, patch.auth);
+  if (patch.policy) Object.assign(next.policy, patch.policy);
+  if (patch.llm) Object.assign(next.llm, patch.llm);
+  if (patch.library) Object.assign(next.library, patch.library);
+  if (patch.radio) Object.assign(next.radio, patch.radio);
+  if (patch.acquisition) Object.assign(next.acquisition, patch.acquisition);
+  return parseAppConfig(next);
+}
+
+export function serializeAppConfig(config: AppConfig): string {
+  const doc = {
+    server: config.server,
+    database: config.database,
+    paths: config.paths,
+    files: config.files,
+    auth: config.auth,
+    worker: config.worker,
+    policy: config.policy,
+    llm: {
+      provider: config.llm.provider,
+      base_url: config.llm.base_url,
+      model: config.llm.model,
+      timeout_ms: config.llm.timeout_ms,
+      verify_status: config.llm.verify_status,
+    },
+    library: {
+      provider: config.library.provider,
+      base_url: config.library.base_url,
+      username: config.library.username,
+      client_name: config.library.client_name,
+      api_version: config.library.api_version,
+      verify_status: config.library.verify_status,
+    },
+    radio: {
+      provider: config.radio.provider,
+      base_url: config.radio.base_url,
+      admin_user: config.radio.admin_user,
+      verify_status: config.radio.verify_status,
+    },
+    acquisition: {
+      provider: config.acquisition.provider,
+      base_url: config.acquisition.base_url,
+      verify_status: config.acquisition.verify_status,
+    },
+  };
+  return `# Written by Sub Wave AI setup/settings. Secrets stay in paths.secrets_dir.\n${stringifyYaml(doc)}`;
+}
+
+export function writeAppConfig(filePath: string, config: AppConfig): void {
+  const resolved = path.resolve(filePath);
+  mkdirSync(path.dirname(resolved), { recursive: true });
+  writeFileSync(resolved, serializeAppConfig(config), { encoding: "utf8" });
 }

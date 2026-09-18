@@ -1,0 +1,69 @@
+# Sub Wave AI production compose.
+# Music/data live on the HOST. Never use only container-writable layers for the library.
+#
+# Required host env (no defaults for live URLs/models):
+#   SUBWAVE_LIBRARY_DIR  absolute host path to the music library
+#   SUBWAVE_DATA_DIR     absolute host path for sqlite/downloads/staging
+#   SUBWAVE_SECRETS_DIR  absolute host path for secret files
+#   SUBWAVE_CONFIG_DIR   absolute host path containing subwave.yaml
+#
+# Ollama is NOT a service here. Point OLLAMA_BASE_URL at an existing daemon.
+
+name: subwave-ai
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: subwave-ai:local
+    command: ["pnpm", "--filter", "@subwave-ai/api", "start"]
+    env_file:
+      - ../.env
+    environment:
+      SUBWAVE_CONFIG: /var/lib/subwave/config/subwave.yaml
+      SUBWAVE_SECRETS_DIR: /var/lib/subwave/secrets
+      SUBWAVE_DB_PATH: /var/lib/subwave/data/subwave.sqlite
+      SUBWAVE_DOWNLOADS_DIR: /var/lib/subwave/data/downloads
+      SUBWAVE_STAGING_DIR: /var/lib/subwave/data/staging
+      SUBWAVE_LIBRARY_DIR: /var/lib/subwave/library
+      SUBWAVE_WEB_DIST: /app/apps/web/dist
+      SUBWAVE_API_HOST: 0.0.0.0
+    ports:
+      - "${SUBWAVE_API_PORT:-8788}:8788"
+    volumes:
+      - ${SUBWAVE_DATA_DIR:?set SUBWAVE_DATA_DIR on the host}:/var/lib/subwave/data
+      - ${SUBWAVE_LIBRARY_DIR:?set SUBWAVE_LIBRARY_DIR on the host}:/var/lib/subwave/library
+      - ${SUBWAVE_SECRETS_DIR:?set SUBWAVE_SECRETS_DIR on the host}:/var/lib/subwave/secrets
+      - ${SUBWAVE_CONFIG_DIR:-../config}:/var/lib/subwave/config
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    image: subwave-ai:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["pnpm", "--filter", "@subwave-ai/worker", "start"]
+    env_file:
+      - ../.env
+    environment:
+      SUBWAVE_CONFIG: /var/lib/subwave/config/subwave.yaml
+      SUBWAVE_SECRETS_DIR: /var/lib/subwave/secrets
+      SUBWAVE_DB_PATH: /var/lib/subwave/data/subwave.sqlite
+      SUBWAVE_DOWNLOADS_DIR: /var/lib/subwave/data/downloads
+      SUBWAVE_STAGING_DIR: /var/lib/subwave/data/staging
+      SUBWAVE_LIBRARY_DIR: /var/lib/subwave/library
+    volumes:
+      - ${SUBWAVE_DATA_DIR:?set SUBWAVE_DATA_DIR on the host}:/var/lib/subwave/data
+      - ${SUBWAVE_LIBRARY_DIR:?set SUBWAVE_LIBRARY_DIR on the host}:/var/lib/subwave/library
+      - ${SUBWAVE_SECRETS_DIR:?set SUBWAVE_SECRETS_DIR on the host}:/var/lib/subwave/secrets
+      - ${SUBWAVE_CONFIG_DIR:-../config}:/var/lib/subwave/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

@@ -17,3 +17,5 @@ secrets/*
 .pnpm-store/
 .vscode/
 .idea/
+backups/
+apps/web/dist/

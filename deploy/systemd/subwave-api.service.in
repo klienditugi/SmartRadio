@@ -1,0 +1,18 @@
+[Unit]
+Description=Sub Wave AI API
+After=network.target
+# Ollama is external and is not a dependency of this unit.
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@ROOT@
+EnvironmentFile=-@ROOT@/.env
+Environment=SUBWAVE_WEB_DIST=@ROOT@/apps/web/dist
+ExecStart=/usr/bin/env pnpm --filter @subwave-ai/api start
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

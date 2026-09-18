@@ -44,6 +44,7 @@ export const JOB_TYPES = [
   "index_library",
   "queue_radio",
   "health_probe",
+  "refresh_playlist",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];

@@ -11,6 +11,7 @@ import {
 } from "@subwave-ai/db";
 import { publicSettings, type RuntimeConfig } from "@subwave-ai/shared";
 import { hashPassword } from "./auth.js";
+import { diskReport } from "./disk.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -68,6 +69,13 @@ export function syncProviders(db: Db, config: RuntimeConfig): void {
   });
 }
 
+export function replaceRuntimeConfig(app: FastifyInstance, next: RuntimeConfig): void {
+  const target = app.config as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(next)) {
+    target[key] = value;
+  }
+}
+
 export function doctorReport(db: Db, config: RuntimeConfig) {
   let dbOk = true;
   try {
@@ -75,9 +83,12 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
   } catch {
     dbOk = false;
   }
+  const disk = diskReport(config);
+  const modelConfigured = Boolean(config.llm.model);
   return {
-    ok: dbOk && Boolean(config.llm.model),
+    ok: dbOk && modelConfigured && disk.ok,
     database: dbOk,
+    disk,
     bind: { host: config.server.host, port: config.server.port },
     ollama: "external-only",
     config: publicSettings(config),
@@ -87,6 +98,7 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
       "API is sync+enqueue only. Workers own LLM, library, acquisition, radio, and live health probes.",
       "Ollama is never installed, updated, or pulled by this process.",
       "Live URLs/credentials are placeholders unless provided via yaml/env/secrets.",
+      "Music library/downloads/staging must be host-mounted persistent paths, never only in an ephemeral container.",
     ],
   };
 }

@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export function readSecretFile(secretsDir: string, name: string): string | undefined {
@@ -39,4 +39,23 @@ export function loadSecrets(secretsDir: string): LoadedSecrets {
     subwaveAdminPassword: readSecretFile(secretsDir, SECRET_FILES.subwaveAdminPassword),
     slskdApiKey: readSecretFile(secretsDir, SECRET_FILES.slskdApiKey),
   };
+}
+
+const SECRET_FILE_NAMES = new Set<string>(Object.values(SECRET_FILES));
+
+export function writeSecretFile(secretsDir: string, name: string, value: string): void {
+  if (!name || name.includes("..") || name.includes("/") || name.includes("\\") || name.includes("\0")) {
+    throw new Error("invalid secret file name");
+  }
+  if (!SECRET_FILE_NAMES.has(name)) {
+    throw new Error(`refusing to write unknown secret file: ${name}`);
+  }
+  const full = path.resolve(secretsDir, name);
+  const root = path.resolve(secretsDir);
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  if (full !== root && !full.startsWith(prefix)) {
+    throw new Error("secret path escapes secrets dir");
+  }
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  writeFileSync(full, `${value.trim()}\n`, { encoding: "utf8", mode: 0o600 });
 }

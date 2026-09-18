@@ -38,11 +38,17 @@ acquisition:
   base_url: "http://slskd.example"
 `,
   );
+  const prevConfig = process.env.SUBWAVE_CONFIG;
+  process.env.SUBWAVE_CONFIG = cfgPath;
   const config = loadConfig({ configPath: cfgPath });
   return {
     config,
     dir,
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    cleanup: () => {
+      if (prevConfig === undefined) delete process.env.SUBWAVE_CONFIG;
+      else process.env.SUBWAVE_CONFIG = prevConfig;
+      rmSync(dir, { recursive: true, force: true });
+    },
   };
 }
 

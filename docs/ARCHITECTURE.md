@@ -10,7 +10,7 @@ Ollama is **external only**. The app never installs, updates, or pulls Ollama or
 | --- | --- |
 | `apps/api` | Auth, CRUD, enqueue jobs, OpenAPI. Binds `127.0.0.1` by default. Does **not** call LLM/library/acquisition/radio except to persist config. |
 | `apps/worker` | Claims leased jobs. Owns LLM classification, Navidrome, slskd, SUB/WAVE, live health probes, and the file flow. |
-| `apps/web` | Placeholder. Bot4 owns the React UI. |
+| `apps/web` | Vite/React operator console (same origin in production). |
 
 SQLite (`packages/db`) persists users, sessions, settings, providers, requests, `request_events`, jobs, `job_attempts`, library matches, acquisition items, and `llm_calls` across restarts.
 
@@ -53,12 +53,11 @@ YAML (`config/subwave.yaml`) + env interpolation/overrides + `secrets/` files. N
 - Requests: CRUD list/get, events, cancel, retry
 - Ops: `/health`, `/ready`, `/doctor`, OpenAPI at `/openapi.json` and `/docs`
 - `GET /providers`, `GET|PUT /settings`, `GET /admin/jobs`
+- Setup/ops (Phase 4): `GET|POST /setup`, `GET /ops/overview`, `/ops/disk`, `/ops/logs`
+- Admin enqueue: Navidrome scan, health probe, radio `refresh_playlist`
 
 Creating a request inserts `RECEIVED` and enqueues `classify`. The worker advances the machine.
 
-## What Bot4 still owns
+## Production packaging
 
-- Full React UI in `apps/web`
-- Production `install.sh` (install, systemd, nginx, update, backup/restore, interactive doctor)
-- First-run wizard and operator UX around provider credentials
-- Any live OpenAPI import from a running SUB/WAVE (`GET /api/connect/openapi.json` is admin-gated on the radio, not copied here)
+Root `install.sh` / `update.sh` / `uninstall.sh` / `backup.sh` / `restore.sh` / `doctor.sh` plus `deploy/`. Ollama is never installed. See `docs/DEPLOY.md` and `docs/RELEASE_CANDIDATE.md`.
