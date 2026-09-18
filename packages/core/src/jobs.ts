@@ -18,6 +18,7 @@ export function jobTypeForStatus(status: RequestStatus): JobType | null {
     case "VALIDATING":
       return "import_library";
     case "IMPORTING":
+      // Leftover vs A3: happy path does not require Navidrome startScan.
       return "index_library";
     default:
       return null;

@@ -11,6 +11,10 @@ server:
 database:
   path: "./data/subwave.sqlite"
 
+# Local-dev placeholders. Live Oracle examples (operator config only — never required
+# source defaults): downloads=/music/downloads (landing/staging),
+# library=/music/library (final). Navidrome discovers files in the library dir on its
+# own ~1 minute scanner; SmartRadio does not need to startScan on the happy path.
 paths:
   secrets_dir: "./secrets"
   downloads: "./data/downloads"
@@ -41,6 +45,7 @@ policy:
   blocked_terms: []
 
 # External Ollama only. Never install/update/pull models from this app.
+# Live example (not a default): http://100.119.17.28:11434 v0.34.0. Do not hard-code qwen3:8b.
 llm:
   provider: ollama
   base_url: "${OLLAMA_BASE_URL}"
@@ -55,15 +60,20 @@ library:
   client_name: "subwave-ai"
   api_version: "1.16.1"
   verify_status: verified
+  # Passive on the happy path: startScan is ops-only. ~1min scanner picks up /music/library.
 
-# Opaque base URL (production may already include `/api`).
+# Opaque base URL (live example already includes `/api`: http://127.0.0.1:7700/api).
+# Playback: verified admin /dj/search + /dj/queue-track. REQUEST_ACCEPTED / TRACK_READY
+# notify HTTP is SERVER INSPECTION REQUIRED — do not invent an endpoint.
 radio:
   provider: subwave
   base_url: "${SUBWAVE_RADIO_URL}"
   admin_user: "${SUBWAVE_RADIO_ADMIN_USER}"
   verify_status: verified
 
+# Optional until a verified download daemon exists (none on the Oracle VM as of A3).
+# Unverified → doctor.acquire_unavailable. Landing dir live example: /music/downloads.
 acquisition:
   provider: slskd
   base_url: "${SLSKD_URL}"
-  verify_status: verified
+  verify_status: unverified

@@ -25,6 +25,8 @@ describe("setup + doctor extras", () => {
     expect(doctor.statusCode).toBe(200);
     expect(doctor.json().disk.ok).toBe(true);
     expect(doctor.json().config.paths.library).toBeTruthy();
+    expect(doctor.json().acquire_unavailable).toBe(true);
+    expect(doctor.json().notes.some((n: string) => n.includes("acquire_unavailable"))).toBe(true);
   });
 
   it("rejects anonymous setup after admin exists", async () => {

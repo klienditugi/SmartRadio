@@ -79,6 +79,7 @@ describe("auth basics", () => {
     const doctor = await app.inject({ method: "GET", url: "/api/v1/doctor" });
     expect(doctor.statusCode).toBe(200);
     expect(doctor.json().ollama).toBe("external-only");
+    expect(doctor.json().acquire_unavailable).toBe(true);
 
     const spec = await app.inject({ method: "GET", url: "/api/v1/openapi.json" });
     expect(spec.statusCode).toBe(200);

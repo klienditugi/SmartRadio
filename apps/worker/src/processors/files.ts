@@ -62,11 +62,15 @@ export const handleImportLibrary: JobHandler = async (ctx, job) => {
   fs.mkdirSync(ctx.config.paths.library, { recursive: true });
   const dest = safeJoin(ctx.config.paths.library, filename);
   fs.copyFileSync(source, dest);
+  // A3 leftover: happy path does not require startScan. Navidrome’s ~1min scanner
+  // discovers files in the library dir. index_library remains for ops-only scans
+  // and the existing graph (IMPORTING → INDEXING → READY).
   enqueueJob(ctx.db, { type: "index_library", requestId: request.id, payload: { filename } });
   return { library: dest };
 };
 
 export const handleIndexLibrary: JobHandler = async (ctx, job) => {
+  // Ops-only / leftover. A3 happy path does not wait on Navidrome startScan.
   // Standalone admin scan (no request_id) — Navidrome startScan/getScanStatus only.
   if (!job.request_id) {
     await ctx.providers.library.startScan();
