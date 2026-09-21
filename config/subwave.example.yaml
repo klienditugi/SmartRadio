@@ -63,8 +63,10 @@ library:
   # Passive on the happy path: startScan is ops-only. ~1min scanner picks up /music/library.
 
 # Opaque base URL (live example already includes `/api`: http://127.0.0.1:7700/api).
-# Playback: verified admin /dj/search + /dj/queue-track. REQUEST_ACCEPTED / TRACK_READY
-# notify HTTP is SERVER INSPECTION REQUIRED — do not invent an endpoint.
+# Playback: GET /dj/search, then POST /dj/queue-track {id,title} (artist/album optional; HTTP 409 = never-play).
+# Notify: POST /dj/say {text, mode:styled, kind:dj-speak|link} with the same admin Basic auth.
+# REQUEST_ACCEPTED only after a transfer is enqueued. TRACK_READY after search shows a string id, then say, then queue.
+# Do not use public POST /request for announcements. URL and admin password come from this file and secrets/.
 radio:
   provider: subwave
   base_url: "${SUBWAVE_RADIO_URL}"

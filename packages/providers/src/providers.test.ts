@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CLASSIFICATION_JSON_SCHEMA } from "@subwave-ai/shared";
 import { OllamaProvider } from "./llm/ollama.js";
 import { NavidromeProvider } from "./library/navidrome.js";
-import { SubWaveProvider } from "./radio/subwave.js";
+import { NeverPlayError, SubWaveProvider } from "./radio/subwave.js";
 import { SoulseekProvider } from "./acquisition/slskd.js";
 import { UnverifiedAcquisitionProvider } from "./acquisition/unverified.js";
 import { UnverifiedAdapterError } from "./http.js";
@@ -162,6 +162,108 @@ describe("SubWaveProvider", () => {
       "GET http://station.example/api/state",
       "POST http://station.example/api/request",
     ]);
+  });
+
+  it("POSTs /dj/say with admin Basic, mode styled, and parses {ok,mode,kind,spoken,sfx}", async () => {
+    const calls: { url: string; method?: string; auth?: string; body?: string }[] = [];
+    const fetchMock: FetchLike = async (url, init) => {
+      const headers = new Headers(init?.headers);
+      calls.push({
+        url: String(url),
+        method: init?.method,
+        auth: headers.get("authorization") ?? undefined,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      });
+      return jsonResponse({ ok: true, mode: "styled", kind: "dj-speak", spoken: "on the way", sfx: null });
+    };
+    const radio = new SubWaveProvider({
+      baseUrl: "http://station.example:7700/api/",
+      adminUser: "admin",
+      adminPassword: "pass",
+      fetch: fetchMock,
+    });
+    const result = await radio.say({ text: "  Listener's requested song is coming.  " });
+    expect(result).toEqual({ ok: true, mode: "styled", kind: "dj-speak", spoken: "on the way", sfx: null });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("http://station.example:7700/api/dj/say");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.auth).toBe(`Basic ${Buffer.from("admin:pass").toString("base64")}`);
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      text: "Listener's requested song is coming.",
+      mode: "styled",
+      kind: "dj-speak",
+    });
+  });
+
+  it("defaults kind to dj-speak, allows link, forwards sfx, and truncates text to 500 characters", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchMock: FetchLike = async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      const kind = bodies.at(-1)?.kind;
+      return jsonResponse({ ok: true, mode: "styled", kind, spoken: "ok", sfx: bodies.at(-1)?.sfx ?? null });
+    };
+    const radio = new SubWaveProvider({
+      baseUrl: "http://station.example/api",
+      adminUser: "a",
+      adminPassword: "b",
+      fetch: fetchMock,
+    });
+    await radio.say({ text: "context", kind: "link", sfx: { cue: "sting" } });
+    await radio.say({ text: ` ${"y".repeat(501)} ` });
+    expect(bodies[0]).toEqual({ text: "context", mode: "styled", kind: "link", sfx: { cue: "sting" } });
+    expect(bodies[1]?.mode).toBe("styled");
+    expect(bodies[1]?.kind).toBe("dj-speak");
+    expect(bodies[1]?.text).toBe("y".repeat(500));
+    expect(bodies[1]?.sfx).toBeUndefined();
+  });
+
+  it("rejects empty text, unsupported kind, unverified adapters, and a non-success say body without calling a guessed URL", async () => {
+    let calls = 0;
+    const fetchMock: FetchLike = async () => {
+      calls += 1;
+      return jsonResponse({ ok: false, mode: "styled", kind: "dj-speak", spoken: "" });
+    };
+    const radio = new SubWaveProvider({
+      baseUrl: "http://station.example/api",
+      adminUser: "a",
+      adminPassword: "b",
+      fetch: fetchMock,
+    });
+    await expect(radio.say({ text: "   " })).rejects.toThrow(/required/);
+    await expect(radio.say({ text: "context", kind: "voiceover" as "dj-speak" })).rejects.toThrow(/unsupported say kind/);
+    expect(calls).toBe(0);
+    await expect(radio.say({ text: "context" })).rejects.toThrow(/invalid \/dj\/say response/);
+    expect(calls).toBe(1);
+
+    const unverified = new SubWaveProvider({
+      baseUrl: "http://station.example/api",
+      adminUser: "a",
+      adminPassword: "b",
+      verifyStatus: "unverified",
+      fetch: async () => {
+        throw new Error("live fetch");
+      },
+    });
+    await expect(unverified.say({ text: "context" })).rejects.toThrow(/unverified radio adapter/);
+  });
+
+  it("sends optional album on queue-track and treats HTTP 409 as never-play", async () => {
+    const bodies: unknown[] = [];
+    const fetchMock: FetchLike = async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      if (bodies.length === 1) return jsonResponse({ ok: true });
+      return new Response("blocked", { status: 409 });
+    };
+    const radio = new SubWaveProvider({
+      baseUrl: "http://station.example/api",
+      adminUser: "a",
+      adminPassword: "b",
+      fetch: fetchMock,
+    });
+    await radio.queueTrack({ id: "t1", title: "Heroes", artist: "Bowie", album: "Lodger" });
+    await expect(radio.queueTrack({ id: "t2", title: "Nope" })).rejects.toBeInstanceOf(NeverPlayError);
+    expect(bodies[0]).toEqual({ id: "t1", title: "Heroes", artist: "Bowie", album: "Lodger" });
+    expect(bodies[1]).toEqual({ id: "t2", title: "Nope" });
   });
 });
 

@@ -72,10 +72,10 @@ Semantic pipeline:
 
 `REQUESTED` → `CLASSIFYING` → `APPROVED`/`REJECTED` → acquisition/download → `/music/downloads` → validation → `/music/library` → announce/queue through SUB/WAVE
 
-Implementation status `RECEIVED` is semantic `REQUESTED` (the code enum is not renamed). Finer statuses still exist: `CHECKING_LIBRARY`, `ALREADY_AVAILABLE`, `SEARCHING`, `QUEUED`, `DOWNLOADING`, `DOWNLOAD_COMPLETE`, `VALIDATING`, `IMPORTING`, leftover `INDEXING`, `READY`, plus `FAILED` and `CANCELLED`.
+Implementation status `RECEIVED` is semantic `REQUESTED` (the code enum is not renamed). Finer statuses still exist: `CHECKING_LIBRARY`, `ALREADY_AVAILABLE`, `SEARCHING`, `QUEUED`, `DOWNLOADING`, `DOWNLOAD_COMPLETE`, `VALIDATING`, `IMPORTING`, `READY`, plus optional `INDEXING`, `FAILED`, and `CANCELLED`.
 
-Navidrome is **passive** on the happy path: once a validated file is in the library directory, its ~1 minute scanner discovers it. Admin `startScan` is ops-only. `INDEXING` is not required for the primary workflow.
+Navidrome is **passive** on the happy path: once a validated file is in the library directory, its ~1 minute scanner discovers it. Admin `startScan` is ops-only. Import does not enqueue `index_library`.
 
-Station policy is application code. The LLM never approves tracks, never runs a shell, and never writes config. SmartRadio does not own DJ personality/voice — SUB/WAVE does. Radio notify for `REQUEST_ACCEPTED` / `TRACK_READY` is **SERVER INSPECTION REQUIRED**.
+Station policy is application code. The LLM never approves tracks, never runs a shell, and never writes config. SmartRadio does not own DJ personality/voice — SUB/WAVE does. `REQUEST_ACCEPTED` and `TRACK_READY` are context sent with `POST /dj/say` (`mode: "styled"`). `TRACK_READY` runs only after search can see the track, and only then is the track queued. Acquisition may stay `acquire_unavailable`; that path does not announce.
 
 Provider contracts: [docs/INTEGRATION.md](docs/INTEGRATION.md). Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Release-candidate gaps: [docs/RELEASE_CANDIDATE.md](docs/RELEASE_CANDIDATE.md). How to run tests: [docs/TESTING.md](docs/TESTING.md).

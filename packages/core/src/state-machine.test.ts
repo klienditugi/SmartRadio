@@ -21,7 +21,7 @@ describe("request state machine", () => {
     expect(canTransition("DOWNLOADING", "DOWNLOAD_COMPLETE")).toBe(true);
     expect(canTransition("DOWNLOAD_COMPLETE", "VALIDATING")).toBe(true);
     expect(canTransition("VALIDATING", "IMPORTING")).toBe(true);
-    expect(canTransition("IMPORTING", "INDEXING")).toBe(true);
+    expect(canTransition("IMPORTING", "READY")).toBe(true);
     expect(canTransition("INDEXING", "READY")).toBe(true);
   });
 
@@ -72,5 +72,10 @@ describe("request state machine", () => {
   it("does not allow QUEUED to jump to IMPORTING (file flow is required)", () => {
     expect(canTransition("QUEUED", "IMPORTING")).toBe(false);
     expect(canTransition("QUEUED", "READY")).toBe(true);
+  });
+
+  it("keeps INDEXING for an explicit index_library job and not as the import happy path", () => {
+    expect(canTransition("IMPORTING", "INDEXING")).toBe(true);
+    expect(canTransition("IMPORTING", "READY")).toBe(true);
   });
 });

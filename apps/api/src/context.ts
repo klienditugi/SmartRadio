@@ -107,8 +107,8 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
       "Ollama is never installed, updated, or pulled by this process.",
       "Live URLs/credentials are placeholders unless provided via yaml/env/secrets.",
       "Music library/downloads/staging must be host-mounted persistent paths, never only in an ephemeral container.",
-      "Navidrome is passive on the happy path; startScan/admin index is ops-only.",
-      "SUB/WAVE REQUEST_ACCEPTED / TRACK_READY notify binding is NEEDS_SERVER_INSPECTION. Do not invent an endpoint.",
+      "Navidrome is passive on the happy path; index_library/startScan is ops-only and is not enqueued after import.",
+      "SUB/WAVE notify is POST {radio base_url}/dj/say with admin Basic and mode styled. SmartRadio sends context only for REQUEST_ACCEPTED and TRACK_READY.",
       ...(acquire_unavailable
         ? ["AcquisitionProvider is optional until a verified download daemon exists (acquire_unavailable)."]
         : []),

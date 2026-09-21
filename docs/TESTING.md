@@ -23,7 +23,7 @@ pnpm --filter @subwave-ai/web build
 
 UI tests use jsdom. They do not call live Navidrome / SUB/WAVE / slskd / Ollama.
 
-Happy-path ingest does **not** require SmartRadio to trigger a Navidrome scan (A3: Navidrome is passive; ~1 minute scanner). Admin scan is ops-only. SUB/WAVE `REQUEST_ACCEPTED` / `TRACK_READY` notify HTTP is **NEEDS_SERVER_INSPECTION** and is not exercised.
+Happy-path ingest does **not** require SmartRadio to trigger a Navidrome scan (Navidrome is passive; ~1 minute scanner). Admin scan is ops-only and is not enqueued after import. `RadioProvider.say` (`POST /dj/say`) and the `REQUEST_ACCEPTED` / `TRACK_READY` worker transitions are covered with mocked HTTP and mocked providers — not against a live radio.
 
 ## Install / ops scripts
 

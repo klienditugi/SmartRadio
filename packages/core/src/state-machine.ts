@@ -18,7 +18,9 @@ const GRAPH: Record<RequestStatus, readonly RequestStatus[]> = {
   DOWNLOADING: ["DOWNLOAD_COMPLETE", "FAILED", "CANCELLED"],
   DOWNLOAD_COMPLETE: ["VALIDATING", "FAILED", "CANCELLED"],
   VALIDATING: ["IMPORTING", "FAILED", "CANCELLED"],
-  IMPORTING: ["INDEXING", "FAILED", "CANCELLED"],
+  // INDEXING stays for an explicitly enqueued index_library job. Happy path goes IMPORTING → READY
+  // after passive Navidrome visibility and the radio handoff (A4).
+  IMPORTING: ["INDEXING", "READY", "FAILED", "CANCELLED"],
   INDEXING: ["READY", "FAILED", "CANCELLED"],
   READY: [],
   FAILED: [

@@ -1,6 +1,6 @@
 import type { VerifyStatus } from "@subwave-ai/shared";
 import { defaultFetch, joinUrl, readJson, type FetchLike, type ProviderHealth } from "../http.js";
-import type { RadioProvider } from "../types.js";
+import { SAY_TEXT_MAX_CHARS, type RadioProvider, type SayKind, type SayRequest, type SayResult } from "../types.js";
 
 export type SubWaveProviderOptions = {
   /** Opaque. Production may already include `/api`. */
@@ -10,6 +10,55 @@ export type SubWaveProviderOptions = {
   fetch?: FetchLike;
   verifyStatus?: VerifyStatus;
 };
+
+/** HTTP 409 from `POST /dj/queue-track` — station never-play, not a transient error. */
+export class NeverPlayError extends Error {
+  readonly status = 409;
+  readonly body?: string;
+
+  constructor(body?: string) {
+    super("never-play");
+    this.name = "NeverPlayError";
+    this.body = body;
+  }
+}
+
+function clampSayText(text: string): string {
+  if (typeof text !== "string") {
+    throw new Error("say text is required");
+  }
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error("say text is required");
+  }
+  const chars = Array.from(trimmed);
+  if (chars.length <= SAY_TEXT_MAX_CHARS) return trimmed;
+  return chars.slice(0, SAY_TEXT_MAX_CHARS).join("");
+}
+
+function resolveSayKind(kind: SayKind | undefined): SayKind {
+  if (kind === undefined) return "dj-speak";
+  if (kind === "dj-speak" || kind === "link") return kind;
+  throw new Error(`unsupported say kind: ${kind}`);
+}
+
+function parseSayResult(body: unknown): SayResult {
+  if (!body || typeof body !== "object") {
+    throw new Error("invalid /dj/say response");
+  }
+  const row = body as Record<string, unknown>;
+  if (row.ok !== true || typeof row.mode !== "string" || typeof row.kind !== "string" || typeof row.spoken !== "string") {
+    throw new Error("invalid /dj/say response");
+  }
+  const result: SayResult = {
+    ok: true,
+    mode: row.mode,
+    kind: row.kind,
+    spoken: row.spoken,
+  };
+  if ("sfx" in row) result.sfx = row.sfx;
+  return result;
+}
 
 export class SubWaveProvider implements RadioProvider {
   readonly kind = "subwave" as const;
@@ -75,19 +124,51 @@ export class SubWaveProvider implements RadioProvider {
     return readJson(res);
   }
 
-  async queueTrack(track: { id: string; title: string; artist?: string }): Promise<unknown> {
+  async queueTrack(track: { id: string; title: string; artist?: string; album?: string }): Promise<unknown> {
     if (this.verifyStatus === "unverified") {
       throw new Error("unverified radio adapter: live endpoints not called");
     }
+    const payload: { id: string; title: string; artist?: string; album?: string } = {
+      id: track.id,
+      title: track.title,
+    };
+    if (track.artist !== undefined) payload.artist = track.artist;
+    if (track.album !== undefined) payload.album = track.album;
     const res = await this.fetchImpl(joinUrl(this.baseUrl, "/dj/queue-track"), {
       method: "POST",
       headers: {
         authorization: this.basicAuth(),
         "content-type": "application/json",
       },
-      body: JSON.stringify({ id: track.id, title: track.title, artist: track.artist }),
+      body: JSON.stringify(payload),
     });
+    if (res.status === 409) {
+      throw new NeverPlayError(await res.text());
+    }
     return readJson(res);
+  }
+
+  async say(input: SayRequest): Promise<SayResult> {
+    if (this.verifyStatus === "unverified") {
+      throw new Error("unverified radio adapter: live endpoints not called");
+    }
+    const text = clampSayText(input.text);
+    const kind = resolveSayKind(input.kind);
+    const payload: { text: string; mode: "styled"; kind: SayKind; sfx?: unknown } = {
+      text,
+      mode: "styled",
+      kind,
+    };
+    if (input.sfx !== undefined) payload.sfx = input.sfx;
+    const res = await this.fetchImpl(joinUrl(this.baseUrl, "/dj/say"), {
+      method: "POST",
+      headers: {
+        authorization: this.basicAuth(),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    return parseSayResult(await readJson<unknown>(res));
   }
 
   async refreshPlaylist(): Promise<unknown> {

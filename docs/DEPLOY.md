@@ -36,7 +36,7 @@ Documented so operators can fill yaml/env on an Oracle aarch64 Linux VM. **Do no
 
 Navidrome is **passive** on the happy path: once a validated track is in `/music/library`, the existing ~1 minute scanner indexes it. Do not configure SmartRadio as if it must call `startScan` for production ingest. Admin scan remains optional ops.
 
-Playback handoff uses verified SUB/WAVE admin `/dj/search` + `/dj/queue-track` under the opaque `/api` base URL. `REQUEST_ACCEPTED` / `TRACK_READY` notify HTTP is **SERVER INSPECTION REQUIRED** — not configured here, not invented.
+Playback handoff uses verified SUB/WAVE admin `/dj/search` then `/dj/queue-track` under the opaque `/api` base URL (`id` and `title` required; `artist` / `album` optional; HTTP 409 = never-play). `REQUEST_ACCEPTED` / `TRACK_READY` use admin `POST /dj/say` with `mode: "styled"` and context text only. The radio base URL and admin password come from config and `secrets/`. This repository does not deploy to Oracle.
 
 ## Modes
 
