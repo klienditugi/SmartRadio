@@ -99,7 +99,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     const job = enqueueJob(app.db, { type: "index_library", payload: { standalone: true } });
     return reply.code(201).send({
       job,
-      note: "Ops-only. Worker may call Navidrome startScan/getScanStatus. Not required for the A3 happy path — Navidrome’s ~1min scanner discovers files in the library dir.",
+      note: "Ops-only. Worker may call Navidrome startScan/getScanStatus. The import happy path does not enqueue index_library — Navidrome’s ~1min scanner discovers files in the library dir.",
     });
   });
 

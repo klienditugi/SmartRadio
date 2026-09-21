@@ -1,4 +1,4 @@
-# INTEGRATION.md — Sub Wave AI Radio Automation (Bot3 VERIFIED + Amendment A3)
+# INTEGRATION.md — Sub Wave AI Radio Automation (Bot3 VERIFIED + Amendments A3 and A4)
 #
 # Local clone directory is always `subwave-ai` (GitHub remote/repo may be SmartRadio):
 #   git clone <repo-url> subwave-ai && cd subwave-ai && sudo ./install.sh
@@ -42,22 +42,33 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
 - HTTP JSON; treat `base_url` as opaque (live example already includes `/api`: `http://127.0.0.1:7700/api`)
 - Public (relative to that opaque base): `GET /health` → `{"status":"on-air"}`, `GET /now-playing`, `GET /state`; `POST /request` (202+requestId); `GET /request/:id`
-- Admin Basic: `GET /dj/search`, `POST /dj/queue-track`, `POST /dj/refresh-playlist`
+- Admin Basic: `GET /dj/search`, `POST /dj/queue-track`, `POST /dj/say`, `POST /dj/refresh-playlist`
 - Auth classes: public | station password | admin Basic
 - Playback handoff MUST use admin `/dj/search` + `/dj/queue-track` under the opaque `/api` `base_url`
+- `POST /dj/queue-track` body: `id` and `title` required; `artist` and `album` optional. HTTP 409 = never-play
 - Do NOT invent AzuraCast APIs
+- Do NOT use public `POST /request` for announcements
 - Webhooks exist; payload schema NEEDS live OpenAPI
 
-### Semantic radio events (A3) — notify = SERVER INSPECTION REQUIRED
+### Semantic radio events (A4) — `POST /dj/say`
 
-SmartRadio supplies **event + context only**. SUB/WAVE owns DJ personality, wording, voice, station identity, and spoken announcement. Do **not** add a second DJ prompt system here.
+SmartRadio supplies **context text only**. SUB/WAVE owns DJ personality, wording, voice, station identity, and spoken announcement (`mode` is always `"styled"`). Do **not** add a second DJ prompt system here.
 
-| Semantic event | Meaning | HTTP binding |
-| --- | --- | --- |
-| `REQUEST_ACCEPTED` | Acquisition started (“song is coming”) | **NEEDS_SERVER_INSPECTION** / **SERVER INSPECTION REQUIRED** — do not invent an endpoint |
-| `TRACK_READY` | Validated + in `/music/library` (“ready / on soon”) | **NEEDS_SERVER_INSPECTION** / **SERVER INSPECTION REQUIRED** — do not invent an endpoint |
+`POST {base_url}/dj/say` uses the same admin Basic auth as the other admin DJ routes.
 
-Until a live SUB/WAVE documents notify path, method, auth, and payload, SmartRadio records the semantic event locally (request/job context) and continues playback via verified `/dj/search` + `/dj/queue-track` only.
+| Field | Rule |
+| --- | --- |
+| `text` | Required. Max 500 characters (adapter truncates). Empty text is rejected. |
+| `mode` | Always `"styled"`. |
+| `kind` | `"dj-speak"` (default) or `"link"`. |
+| `sfx` | Optional passthrough. |
+
+Success body: `{ ok, mode, kind, spoken, sfx }`.
+
+| Semantic event | When SmartRadio calls `say` |
+| --- | --- |
+| `REQUEST_ACCEPTED` | Verified `AcquisitionProvider.enqueueDownload` has returned. Context like “Listener's requested song is coming.” Not sent if acquisition is unavailable or no transfer was enqueued. |
+| `TRACK_READY` | Download validated, file placed in the music library, and `GET /dj/search?q=` returned a string `id`. Order: visible → `say` → `POST /dj/queue-track`. |
 
 ## Soulseek / acquisition (VERIFIED via slskd only) — AcquisitionProvider (optional)
 

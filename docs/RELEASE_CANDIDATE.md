@@ -1,6 +1,6 @@
-# Release candidate — Phase 4 (web UI + ops) + Amendment A3
+# Release candidate — Phase 4 (web UI + ops) + Amendments A3 and A4
 
-This branch adds the operator UI, production installer, and Compose/systemd packaging on top of the Bot2 backend foundation. Amendment **A3** locks live-environment examples, a passive Navidrome happy path, two semantic radio events, and the remaining acquisition gap. A3 is a **documentation lock**; it does not deploy to Oracle and does not invent SUB/WAVE notify APIs.
+This branch adds the operator UI, production installer, and Compose/systemd packaging on top of the Bot2 backend foundation. Amendment **A3** locks live-environment examples, a passive Navidrome happy path, two semantic radio events, and the remaining acquisition gap. Amendment **A4** binds those events to verified `POST /dj/say` and removes `index_library` from the import happy path. This repository does not deploy to Oracle.
 
 ## What is in
 
@@ -31,9 +31,11 @@ Canonical pipeline (semantic):
 
 - Implementation status `RECEIVED` = semantic `REQUESTED` (not renamed in code).
 - **Navidrome is passive.** SmartRadio does not trigger scans on the happy path. After a validated file is in `/music/library`, Navidrome’s existing ~1 minute scanner discovers it. Admin `index_library` / `startScan` is **optional ops-only**, not required for the primary workflow.
-- Implementation leftover: the worker may still enqueue `index_library` after `import_library`. That is **not** the A3 happy path and must not be documented as required.
-- Two radio events only, context from SmartRadio, personality/voice from SUB/WAVE: `REQUEST_ACCEPTED` (acquisition started) and `TRACK_READY` (in library). Notify HTTP = **NEEDS_SERVER_INSPECTION** / **SERVER INSPECTION REQUIRED**.
-- Playback handoff remains verified admin `GET /dj/search` + `POST /dj/queue-track` under opaque `base_url` (live example `http://127.0.0.1:7700/api`).
+- A4 removes the post-import `index_library` enqueue. `import_library` schedules `queue_radio` instead. `IMPORTING → READY` is the happy-path transition. `INDEXING` remains for an explicitly enqueued scan.
+- Two radio events only, context from SmartRadio, personality/voice from SUB/WAVE. A4 notify is `POST {base_url}/dj/say` (admin Basic, `mode: "styled"`, `kind` `dj-speak` or `link`, `text` max 500). Success body `{ ok, mode, kind, spoken, sfx }`. Public `POST /request` is not an announcement API.
+- `REQUEST_ACCEPTED` runs only after verified `enqueueDownload` succeeds. Search, approval, and a download poll with no transfer do not call `say`. Unverified acquisition fails as `acquire_unavailable` and does not announce.
+- `TRACK_READY` order: `GET /dj/search` shows a string `id` → `say` → `POST /dj/queue-track` `{ id, title }` (optional `artist` / `album`). HTTP 409 is never-play. Until search is visible, the worker waits and does not scan Navidrome.
+- Playback handoff remains verified admin `GET /dj/search` + `POST /dj/queue-track` under opaque `base_url` (live example `http://127.0.0.1:7700/api`). Library hits use that handoff and do not send `TRACK_READY`.
 - AcquisitionProvider optional/disabled until a verified daemon exists. Landing dir config example: `/music/downloads`.
 
 Live environment **examples** (never required source defaults): Oracle aarch64 Linux; SUB/WAVE 1.16.0 at `http://127.0.0.1:7700` `/api`; `GET /api/health` → `{"status":"on-air"}`; Ollama `http://100.119.17.28:11434` v0.34.0; paths `/music/downloads` and `/music/library`; no acquisition daemon on Oracle.
@@ -43,7 +45,7 @@ Live environment **examples** (never required source defaults): Oracle aarch64 L
 - `REJECTED` remains cancel-terminal but may go to `RECEIVED` (reclassify) or `APPROVED` (operator override; skips reclassification)
 - `CLASSIFYING → RECEIVED`, `APPROVED → REJECTED`
 - Job type `refresh_playlist`
-- `index_library` without `request_id` = **ops-only** standalone Navidrome `startScan` / `getScanStatus` (not the A3 happy path)
+- `index_library` without `request_id` = **ops-only** standalone Navidrome `startScan` / `getScanStatus` (not the happy path; A4 does not enqueue it after import)
 - New `/api/v1` routes: setup, ops/disk, ops/logs, ops/overview, request jobs/acquisitions/admin actions, library scan (ops-only), health-probe enqueue
 - Download worker stores a best-effort progress snapshot from `GET /api/v0/transfers/downloads` when acquisition is enabled
 - `GET /api/v1/doctor` reports `acquire_unavailable`
@@ -52,12 +54,12 @@ Live environment **examples** (never required source defaults): Oracle aarch64 L
 
 | Item | Why |
 | --- | --- |
-| **SUB/WAVE `REQUEST_ACCEPTED` / `TRACK_READY` notify** | **SERVER INSPECTION REQUIRED.** Semantic events are defined; HTTP path, method, auth, and payload are **not** documented on a live server. Do **not** invent an endpoint. |
+| **SUB/WAVE `REQUEST_ACCEPTED` / `TRACK_READY` notify** | **Bound in A4** to admin `POST /dj/say` (`mode: "styled"`). No further notify URL is invented. Webhook payload schema is still not implemented. |
 | slskd transfer JSON field names | `GET /api/v0/transfers/downloads` is verified when slskd exists; per-file progress keys are inferred only when present (`percentComplete`, `bytesTransferred`, …). Completion vs in-progress is **not** fully specified; the Bot2 worker still advances `DOWNLOADING → DOWNLOAD_COMPLETE` after one poll. |
 | slskd search result → enqueue payload | `POST /searches` is verified; mapping a hit to `POST /transfers/downloads/{user}` file body is not copied from a live server. |
 | SUB/WAVE webhook payload | Documented as existing; schema not implemented (unchanged). |
 | SUB/WAVE `GET /api/connect/openapi.json` | Admin-gated on the radio; not imported. |
-| Live OpenAPI of a running SUB/WAVE | Not fetched. Automation still uses verified `/dj/search` + `/dj/queue-track` + `/dj/refresh-playlist`. Notify remains unbound. |
+| Live OpenAPI of a running SUB/WAVE | Not fetched. Automation uses verified `/dj/search`, `/dj/queue-track`, `/dj/say`, and `/dj/refresh-playlist`. |
 | Navidrome scan status JSON | `startScan` / `getScanStatus` are verified **ops-only** APIs; UI shows worker job result, not a typed scan document. Happy path does not wait on this. |
 | Production bind addresses / live hosts | Must be supplied by the operator. Example yaml still uses loopback / relative paths for **local** development only. Oracle examples (`100.119.17.28`, `:7700/api`, `/music/…`) are documentation, not defaults. |
 
@@ -65,7 +67,7 @@ Live environment **examples** (never required source defaults): Oracle aarch64 L
 
 - Installing or managing Ollama / Qwen / `qwen3:8b`
 - Oracle Cloud (or any cloud) deploy steps as executed actions
-- Invented AzuraCast, SUB/WAVE notify, or non-slskd Soulseek APIs
+- Invented AzuraCast APIs, a second notify URL besides `POST /dj/say`, or non-slskd Soulseek APIs
 - Requiring SmartRadio to trigger Navidrome scans on the happy path
 - A second DJ personality / prompt system inside SmartRadio
 - Replacing the SmartRadio git remote / creating a new repository

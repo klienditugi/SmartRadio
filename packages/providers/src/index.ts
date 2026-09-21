@@ -12,8 +12,13 @@ export type {
   RadioProvider,
   AcquisitionProvider,
   LibrarySong,
+  SayKind,
+  SayRequest,
+  SayResult,
 } from "./types.js";
+export { SAY_KINDS, SAY_TEXT_MAX_CHARS } from "./types.js";
 export { OllamaProvider, NavidromeProvider, SubWaveProvider, SoulseekProvider, UnverifiedAcquisitionProvider };
+export { NeverPlayError } from "./radio/subwave.js";
 export { createProviders } from "./factory.js";
 export type { ProviderBundle } from "./factory.js";
 export type { OllamaProviderOptions } from "./llm/ollama.js";

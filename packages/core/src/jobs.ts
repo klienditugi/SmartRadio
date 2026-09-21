@@ -18,8 +18,8 @@ export function jobTypeForStatus(status: RequestStatus): JobType | null {
     case "VALIDATING":
       return "import_library";
     case "IMPORTING":
-      // Leftover vs A3: happy path does not require Navidrome startScan.
-      return "index_library";
+      // A4: do not enqueue index_library after import. Passive Navidrome scan, then queue_radio.
+      return "queue_radio";
     default:
       return null;
   }

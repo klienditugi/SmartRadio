@@ -1,10 +1,10 @@
-# Architecture — Sub Wave AI Radio Automation (Amendment A3)
+# Architecture — Sub Wave AI Radio Automation (Amendments A3 and A4)
 
 This repository delivers Sub Wave AI. The local clone directory and install path are always `subwave-ai`. The GitHub remote/repo name remains SmartRadio.
 
 Ollama is **external only**. The app never installs, updates, or pulls Ollama or any model. Model names are configuration, never source defaults.
 
-Amendment **A3** is locked below. Live host values in this document are **config examples**. They are never required application defaults and must not be hard-coded into source.
+Amendment **A3** is locked below. Amendment **A4** binds notify to `POST /dj/say` and takes `index_library` off the import happy path. Live host values in this document are **config examples**. They are never required application defaults and must not be hard-coded into source.
 
 ## Amendment A3 (locked)
 
@@ -31,7 +31,7 @@ REQUESTED → CLASSIFYING → APPROVED | REJECTED
 
 Implementation status `RECEIVED` is the A3 **REQUESTED** semantic. This amendment does **not** rename the code enum. Finer worker statuses (`CHECKING_LIBRARY`, `SEARCHING`, `DOWNLOADING`, `VALIDATING`, `IMPORTING`, …) still exist as internal steps under that pipeline.
 
-Happy-path completion is: validated file in `/music/library`, then announce/queue through SUB/WAVE. **`INDEXING` / Navidrome `startScan` is not part of the A3 happy path.** The worker may still enqueue `index_library` after import (implementation leftover); operators must not treat that as required.
+Happy-path completion is: validated file in `/music/library`, then announce/queue through SUB/WAVE. **`INDEXING` / Navidrome `startScan` is not part of the happy path.** A4: `import_library` enqueues `queue_radio` and does not enqueue `index_library`.
 
 ### Navidrome is passive
 
@@ -45,10 +45,14 @@ SmartRadio provides **event + context only**. SUB/WAVE owns DJ personality, word
 
 | Event | When | Listener meaning |
 | --- | --- | --- |
-| `REQUEST_ACCEPTED` | Acquisition started | “song is coming” |
-| `TRACK_READY` | Validated + moved into `/music/library` | “ready / on soon” |
+| `REQUEST_ACCEPTED` | A verified acquisition provider has accepted `enqueueDownload` | “song is coming” |
+| `TRACK_READY` | Validated file is in the music library and `GET /dj/search` returns a string `id` | “ready / on soon” |
 
-**Notify binding = SERVER INSPECTION REQUIRED.** Do not invent a SUB/WAVE notify HTTP endpoint. Until a live server documents the path, payload, and auth, SmartRadio must not call a guessed notify URL.
+**Notify binding (A4):** `POST {base_url}/dj/say` with the same admin HTTP Basic credentials as the other `/dj/*` routes. Body is `{ text, mode: "styled", kind }` where `text` is context only (required, max 500 characters), `kind` defaults to `"dj-speak"` and may be `"link"`, and `sfx` is optional. Success is `{ ok, mode, kind, spoken, sfx }`. Public `POST /request` is not used for announcements. There is no second DJ personality in SmartRadio.
+
+`REQUEST_ACCEPTED` is not sent on approval, on search, or when a download job only polls transfers. If `AcquisitionProvider` is unverified, the worker fails with `acquire_unavailable` and does not call `say`.
+
+`TRACK_READY` order is fixed: search-visible → `say` → `POST /dj/queue-track` with `{ id, title }` and optional `artist` / `album`. HTTP 409 is never-play and fails the request.
 
 Playback handoff continues to use the verified admin APIs under the opaque `/api` `base_url`:
 
@@ -58,6 +62,15 @@ Playback handoff continues to use the verified admin APIs under the opaque `/api
 ### Remaining acquisition gap
 
 There is no download daemon on Oracle. `AcquisitionProvider` is **optional / disabled** until a verified service exists. `GET /api/v1/doctor` surfaces `acquire_unavailable` when acquisition is unverified, missing a URL, or missing an API key. Landing-dir config for a live host is `/music/downloads`.
+
+## Amendment A4 (locked)
+
+- `RadioProvider.say` → `POST {base_url}/dj/say`, admin Basic, `mode` forced to `"styled"`, `kind` `"dj-speak"` or `"link"`, `text` truncated to 500 characters. Credentials and base URL stay in config/secrets.
+- `REQUEST_ACCEPTED` fires from the download processor after `enqueueDownload` returns. Unavailable acquisition (`acquire_unavailable`) does not announce and does not enter `DOWNLOADING`.
+- `TRACK_READY` fires from `queue_radio` only for a post-import job (`track_ready`), and only after `GET /dj/search?q=` yields a string `id`. Then `say`, then `POST /dj/queue-track`. A miss reschedules the same job; it does not call Navidrome `startScan`.
+- Library-hit playback stays `GET /dj/search` → `POST /dj/queue-track` and does not send `TRACK_READY`.
+- HTTP 409 from `queue-track` is never-play (`FAILED`).
+- No acquisition daemon is added in this amendment.
 
 ## Process split
 
@@ -71,14 +84,14 @@ SQLite (`packages/db`) persists users, sessions, settings, providers, requests, 
 
 ## Request state machine
 
-Implementation statuses: `RECEIVED → CLASSIFYING → REJECTED|APPROVED → CHECKING_LIBRARY → ALREADY_AVAILABLE|SEARCHING → QUEUED → DOWNLOADING → DOWNLOAD_COMPLETE → VALIDATING → IMPORTING → INDEXING → READY`, plus `FAILED` and `CANCELLED`.
+Implementation statuses: `RECEIVED → CLASSIFYING → REJECTED|APPROVED → CHECKING_LIBRARY → ALREADY_AVAILABLE|SEARCHING → QUEUED → DOWNLOADING → DOWNLOAD_COMPLETE → VALIDATING → IMPORTING → READY`, plus optional `INDEXING`, `FAILED`, and `CANCELLED`.
 
-A3 mapping:
+A3 / A4 mapping:
 
 - `RECEIVED` = semantic `REQUESTED`
 - After `APPROVED`, library check may skip download (`ALREADY_AVAILABLE`) or enter acquisition (`SEARCHING` …)
-- File flow: `/music/downloads` (landing) → validation → `/music/library` (final)
-- `INDEXING` is retained in the graph for the leftover `index_library` job and ops-only scans; A3 does not require it on the happy path
+- File flow: `/music/downloads` (landing) → validation → `/music/library` (final) → poll `GET /dj/search` → `say` (`TRACK_READY`) → `POST /dj/queue-track`
+- `IMPORTING → READY` is the happy-path edge (`queue_radio`). `IMPORTING → INDEXING` remains only when an operator enqueues `index_library` for that request. Standalone admin scan has no request id.
 
 Rules:
 
@@ -101,10 +114,10 @@ See `docs/INTEGRATION.md`. Adapters map 1:1:
 
 - `LLMProvider` → `OllamaProvider` (health `GET /api/tags` or `/api/version`). Live example: Tailscale `http://100.119.17.28:11434` v0.34.0 — configure, do not hard-code. No default model name.
 - `MusicLibraryProvider` → `NavidromeProvider` (Subsonic 1.16.1 `{url}/rest`, `f=json`, `u` + `t/s` md5; happy-path `search3`, `getSong`; **ops-only** `startScan`, `getScanStatus`; string IDs). Navidrome is passive after files land in the library.
-- `RadioProvider` → `SubWaveProvider` (opaque `base_url`; live example `http://127.0.0.1:7700/api`; public `GET /health` → `{"status":"on-air"}`, `GET /state`, `GET /now-playing`; playback `GET /dj/search` + `POST /dj/queue-track`; also `POST /dj/refresh-playlist`; public `POST /request` is secondary). `REQUEST_ACCEPTED` / `TRACK_READY` notify = **NEEDS_SERVER_INSPECTION**.
+- `RadioProvider` → `SubWaveProvider` (opaque `base_url`; live example `http://127.0.0.1:7700/api`; public `GET /health` → `{"status":"on-air"}`, `GET /state`, `GET /now-playing`; playback `GET /dj/search` + `POST /dj/queue-track`; notify `POST /dj/say`; also `POST /dj/refresh-playlist`; public `POST /request` is secondary and is not used for `REQUEST_ACCEPTED` / `TRACK_READY`).
 - `AcquisitionProvider` → `SoulseekProvider` only when a verified slskd exists (`/api/v0`, `X-API-Key`, `POST /searches`, `POST /transfers/downloads/{user}`, poll transfers). Otherwise leave unverified / disabled; doctor reports `acquire_unavailable`.
 
-Unverified adapters set `verifyStatus` and **do not** call live endpoints with invented paths. Webhook / notify payload schema is `needs_server_inspection` and is not implemented.
+Unverified adapters set `verifyStatus` and **do not** call live endpoints with invented paths. SUB/WAVE webhook payload schema remains `needs_server_inspection`. Notify for the two semantic events is the verified `/dj/say` contract above, not a webhook.
 
 ## Config and secrets
 
