@@ -1,0 +1,21 @@
+{
+  "name": "@subwave-ai/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -b --pretty"
+  },
+  "dependencies": {
+    "@subwave-ai/core": "workspace:*",
+    "@subwave-ai/db": "workspace:*",
+    "@subwave-ai/providers": "workspace:*",
+    "@subwave-ai/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5"
+  }
+}

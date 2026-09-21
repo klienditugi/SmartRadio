@@ -1,0 +1,18 @@
+[Unit]
+Description=Sub Wave AI worker
+After=network.target subwave-api.service
+# WorkingDirectory is the subwave-ai clone (install.sh substitutes @ROOT@).
+# Ollama is external and is not a dependency of this unit.
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@ROOT@
+EnvironmentFile=-@ROOT@/.env
+ExecStart=/usr/bin/env pnpm --filter @subwave-ai/worker start
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
