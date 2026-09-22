@@ -67,8 +67,8 @@ Success body: `{ ok, mode, kind, spoken, sfx }`.
 
 | Semantic event | When SmartRadio calls `say` |
 | --- | --- |
-| `REQUEST_ACCEPTED` | Verified `AcquisitionProvider.enqueueDownload` has returned. Context like “Listener's requested song is coming.” Not sent if acquisition is unavailable or no transfer was enqueued. |
-| `TRACK_READY` | Download validated, file placed in the music library, and `GET /dj/search?q=` returned a string `id`. Order: visible → `say` → `POST /dj/queue-track`. |
+| `REQUEST_ACCEPTED` | Verified `AcquisitionProvider.enqueueDownload` has returned. Factual context only (event name, optional requester username, track label, “Acquisition has started.”). Not announcer dialogue. Not sent if acquisition is unavailable or no transfer was enqueued. |
+| `TRACK_READY` | Download validated, file placed in the music library, and `GET /dj/search?q=` returned a string `id`. Factual context only (event name, optional requester, track label, validated/available for airplay). Order: visible → `say` → `POST /dj/queue-track`. |
 
 ## Soulseek / acquisition (VERIFIED via slskd only) — AcquisitionProvider (optional)
 

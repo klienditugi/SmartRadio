@@ -45,8 +45,8 @@ SmartRadio provides **event + context only**. SUB/WAVE owns DJ personality, word
 
 | Event | When | Listener meaning |
 | --- | --- | --- |
-| `REQUEST_ACCEPTED` | A verified acquisition provider has accepted `enqueueDownload` | “song is coming” |
-| `TRACK_READY` | Validated file is in the music library and `GET /dj/search` returns a string `id` | “ready / on soon” |
+| `REQUEST_ACCEPTED` | A verified acquisition provider has accepted `enqueueDownload` | Factual: event + track (+ requester if known) + acquisition started |
+| `TRACK_READY` | Validated file is in the music library and `GET /dj/search` returns a string `id` | Factual: event + track (+ requester if known) + validated/available for airplay |
 
 **Notify binding (A4):** `POST {base_url}/dj/say` with the same admin HTTP Basic credentials as the other `/dj/*` routes. Body is `{ text, mode: "styled", kind }` where `text` is context only (required, max 500 characters), `kind` defaults to `"dj-speak"` and may be `"link"`, and `sfx` is optional. Success is `{ ok, mode, kind, spoken, sfx }`. Public `POST /request` is not used for announcements. There is no second DJ personality in SmartRadio.
 
