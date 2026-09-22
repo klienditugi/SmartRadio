@@ -72,8 +72,15 @@ export interface RadioProvider {
 export interface AcquisitionProvider {
   readonly kind: "slskd" | "unverified";
   readonly verifyStatus: VerifyStatus;
+  /** POST /api/v0/searches `{ id, searchText }` */
   search(searchText: string, id: string): Promise<unknown>;
+  /** GET /api/v0/searches/{id}?includeResponses=true */
+  getSearch(id: string, opts?: { includeResponses?: boolean }): Promise<unknown>;
+  /** GET /api/v0/searches/{id}/responses — fallback when inline responses are empty */
+  getSearchResponses(id: string): Promise<unknown>;
+  /** POST /api/v0/transfers/downloads/{username} body `[{filename,size}]` */
   enqueueDownload(user: string, files: unknown): Promise<unknown>;
+  /** GET /api/v0/transfers/downloads */
   listDownloads(): Promise<unknown>;
   health(): Promise<ProviderHealth>;
 }

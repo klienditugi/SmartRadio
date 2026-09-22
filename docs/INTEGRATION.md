@@ -74,8 +74,10 @@ Success body: `{ ok, mode, kind, spoken, sfx }`.
 
 - HTTP `/api/v0`, default port `:5030` **when a slskd exists**
 - Auth: `X-API-Key` or session JWT
-- Search: `POST /searches`
-- Download: `POST /transfers/downloads/{user}`
-- Poll transfers for progress
+- Health (when verifying): `GET /application` + `GET /server`
+- Search: `POST /searches` `{ id, searchText }`, then poll `GET /searches/{id}?includeResponses=true` (fallback `GET /searches/{id}/responses`) until complete
+- Select a usable file `{ username, filename, size }` in an isolated selection module
+- Download: `POST /transfers/downloads/{username}` body `[{filename,size}]`
+- Poll `GET /transfers/downloads` until the **correlated** transfer is **Completed** and **Succeeded** (not Errored); then resolve the real file under configured `paths.downloads`
 - If not slskd, leave unverified — do not invent other APIs
-- A3: **no acquisition daemon on Oracle**. Keep the provider optional/disabled (`verify_status: unverified`) until a verified service exists. Doctor must surface `acquire_unavailable`. Landing dir config → `/music/downloads`.
+- **Optional:** SmartRadio runs with acquisition unset/unverified → doctor/`acquire_unavailable`. No Oracle/ARM64 requirements in app code. Landing dir is config-only (live example `/music/downloads`).

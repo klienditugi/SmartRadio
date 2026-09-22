@@ -27,3 +27,14 @@ export type { SubWaveProviderOptions } from "./radio/subwave.js";
 export type { SoulseekProviderOptions } from "./acquisition/slskd.js";
 export { extractTransferProgress } from "./acquisition/progress.js";
 export type { TransferProgress } from "./acquisition/progress.js";
+export { selectSearchResult, isSearchComplete } from "./acquisition/select.js";
+export type { SelectedSearchFile, SelectSearchOptions } from "./acquisition/select.js";
+export {
+  findCorrelatedTransfer,
+  isTransferSucceeded,
+  isTransferErrored,
+  isTransferInProgress,
+} from "./acquisition/correlate.js";
+export type { TransferMatchTarget, CorrelatedTransfer } from "./acquisition/correlate.js";
+export { resolveDownloadedFile, remoteBasename } from "./acquisition/resolve-download.js";
+export type { ResolvedDownload } from "./acquisition/resolve-download.js";

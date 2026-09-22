@@ -1,6 +1,6 @@
-# Release candidate — Phase 4 (web UI + ops) + Amendments A3 and A4
+# Release candidate — Phase 4 (web UI + ops) + Amendments A3, A4, and A5
 
-This branch adds the operator UI, production installer, and Compose/systemd packaging on top of the Bot2 backend foundation. Amendment **A3** locks live-environment examples, a passive Navidrome happy path, two semantic radio events, and the remaining acquisition gap. Amendment **A4** binds those events to verified `POST /dj/say` and removes `index_library` from the import happy path. This repository does not deploy to Oracle.
+This branch adds the operator UI, production installer, and Compose/systemd packaging on top of the Bot2 backend foundation. Amendment **A3** locks live-environment examples, a passive Navidrome happy path, two semantic radio events, and optional acquisition. Amendment **A4** binds those events to verified `POST /dj/say` and removes `index_library` from the import happy path. Amendment **A5** makes optional slskd acquisition work end-to-end when verified, while SmartRadio still runs with `acquire_unavailable` when acquisition is unset/unverified. This repository does not deploy to Oracle.
 
 ## What is in
 
@@ -37,8 +37,9 @@ Canonical pipeline (semantic):
 - `TRACK_READY` order: `GET /dj/search` shows a string `id` → `say` → `POST /dj/queue-track` `{ id, title }` (optional `artist` / `album`). HTTP 409 is never-play. Until search is visible, the worker waits and does not scan Navidrome.
 - Playback handoff remains verified admin `GET /dj/search` + `POST /dj/queue-track` under opaque `base_url` (live example `http://127.0.0.1:7700/api`). Library hits use that handoff and do not send `TRACK_READY`.
 - AcquisitionProvider optional/disabled until a verified daemon exists. Landing dir config example: `/music/downloads`.
+- **A5:** When `acquisition.verify_status` is `verified` and slskd is reachable, the worker runs search → poll → select → enqueue → transfer poll (Completed+Succeeded) → real file under `paths.downloads`. Unverified/missing config still yields `acquire_unavailable`. No false-complete after a single empty poll.
 
-Live environment **examples** (never required source defaults): Oracle aarch64 Linux; SUB/WAVE 1.16.0 at `http://127.0.0.1:7700` `/api`; `GET /api/health` → `{"status":"on-air"}`; Ollama `http://100.119.17.28:11434` v0.34.0; paths `/music/downloads` and `/music/library`; no acquisition daemon on Oracle.
+Live environment **examples** (never required source defaults): Oracle aarch64 Linux; SUB/WAVE 1.16.0 at `http://127.0.0.1:7700` `/api`; `GET /api/health` → `{"status":"on-air"}`; Ollama `http://100.119.17.28:11434` v0.34.0; paths `/music/downloads` and `/music/library`; acquisition daemon still optional on Oracle.
 
 ## Backend deltas for Bot2 review (additive)
 
@@ -55,8 +56,8 @@ Live environment **examples** (never required source defaults): Oracle aarch64 L
 | Item | Why |
 | --- | --- |
 | **SUB/WAVE `REQUEST_ACCEPTED` / `TRACK_READY` notify** | **Bound in A4** to admin `POST /dj/say` (`mode: "styled"`). No further notify URL is invented. Webhook payload schema is still not implemented. |
-| slskd transfer JSON field names | `GET /api/v0/transfers/downloads` is verified when slskd exists; per-file progress keys are inferred only when present (`percentComplete`, `bytesTransferred`, …). Completion vs in-progress is **not** fully specified; the Bot2 worker still advances `DOWNLOADING → DOWNLOAD_COMPLETE` after one poll. |
-| slskd search result → enqueue payload | `POST /searches` is verified; mapping a hit to `POST /transfers/downloads/{user}` file body is not copied from a live server. |
+| slskd transfer JSON field names | `GET /api/v0/transfers/downloads` is verified. A5 correlates on username/filename/size/(id) and treats state tokens **Completed + Succeeded** (not Errored) as done. Per-file progress keys are still best-effort when present. |
+| slskd search result → enqueue payload | **Bound in A5**: poll search responses, isolated selection → `{username,filename,size}` for `POST /transfers/downloads/{user}`. Heuristics may improve later without new endpoints. |
 | SUB/WAVE webhook payload | Documented as existing; schema not implemented (unchanged). |
 | SUB/WAVE `GET /api/connect/openapi.json` | Admin-gated on the radio; not imported. |
 | Live OpenAPI of a running SUB/WAVE | Not fetched. Automation uses verified `/dj/search`, `/dj/queue-track`, `/dj/say`, and `/dj/refresh-playlist`. |

@@ -59,9 +59,9 @@ Playback handoff continues to use the verified admin APIs under the opaque `/api
 - `GET /dj/search`
 - `POST /dj/queue-track`
 
-### Remaining acquisition gap
+### Remaining acquisition gap (A3) / optional slskd (A5)
 
-There is no download daemon on Oracle. `AcquisitionProvider` is **optional / disabled** until a verified service exists. `GET /api/v1/doctor` surfaces `acquire_unavailable` when acquisition is unverified, missing a URL, or missing an API key. Landing-dir config for a live host is `/music/downloads`.
+`AcquisitionProvider` remains **optional**. SmartRadio runs when acquisition is unset or unverified — doctor reports `acquire_unavailable`, and the worker fails acquisition jobs with that error (no `REQUEST_ACCEPTED`). Amendment **A5** wires the first verified provider (`SoulseekProvider` / slskd) end-to-end when configured and `verify_status: verified`: search → poll → select → enqueue `{username,filename,size}` → poll transfers until **Completed + Succeeded** → resolve the real file under configurable `paths.downloads` → `DOWNLOAD_COMPLETE`. No Oracle/ARM64 topology in app code; landing paths come from config only (live example `/music/downloads`).
 
 ## Amendment A4 (locked)
 
@@ -71,6 +71,13 @@ There is no download daemon on Oracle. `AcquisitionProvider` is **optional / dis
 - Library-hit playback stays `GET /dj/search` → `POST /dj/queue-track` and does not send `TRACK_READY`.
 - HTTP 409 from `queue-track` is never-play (`FAILED`).
 - No acquisition daemon is added in this amendment.
+
+## Amendment A5 (locked)
+
+- Optional `SoulseekProvider` (slskd `/api/v0`, `X-API-Key`): `POST /searches`, poll `GET /searches/{id}?includeResponses=true` (fallback `…/responses`), select via isolated module, `POST /transfers/downloads/{username}` with `[{filename,size}]`, poll `GET /transfers/downloads` until correlated transfer is **Completed** and **Succeeded** (not Errored), then hand off the real basename under `paths.downloads`.
+- Health prefers `GET /application` + `GET /server`. `verify_status` gates live calls.
+- False-complete removed: one empty poll (or an unrelated transfer) must not advance to `DOWNLOAD_COMPLETE`.
+- Portable: no hard-coded Oracle paths; acquisition stays optional with `acquire_unavailable`.
 
 ## Process split
 
@@ -115,7 +122,7 @@ See `docs/INTEGRATION.md`. Adapters map 1:1:
 - `LLMProvider` → `OllamaProvider` (health `GET /api/tags` or `/api/version`). Live example: Tailscale `http://100.119.17.28:11434` v0.34.0 — configure, do not hard-code. No default model name.
 - `MusicLibraryProvider` → `NavidromeProvider` (Subsonic 1.16.1 `{url}/rest`, `f=json`, `u` + `t/s` md5; happy-path `search3`, `getSong`; **ops-only** `startScan`, `getScanStatus`; string IDs). Navidrome is passive after files land in the library.
 - `RadioProvider` → `SubWaveProvider` (opaque `base_url`; live example `http://127.0.0.1:7700/api`; public `GET /health` → `{"status":"on-air"}`, `GET /state`, `GET /now-playing`; playback `GET /dj/search` + `POST /dj/queue-track`; notify `POST /dj/say`; also `POST /dj/refresh-playlist`; public `POST /request` is secondary and is not used for `REQUEST_ACCEPTED` / `TRACK_READY`).
-- `AcquisitionProvider` → `SoulseekProvider` only when a verified slskd exists (`/api/v0`, `X-API-Key`, `POST /searches`, `POST /transfers/downloads/{user}`, poll transfers). Otherwise leave unverified / disabled; doctor reports `acquire_unavailable`.
+- `AcquisitionProvider` → `SoulseekProvider` when a verified slskd exists (`/api/v0`, `X-API-Key`; A5: `POST /searches`, poll search with `includeResponses`, select `{username,filename,size}`, `POST /transfers/downloads/{user}`, poll transfers until Completed+Succeeded, resolve file under `paths.downloads`). Otherwise leave unverified / disabled; doctor reports `acquire_unavailable`.
 
 Unverified adapters set `verifyStatus` and **do not** call live endpoints with invented paths. SUB/WAVE webhook payload schema remains `needs_server_inspection`. Notify for the two semantic events is the verified `/dj/say` contract above, not a webhook.
 

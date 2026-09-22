@@ -55,8 +55,12 @@ export const handleValidateFile: JobHandler = async (ctx, job) => {
   const current = getRequest(ctx.db, request.id)!;
   if (current.status !== "VALIDATING") return { skipped: true, status: current.status };
 
-  const payload = job.payload_json ? (JSON.parse(job.payload_json) as { filename?: string }) : {};
-  const filename = payload.filename ?? `${request.id}.bin`;
+  const payload = job.payload_json ? (JSON.parse(job.payload_json) as { filename?: string; path?: string }) : {};
+  // A5: never invent `{requestId}.bin` — require the real completed basename from acquisition.
+  const filename = payload.filename;
+  if (!filename || typeof filename !== "string") {
+    fail(ctx, request.id, "validate_file missing real download basename");
+  }
   if (!isAllowedAudioExtension(filename, ctx.config.files.allowed_extensions)) {
     fail(ctx, request.id, `disallowed extension for ${filename}`);
   }
@@ -86,7 +90,10 @@ export const handleImportLibrary: JobHandler = async (ctx, job) => {
   if (current.status !== "IMPORTING") return { skipped: true, status: current.status };
 
   const payload = job.payload_json ? (JSON.parse(job.payload_json) as { filename?: string }) : {};
-  const filename = payload.filename ?? `${request.id}.bin`;
+  const filename = payload.filename;
+  if (!filename || typeof filename !== "string") {
+    fail(ctx, request.id, "import_library missing real download basename");
+  }
   const source = safeJoin(ctx.config.paths.staging, filename);
   assertInsideRoot(ctx.config.paths.staging, source);
   if (!fs.existsSync(source)) fail(ctx, request.id, "staging file missing");

@@ -52,6 +52,26 @@ export class SoulseekProvider implements AcquisitionProvider {
     return readJson(res);
   }
 
+  async getSearch(id: string, opts?: { includeResponses?: boolean }): Promise<unknown> {
+    this.assertVerified();
+    const include = opts?.includeResponses !== false;
+    const path = `/searches/${encodeURIComponent(id)}${include ? "?includeResponses=true" : ""}`;
+    const res = await this.fetchImpl(joinUrl(this.root, path), {
+      method: "GET",
+      headers: this.headers(),
+    });
+    return readJson(res);
+  }
+
+  async getSearchResponses(id: string): Promise<unknown> {
+    this.assertVerified();
+    const res = await this.fetchImpl(joinUrl(this.root, `/searches/${encodeURIComponent(id)}/responses`), {
+      method: "GET",
+      headers: this.headers(),
+    });
+    return readJson(res);
+  }
+
   async enqueueDownload(user: string, files: unknown): Promise<unknown> {
     this.assertVerified();
     const res = await this.fetchImpl(joinUrl(this.root, `/transfers/downloads/${encodeURIComponent(user)}`), {
@@ -80,8 +100,25 @@ export class SoulseekProvider implements AcquisitionProvider {
       return { ok: false, verifyStatus: this.verifyStatus, detail: "unverified adapter; not calling live endpoints", checked_at };
     }
     try {
-      await this.listDownloads();
-      return { ok: true, verifyStatus: this.verifyStatus, detail: "GET /api/v0/transfers/downloads", checked_at };
+      const appRes = await this.fetchImpl(joinUrl(this.root, "/application"), {
+        method: "GET",
+        headers: this.headers(),
+      });
+      await readJson(appRes);
+      const serverRes = await this.fetchImpl(joinUrl(this.root, "/server"), {
+        method: "GET",
+        headers: this.headers(),
+      });
+      const server = (await readJson(serverRes)) as { isConnected?: boolean; IsConnected?: boolean };
+      const loggedIn = server.isConnected === true || server.IsConnected === true;
+      return {
+        ok: loggedIn,
+        verifyStatus: this.verifyStatus,
+        detail: loggedIn
+          ? "GET /api/v0/application + GET /api/v0/server (connected)"
+          : "GET /api/v0/server reports not connected",
+        checked_at,
+      };
     } catch (err) {
       return { ok: false, verifyStatus: this.verifyStatus, detail: (err as Error).message, checked_at };
     }

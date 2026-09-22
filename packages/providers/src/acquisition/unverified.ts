@@ -17,6 +17,12 @@ export class UnverifiedAcquisitionProvider implements AcquisitionProvider {
   async search(_searchText?: string, _id?: string): Promise<unknown> {
     this.fail();
   }
+  async getSearch(_id?: string, _opts?: { includeResponses?: boolean }): Promise<unknown> {
+    this.fail();
+  }
+  async getSearchResponses(_id?: string): Promise<unknown> {
+    this.fail();
+  }
   async enqueueDownload(_user?: string, _files?: unknown): Promise<unknown> {
     this.fail();
   }
