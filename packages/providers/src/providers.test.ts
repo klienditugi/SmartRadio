@@ -268,7 +268,7 @@ describe("SubWaveProvider", () => {
 });
 
 describe("SoulseekProvider (slskd)", () => {
-  it("uses /api/v0, X-API-Key, POST /searches and POST /transfers/downloads/{user}", async () => {
+  it("uses /api/v0, X-API-Key, POST /searches, poll search, POST /transfers/downloads/{user}", async () => {
     const calls: { url: string; method?: string; key?: string }[] = [];
     const fetchMock: FetchLike = async (url, init) => {
       const headers = new Headers(init?.headers);
@@ -276,7 +276,7 @@ describe("SoulseekProvider (slskd)", () => {
       if (init?.method === "POST" && String(url).includes("/transfers/")) {
         return new Response(null, { status: 201 });
       }
-      return jsonResponse({ id: "s1" });
+      return jsonResponse({ id: "s1", isComplete: true, responses: [] });
     };
     const slskd = new SoulseekProvider({
       baseUrl: "http://slskd.example",
@@ -284,18 +284,43 @@ describe("SoulseekProvider (slskd)", () => {
       fetch: fetchMock,
     });
     await slskd.search("artist title", "search-1");
+    await slskd.getSearch("search-1", { includeResponses: true });
+    await slskd.getSearchResponses("search-1");
     await slskd.enqueueDownload("peer", [{ filename: "a.flac", size: 1 }]);
     await slskd.listDownloads();
     expect(calls[0]?.url).toBe("http://slskd.example/api/v0/searches");
     expect(calls[0]?.method).toBe("POST");
     expect(calls[0]?.key).toBe("key-from-secrets");
-    expect(calls[1]?.url).toBe("http://slskd.example/api/v0/transfers/downloads/peer");
-    expect(calls[2]?.url).toBe("http://slskd.example/api/v0/transfers/downloads");
+    expect(calls[1]?.url).toBe("http://slskd.example/api/v0/searches/search-1?includeResponses=true");
+    expect(calls[2]?.url).toBe("http://slskd.example/api/v0/searches/search-1/responses");
+    expect(calls[3]?.url).toBe("http://slskd.example/api/v0/transfers/downloads/peer");
+    expect(calls[4]?.url).toBe("http://slskd.example/api/v0/transfers/downloads");
+  });
+
+  it("health prefers GET /application and GET /server", async () => {
+    const calls: string[] = [];
+    const fetchMock: FetchLike = async (url) => {
+      calls.push(String(url));
+      if (String(url).endsWith("/server")) return jsonResponse({ isConnected: true });
+      return jsonResponse({ ok: true });
+    };
+    const slskd = new SoulseekProvider({
+      baseUrl: "http://slskd.example",
+      apiKey: "key",
+      fetch: fetchMock,
+    });
+    const health = await slskd.health();
+    expect(health.ok).toBe(true);
+    expect(calls).toEqual([
+      "http://slskd.example/api/v0/application",
+      "http://slskd.example/api/v0/server",
+    ]);
   });
 
   it("unverified acquisition never calls fetch", async () => {
     const unverified = new UnverifiedAcquisitionProvider();
     await expect(unverified.search("x", "id")).rejects.toBeInstanceOf(UnverifiedAdapterError);
+    await expect(unverified.getSearch("x")).rejects.toBeInstanceOf(UnverifiedAdapterError);
     const health = await unverified.health();
     expect(health.verifyStatus).toBe("unverified");
     expect(health.ok).toBe(false);

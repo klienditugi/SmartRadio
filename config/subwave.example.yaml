@@ -74,7 +74,8 @@ radio:
   verify_status: verified
 
 # Optional until a verified download daemon exists (none on the Oracle VM as of A3).
-# Unverified → doctor.acquire_unavailable. Landing dir live example: /music/downloads.
+# Unverified → doctor.acquire_unavailable. Landing dir is config-only (live example: /music/downloads).
+# A5: when verify_status is verified and slskd is reachable, acquisition runs end-to-end; otherwise SmartRadio still runs.
 acquisition:
   provider: slskd
   base_url: "${SLSKD_URL}"

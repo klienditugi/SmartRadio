@@ -151,6 +151,23 @@ function harness(opts?: {
       order.push("acq-search");
       return { id: "search-1" };
     },
+    getSearch: async () => {
+      order.push("get-search");
+      return {
+        id: "search-1",
+        isComplete: true,
+        responses: [
+          {
+            username: "peer",
+            files: [{ filename: "track.flac", size: 12 }],
+          },
+        ],
+      };
+    },
+    getSearchResponses: async () => {
+      order.push("get-responses");
+      return [];
+    },
     enqueueDownload: async () => {
       order.push("enqueue");
       return { ok: true };
@@ -180,7 +197,7 @@ describe("A4 radio events", () => {
     const job = enqueueJob(db, {
       type: "download",
       requestId: request.id,
-      payload: { user: "peer", files: [{ filename: "track.flac" }] },
+      payload: { user: "peer", files: [{ filename: "track.flac", size: 12 }] },
     });
     const ctx: WorkerContext = {
       db,
@@ -189,7 +206,7 @@ describe("A4 radio events", () => {
       workerId: "worker-test",
     };
     await handleDownload(ctx, job);
-    expect(order).toEqual(["enqueue", "say", "list"]);
+    expect(order).toEqual(["enqueue", "say"]);
     expect(say).toEqual([
       {
         text: "REQUEST_ACCEPTED. Requester: Alice. Track: Artist — Track. Acquisition has started.",
@@ -197,9 +214,10 @@ describe("A4 radio events", () => {
       },
     ]);
     expect(order).not.toContain("public-request");
-    expect(getRequest(db, request.id)?.status).toBe("DOWNLOAD_COMPLETE");
+    // A5: stay DOWNLOADING until correlated Completed+Succeeded + file exists.
+    expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
     const downloading = listRequestEvents(db, request.id).find((event) => event.to_status === "DOWNLOADING");
-    expect(JSON.parse(downloading?.payload_json ?? "{}")).toEqual({ event: "REQUEST_ACCEPTED" });
+    expect(JSON.parse(downloading?.payload_json ?? "{}").event).toBe("REQUEST_ACCEPTED");
   });
 
   it("does not announce when acquisition never starts", async () => {
@@ -228,13 +246,25 @@ describe("A4 radio events", () => {
     expect(getRequest(db, request.id)?.status).toBe("QUEUED");
     expect(say).toEqual([]);
 
+    // Search-only payload without a usable hit: no enqueue, no REQUEST_ACCEPTED, no false-complete.
+    const emptySearch = {
+      ...acquisition,
+      getSearch: async () => {
+        order.push("get-search");
+        return { id: "only-search", isComplete: true, responses: [] };
+      },
+      getSearchResponses: async () => {
+        order.push("get-responses");
+        return [];
+      },
+    };
     const polled = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "only-search" } });
-    await handleDownload(ctx, polled);
+    await expect(
+      handleDownload({ ...ctx, providers: { ...ctx.providers, acquisition: emptySearch } }, polled),
+    ).rejects.toThrow(/no usable search result/);
     expect(say).toEqual([]);
-    expect(order).toEqual(["list"]);
-    expect(getRequest(db, request.id)?.status).toBe("DOWNLOAD_COMPLETE");
-    const downloading = listRequestEvents(db, request.id).find((event) => event.to_status === "DOWNLOADING");
-    expect(downloading?.payload_json).toBeNull();
+    expect(order).toEqual(["get-search", "get-responses"]);
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
   });
 
   it("does not announce REQUEST_ACCEPTED from search alone, and skips search when acquisition is unavailable", async () => {
