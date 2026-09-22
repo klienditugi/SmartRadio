@@ -184,7 +184,7 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
       return { waiting: true, reason: "not_search_visible" };
     }
     await ctx.providers.radio.say({
-      text: trackReadyContext(request),
+      text: trackReadyContext(ctx.db, request),
       kind: "dj-speak",
     });
     const queued = await queueVisibleTrack(ctx, request.id, track, "TRACK_READY");

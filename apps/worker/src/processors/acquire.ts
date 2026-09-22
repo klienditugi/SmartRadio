@@ -63,7 +63,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   if (request.status === "QUEUED" && hasTransfer) {
     await ctx.providers.acquisition.enqueueDownload(payload.user as string, payload.files);
     await ctx.providers.radio.say({
-      text: requestAcceptedContext(request),
+      text: requestAcceptedContext(ctx.db, request),
       kind: "dj-speak",
     });
     transitionRequest(ctx.db, {

@@ -6,6 +6,7 @@ import {
   createRequest,
   enqueueJob,
   getRequest,
+  insertUser,
   listJobsForRequest,
   listRequestEvents,
   openDatabase,
@@ -173,7 +174,8 @@ describe("A4 radio events", () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const { radio, library, acquisition, order, say } = harness();
-    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    const alice = insertUser(db, { username: "Alice", passwordHash: "x", role: "operator" });
+    const request = createRequest(db, { rawQuery: "Artist - Track", userId: alice.id });
     advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
     const job = enqueueJob(db, {
       type: "download",
@@ -189,7 +191,10 @@ describe("A4 radio events", () => {
     await handleDownload(ctx, job);
     expect(order).toEqual(["enqueue", "say", "list"]);
     expect(say).toEqual([
-      { text: "Listener's requested song is coming: Artist — Track.", kind: "dj-speak" },
+      {
+        text: "REQUEST_ACCEPTED. Requester: Alice. Track: Artist — Track. Acquisition has started.",
+        kind: "dj-speak",
+      },
     ]);
     expect(order).not.toContain("public-request");
     expect(getRequest(db, request.id)?.status).toBe("DOWNLOAD_COMPLETE");
@@ -298,7 +303,12 @@ describe("A4 radio events", () => {
 
     const result = await handleQueueRadio(ctx, radioJob!);
     expect(order).toEqual(["search", "say", "queue"]);
-    expect(say).toEqual([{ text: "Listener's requested song is ready: Artist — Track.", kind: "dj-speak" }]);
+    expect(say).toEqual([
+      {
+        text: "TRACK_READY. Track: Artist — Track. Track validated and available in library for airplay.",
+        kind: "dj-speak",
+      },
+    ]);
     expect(queued).toEqual([{ id: "song-1", title: "Track", artist: "Artist", album: "LP" }]);
     expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
     expect(getRequest(db, request.id)?.status).toBe("READY");
