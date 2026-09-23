@@ -1,4 +1,5 @@
 # Optional systemd sketch for an external slskd process.
+# The compose installer is deploy/slskd/install-slskd.sh.
 # Copy to your host unit directory and replace the paths. This is not installed
 # by SmartRadio. Do not point downloads or incomplete at the library directory.
 

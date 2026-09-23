@@ -1,3 +1,4 @@
+# Sketch only. Prefer deploy/slskd/ for the compose example.
 # Example slskd YAML. Not SmartRadio config.
 # Replace every placeholder. Soulseek username and password stay in this file
 # (or in slskd's environment). Do not copy them into SmartRadio.

@@ -1,0 +1,42 @@
+# Optional slskd, run beside SmartRadio. Not built into the SmartRadio image
+# and not started by deploy/docker-compose.yml or ./install.sh.
+#
+# Official multi-arch image: linux/amd64 and linux/arm64 (also linux/arm/v7).
+# Docker picks the host architecture. Switch registry with SLSKD_IMAGE
+# (ghcr.io/slskd/slskd is the same upstream image).
+#
+# Volumes are completed downloads, a separate incomplete directory, and
+# persistent config/state (/app). There is no library volume.
+# First-host path examples, comments only: completed downloads /music/downloads,
+# library /music/library. Do not mount or write the library.
+
+name: smartradio-slskd
+
+services:
+  slskd:
+    image: ${SLSKD_IMAGE:-slskd/slskd:latest}
+    # Docker user: so the process is not root. Do not also set PUID/PGID.
+    user: "${SLSKD_UID:?set SLSKD_UID}:${SLSKD_GID:?set SLSKD_GID}"
+    environment:
+      SLSKD_DOWNLOADS_DIR: /downloads
+      SLSKD_INCOMPLETE_DIR: /incomplete
+      SLSKD_HTTP_PORT: ${SLSKD_HTTP_PORT:-5030}
+      SLSKD_HTTPS_PORT: ${SLSKD_HTTPS_PORT:-5031}
+      SLSKD_SLSK_LISTEN_PORT: ${SLSKD_LISTEN_PORT:-50300}
+      SLSKD_UMASK: ${SLSKD_UMASK:-0022}
+      SLSKD_SLSK_USERNAME: ${SLSKD_SLSK_USERNAME:?set the Soulseek username in deploy/slskd/.env}
+      SLSKD_SLSK_PASSWORD: ${SLSKD_SLSK_PASSWORD:?set the Soulseek password in deploy/slskd/.env}
+      SLSKD_API_KEY: ${SLSKD_API_KEY:?set SLSKD_API_KEY in deploy/slskd/.env}
+    ports:
+      # API. Default bind is loopback; set SLSKD_HTTP_BIND=0.0.0.0 if another
+      # machine or a SmartRadio container must reach it.
+      - "${SLSKD_HTTP_BIND:-127.0.0.1}:${SLSKD_HTTP_PORT:-5030}:${SLSKD_HTTP_PORT:-5030}"
+      # Optional HTTPS UI. Often closed until TLS is configured. Not used by SmartRadio.
+      - "${SLSKD_HTTP_BIND:-127.0.0.1}:${SLSKD_HTTPS_PORT:-5031}:${SLSKD_HTTPS_PORT:-5031}"
+      # Soulseek listen. Peers need this reachable if you want inbound connections.
+      - "${SLSKD_LISTEN_BIND:-0.0.0.0}:${SLSKD_LISTEN_PORT:-50300}:${SLSKD_LISTEN_PORT:-50300}"
+    volumes:
+      - ${SLSKD_APP_DIR:?host directory for slskd config and state}:/app
+      - ${SLSKD_DOWNLOADS_DIR:?host directory shared with SmartRadio downloads}:/downloads
+      - ${SLSKD_INCOMPLETE_DIR:?host directory for incomplete downloads, not the library}:/incomplete
+    restart: unless-stopped
