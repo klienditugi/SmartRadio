@@ -1,0 +1,26 @@
+# Optional example: slskd beside SmartRadio. Not part of the SmartRadio image
+# and not referenced by deploy/docker-compose.yml.
+#
+# Completed downloads (SLSKD_COMPLETE_DIR) must be the directory SmartRadio uses
+# as paths.downloads. Incomplete downloads must be a different directory.
+# Do not mount the SmartRadio library directory here.
+# Soulseek username and password belong only in this environment.
+
+services:
+  slskd:
+    image: slskd/slskd:latest
+    environment:
+      SLSKD_DOWNLOADS_DIR: /downloads
+      SLSKD_INCOMPLETE_DIR: /incomplete
+      SLSKD_SLSK_USERNAME: ${SLSKD_SLSK_USERNAME:?set the Soulseek username for slskd}
+      SLSKD_SLSK_PASSWORD: ${SLSKD_SLSK_PASSWORD:?set the Soulseek password for slskd}
+      SLSKD_API_KEY: ${SLSKD_API_KEY:?same value entered in the SmartRadio setup UI}
+      SLSKD_HTTP_PORT: ${SLSKD_HTTP_PORT:-5030}
+      SLSKD_SLSK_LISTEN_PORT: ${SLSKD_LISTEN_PORT:-50300}
+    ports:
+      - "${SLSKD_HTTP_PORT:-5030}:${SLSKD_HTTP_PORT:-5030}"
+      - "${SLSKD_LISTEN_PORT:-50300}:${SLSKD_LISTEN_PORT:-50300}"
+    volumes:
+      - ${SLSKD_COMPLETE_DIR:?host path shared with SmartRadio downloads}:/downloads
+      - ${SLSKD_INCOMPLETE_DIR:?host path for incomplete downloads, not the library}:/incomplete
+    restart: unless-stopped

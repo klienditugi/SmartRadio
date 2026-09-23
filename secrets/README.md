@@ -8,6 +8,6 @@ Place one secret per file in the local clone directory named `subwave-ai`. Do no
 | `session_secret` | Session cookie signing / token hashing salt |
 | `navidrome_password` | Navidrome Subsonic `t/s` auth |
 | `subwave_admin_password` | SUB/WAVE admin HTTP Basic |
-| `slskd_api_key` | slskd `X-API-Key` (optional until a verified acquisition daemon exists; doctor reports `acquire_unavailable` when missing) |
+| `slskd_api_key` | slskd `X-API-Key` (optional). The setup UI writes this file and never returns the value. Soulseek username/password are not SmartRadio secrets. |
 
 Override the directory with `SUBWAVE_SECRETS_DIR`. Values are never written back by the LLM or workers.

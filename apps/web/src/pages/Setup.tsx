@@ -2,8 +2,9 @@ import { FormEvent, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { AcquisitionForm } from "../components/AcquisitionForm";
 
-const STEPS = ["Admin", "Paths", "Ollama", "Navidrome", "Radio", "slskd", "Review"];
+const STEPS = ["Admin", "Paths", "Ollama", "Navidrome", "Radio", "Acquisition", "Review"];
 
 type FormState = {
   admin_username: string;
@@ -21,6 +22,8 @@ type FormState = {
   radio_password: string;
   slskd_url: string;
   slskd_key: string;
+  acquisition_enabled: boolean;
+  acquisition_provider: string;
 };
 
 const EMPTY: FormState = {
@@ -39,6 +42,8 @@ const EMPTY: FormState = {
   radio_password: "",
   slskd_url: "",
   slskd_key: "",
+  acquisition_enabled: false,
+  acquisition_provider: "slskd",
 };
 
 export function SetupPage() {
@@ -50,7 +55,8 @@ export function SetupPage() {
   const [busy, setBusy] = useState(false);
   const bootstrap = Boolean(setup && !setup.configured);
 
-  const set = (key: keyof FormState, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
+  type TextKey = { [K in keyof FormState]: FormState[K] extends string ? K : never }[keyof FormState];
+  const set = (key: TextKey, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
 
   const payload = useMemo(
     () => ({
@@ -80,12 +86,18 @@ export function SetupPage() {
           ...(form.radio_url ? { base_url: form.radio_url } : {}),
           ...(form.radio_user ? { admin_user: form.radio_user } : {}),
         },
-        acquisition: {
-          ...(form.slskd_url ? { base_url: form.slskd_url } : {}),
-        },
+        ...(bootstrap
+          ? {
+              acquisition: {
+                enabled: form.acquisition_enabled,
+                provider: form.acquisition_provider || "slskd",
+                ...(form.slskd_url ? { base_url: form.slskd_url } : {}),
+              },
+            }
+          : {}),
       },
     }),
-    [form],
+    [bootstrap, form],
   );
 
   async function onSubmit(event: FormEvent) {
@@ -200,19 +212,33 @@ export function SetupPage() {
             </label>
           </>
         )}
-        {step === 5 && (
-          <>
-            <p className="muted">Acquisition is slskd only. Other Soulseek frontends stay unverified.</p>
-            <label className="field">
-              <span>slskd URL</span>
-              <input value={form.slskd_url} onChange={(e) => set("slskd_url", e.target.value)} />
-            </label>
-            <label className="field">
-              <span>API key (secrets/)</span>
-              <input type="password" value={form.slskd_key} onChange={(e) => set("slskd_key", e.target.value)} />
-            </label>
-          </>
-        )}
+        {step === 5 &&
+          (bootstrap ? (
+            <AcquisitionForm
+              mode="wizard"
+              draft={{
+                enabled: form.acquisition_enabled,
+                provider: form.acquisition_provider,
+                base_url: form.slskd_url,
+                api_key: form.slskd_key,
+                downloads: form.downloads,
+                library: form.library,
+              }}
+              onDraftChange={(draft) =>
+                setForm((prev) => ({
+                  ...prev,
+                  acquisition_enabled: draft.enabled,
+                  acquisition_provider: draft.provider,
+                  slskd_url: draft.base_url,
+                  slskd_key: draft.api_key,
+                  downloads: draft.downloads,
+                  library: draft.library,
+                }))
+              }
+            />
+          ) : (
+            <AcquisitionForm mode="settings" readOnly={user?.role !== "admin"} />
+          ))}
         {step === 6 && (
           <div className="pre">
             {JSON.stringify(

@@ -1,0 +1,23 @@
+# Example slskd YAML. Not SmartRadio config.
+# Replace every placeholder. Soulseek username and password stay in this file
+# (or in slskd's environment). Do not copy them into SmartRadio.
+#
+# downloads must be the same directory SmartRadio uses as paths.downloads.
+# incomplete must be a different directory. Neither path is the library.
+
+directories:
+  downloads: /replace/with/completed-downloads
+  incomplete: /replace/with/incomplete-downloads
+
+soulseek:
+  username: REPLACE_SOULSEEK_USERNAME
+  password: REPLACE_SOULSEEK_PASSWORD
+  listen_port: 50300
+
+web:
+  port: 5030
+  authentication:
+    api_keys:
+      smartradio:
+        key: REPLACE_WITH_16_TO_255_CHARACTER_API_KEY
+        cidr: 0.0.0.0/0,::/0

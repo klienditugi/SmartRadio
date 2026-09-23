@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { AcquisitionForm } from "../components/AcquisitionForm";
 
 type SettingsResponse = {
   config: {
@@ -80,7 +81,7 @@ export function SettingsPage() {
               <strong>SUB/WAVE</strong> {cfg.radio.base_url} · {cfg.radio.admin_user}
             </p>
             <p>
-              <strong>slskd</strong> {cfg.acquisition.base_url}
+              <strong>Acquisition</strong> slskd URL and API key are edited below. Soulseek username and password stay in slskd.
             </p>
             <h3>Secrets present</h3>
             <div className="pre">{JSON.stringify(cfg.secrets_present, null, 2)}</div>
@@ -105,6 +106,10 @@ export function SettingsPage() {
           </div>
         </div>
       ) : null}
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h2>Acquisition</h2>
+        <AcquisitionForm mode="settings" readOnly={user?.role !== "admin"} />
+      </div>
     </>
   );
 }

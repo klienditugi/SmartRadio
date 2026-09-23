@@ -49,6 +49,7 @@ cp config/subwave.example.yaml config/subwave.yaml
 mkdir -p secrets data/downloads data/staging data/library
 # secrets/admin_password, session_secret, navidrome_password,
 # subwave_admin_password, slskd_api_key
+# The setup UI writes slskd_api_key and does not store a Soulseek password.
 pnpm install
 pnpm typecheck
 pnpm test

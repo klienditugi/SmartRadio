@@ -1,0 +1,15 @@
+# Optional systemd sketch for an external slskd process.
+# Copy to your host unit directory and replace the paths. This is not installed
+# by SmartRadio. Do not point downloads or incomplete at the library directory.
+
+[Unit]
+Description=External slskd (not part of SmartRadio)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/slskd --config /etc/slskd/slskd.yml
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

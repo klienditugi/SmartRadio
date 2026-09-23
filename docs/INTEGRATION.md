@@ -74,7 +74,7 @@ Success body: `{ ok, mode, kind, spoken, sfx }`.
 
 - HTTP `/api/v0`, default port `:5030` **when a slskd exists**
 - Auth: `X-API-Key` or session JWT
-- Health (when verifying): `GET /application` + `GET /server`. Ready requires application `version` plus Soulseek `isConnected` and `isLoggedIn` (or `state` flags). `isConnected` alone is not logged in.
+- Health (when verifying): `GET /application` + `GET /server`. Ready requires application `version` plus Soulseek `isConnected` and `isLoggedIn` (or `state` flags). `isConnected` alone is not logged in. Optional external slskd: `docs/SLSKD.md`.
 - Search: `POST /searches` `{ id, searchText }`, then poll `GET /searches/{id}?includeResponses=true` (fallback `GET /searches/{id}/responses`) until complete
 - Select a usable file `{ username, filename, size }` in an isolated selection module
 - Download: `POST /transfers/downloads/{username}` body `[{filename,size}]`

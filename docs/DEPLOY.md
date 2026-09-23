@@ -87,6 +87,10 @@ OpenAPI: `http://127.0.0.1:8788/api/v1/docs`
 
 Relative `./data/downloads` and `./data/library` in the example yaml are **local-dev placeholders**, not the Oracle live paths.
 
+## Optional external slskd
+
+SmartRadio does not install or contain slskd. To run slskd yourself and point the setup UI at it, see `docs/SLSKD.md`. Completed downloads must be the directory SmartRadio uses as `paths.downloads`. Incomplete downloads stay on a different directory. slskd must not write the library directory. Soulseek username and password are slskd settings, not SmartRadio settings.
+
 ## Health
 
 - `GET /api/v1/health` — process up

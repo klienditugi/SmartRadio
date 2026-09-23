@@ -12,4 +12,5 @@
 #   SUBWAVE_LIBRARY_DIR=/music/library       # final library; Navidrome scanner is passive
 #
 # Music must never live only in the container writable layer.
-# Ollama is not started here. Acquisition is optional until a verified daemon exists.
+# Ollama is not started here. slskd is not a service in this file.
+# Optional external slskd examples: docs/SLSKD.md and deploy/examples/slskd/.

@@ -79,12 +79,12 @@ Playback handoff continues to use the verified admin APIs under the opaque `/api
 - False-complete removed: one empty poll (or an unrelated transfer) must not advance to `DOWNLOAD_COMPLETE`.
 - Portable: no hard-coded Oracle paths; acquisition stays optional with `acquire_unavailable`.
 
-## Amendment A6 (acquisition settings)
+## Amendment A6 (acquisition settings + setup UI)
 
-- Admin settings persist `acquisition.enabled`, `provider` (slskd, extensible), `base_url`, and `paths.downloads` / `paths.library`. The API key is write-only at `secrets/slskd_api_key`. Responses expose `secrets_present.slskd_api_key` only.
+- The setup wizard and Settings edit acquisition without hand-editing YAML. Admin settings persist `acquisition.enabled`, `provider` (slskd, extensible), `base_url`, and `paths.downloads` / `paths.library`. The API key is write-only at `secrets/slskd_api_key`. Responses expose `secrets_present.slskd_api_key` only.
 - `verify_status: verified` is written only by `POST /api/v1/acquisition/test-connection` after read-only `GET /api/v0/application` and `GET /api/v0/server` show a healthy application and a connected, logged-in Soulseek session. Saving a URL and key does not verify.
 - `GET /api/v1/acquisition/status` reports `disabled` or `not_configured` from config without a probe. Otherwise the state comes from the live probe (`unreachable`, `auth_failed`, `reachable`, `soulseek_not_connected`, `soulseek_not_logged_in`, `ready`).
-- `acquire_unavailable` is true when acquisition is disabled, the provider is not slskd, the URL or API key is missing, or `verify_status` is not `verified`. This amendment does not enqueue searches or downloads. Soulseek username/password stay out of SmartRadio.
+- `acquire_unavailable` is true when acquisition is disabled, the provider is not slskd, the URL or API key is missing, or `verify_status` is not `verified`. This amendment does not enqueue searches or downloads. Soulseek username/password stay out of SmartRadio. Optional external slskd is documented in `docs/SLSKD.md` and is not part of the SmartRadio image.
 
 ## Process split
 
@@ -144,6 +144,7 @@ YAML (`config/subwave.yaml`) + env interpolation/overrides + `secrets/` files. N
 - Ops: `/health`, `/ready`, `/doctor` (includes `acquire_unavailable`), OpenAPI at `/openapi.json` and `/docs`
 - `GET /providers`, `GET|PUT /settings`, `GET /admin/jobs`
 - Setup/ops (Phase 4): `GET|POST /setup`, `GET /ops/overview`, `/ops/disk`, `/ops/logs`
+- Acquisition setup (A6): `GET|PUT /acquisition/settings`, `GET /acquisition/status`, `POST /acquisition/test-connection` (read-only slskd health; no search/download)
 - Admin enqueue: **ops-only** Navidrome scan, health probe, radio `refresh_playlist`
 
 Creating a request inserts `RECEIVED` (semantic `REQUESTED`) and enqueues `classify`. The worker advances the machine.
