@@ -1,6 +1,7 @@
 import type { VerifyStatus } from "@subwave-ai/shared";
 import { defaultFetch, joinUrl, readJson, type FetchLike, type ProviderHealth } from "../http.js";
 import type { AcquisitionProvider } from "../types.js";
+import { apiRoot, probeSlskdConnection } from "./probe.js";
 
 export type SoulseekProviderOptions = {
   baseUrl: string;
@@ -9,20 +10,17 @@ export type SoulseekProviderOptions = {
   verifyStatus?: VerifyStatus;
 };
 
-function apiRoot(baseUrl: string): string {
-  const trimmed = baseUrl.replace(/\/+$/, "");
-  return trimmed.endsWith("/api/v0") ? trimmed : `${trimmed}/api/v0`;
-}
-
 /** slskd-only acquisition. Other Soulseek frontends stay unverified. */
 export class SoulseekProvider implements AcquisitionProvider {
   readonly kind = "slskd" as const;
   readonly verifyStatus: VerifyStatus;
+  private readonly baseUrl: string;
   private readonly root: string;
   private readonly apiKey: string;
   private readonly fetchImpl: FetchLike;
 
   constructor(opts: SoulseekProviderOptions) {
+    this.baseUrl = opts.baseUrl;
     this.root = apiRoot(opts.baseUrl);
     this.apiKey = opts.apiKey;
     this.fetchImpl = opts.fetch ?? defaultFetch();
@@ -99,28 +97,16 @@ export class SoulseekProvider implements AcquisitionProvider {
     if (this.verifyStatus === "unverified") {
       return { ok: false, verifyStatus: this.verifyStatus, detail: "unverified adapter; not calling live endpoints", checked_at };
     }
-    try {
-      const appRes = await this.fetchImpl(joinUrl(this.root, "/application"), {
-        method: "GET",
-        headers: this.headers(),
-      });
-      await readJson(appRes);
-      const serverRes = await this.fetchImpl(joinUrl(this.root, "/server"), {
-        method: "GET",
-        headers: this.headers(),
-      });
-      const server = (await readJson(serverRes)) as { isConnected?: boolean; IsConnected?: boolean };
-      const loggedIn = server.isConnected === true || server.IsConnected === true;
-      return {
-        ok: loggedIn,
-        verifyStatus: this.verifyStatus,
-        detail: loggedIn
-          ? "GET /api/v0/application + GET /api/v0/server (connected)"
-          : "GET /api/v0/server reports not connected",
-        checked_at,
-      };
-    } catch (err) {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: (err as Error).message, checked_at };
-    }
+    const probe = await probeSlskdConnection({
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      fetch: this.fetchImpl,
+    });
+    return {
+      ok: probe.state === "ready",
+      verifyStatus: this.verifyStatus,
+      detail: probe.detail,
+      checked_at,
+    };
   }
 }

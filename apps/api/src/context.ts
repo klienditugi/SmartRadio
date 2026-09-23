@@ -9,7 +9,16 @@ import {
   upsertProvider,
   type Db,
 } from "@subwave-ai/db";
-import { publicSettings, type RuntimeConfig } from "@subwave-ai/shared";
+import {
+  loadConfig,
+  mergeAppConfigPatch,
+  publicSettings,
+  writableConfigPath,
+  writeAppConfig,
+  type AppConfig,
+  type AppConfigPatch,
+  type RuntimeConfig,
+} from "@subwave-ai/shared";
 import { hashPassword } from "./auth.js";
 import { diskReport } from "./disk.js";
 
@@ -60,18 +69,26 @@ export function syncProviders(db: Db, config: RuntimeConfig): void {
     verifyStatus: config.radio.verify_status,
     config: { base_url: config.radio.base_url, admin_user: config.radio.admin_user, provider: "subwave" },
   });
+  const slskd = config.acquisition.provider === "slskd";
   upsertProvider(db, {
     id: "acquisition-slskd",
     kind: "acquisition",
-    name: config.acquisition.provider === "slskd" ? "SoulseekProvider" : "UnverifiedAcquisitionProvider",
+    name: slskd ? "SoulseekProvider" : "UnverifiedAcquisitionProvider",
     verifyStatus: config.acquisition.verify_status,
-    enabled: config.acquisition.enabled,
-    config: {
-      base_url: config.acquisition.base_url,
-      provider: config.acquisition.provider,
-      enabled: config.acquisition.enabled,
-    },
+    enabled: config.acquisition.enabled && slskd,
+    config: { base_url: config.acquisition.base_url, provider: config.acquisition.provider },
   });
+}
+
+export function commitRuntimeConfig(app: FastifyInstance, next: AppConfig): void {
+  writeAppConfig(writableConfigPath(), next);
+  const reloaded = loadConfig({ configPath: writableConfigPath() });
+  replaceRuntimeConfig(app, reloaded);
+  syncProviders(app.db, app.config);
+}
+
+export function commitConfigPatch(app: FastifyInstance, patch: AppConfigPatch): void {
+  commitRuntimeConfig(app, mergeAppConfigPatch(app.config, patch));
 }
 
 export function replaceRuntimeConfig(app: FastifyInstance, next: RuntimeConfig): void {
@@ -86,7 +103,8 @@ export function acquisitionUnavailable(config: RuntimeConfig): boolean {
   if (config.acquisition.provider !== "slskd") return true;
   const url = config.acquisition.base_url.trim();
   const key = (config.secrets.slskdApiKey ?? "").trim();
-  return config.acquisition.verify_status !== "verified" || url.length === 0 || key.length === 0;
+  if (!url || !key) return true;
+  return config.acquisition.verify_status !== "verified";
 }
 
 export function doctorReport(db: Db, config: RuntimeConfig) {

@@ -136,6 +136,63 @@
         }
       }
     },
+    "/api/v1/acquisition/settings": {
+      "get": {
+        "tags": [
+          "acquisition"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "acquisition"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/v1/acquisition/status": {
+      "get": {
+        "tags": [
+          "acquisition"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/v1/acquisition/test-connection": {
+      "post": {
+        "tags": [
+          "acquisition"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/api/v1/requests": {
       "post": {
         "tags": [
@@ -633,6 +690,9 @@
     },
     {
       "name": "settings"
+    },
+    {
+      "name": "acquisition"
     },
     {
       "name": "admin"

@@ -44,6 +44,9 @@ importers:
       '@subwave-ai/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@subwave-ai/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@subwave-ai/shared':
         specifier: workspace:*
         version: link:../../packages/shared

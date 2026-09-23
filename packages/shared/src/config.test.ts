@@ -2,7 +2,16 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyEnvOverrides, interpolateEnv, loadConfig, nextAcquisitionConfig, parseAppConfig } from "./config.js";
+import { parse as parseYaml } from "yaml";
+import {
+  applyEnvOverrides,
+  interpolateEnv,
+  loadConfig,
+  normalizeAcquisitionSettingsPatch,
+  parseAppConfig,
+  publicSettings,
+  serializeAppConfig,
+} from "./config.js";
 import { parseClassification, parseClassificationJson, safeParseClassification } from "./classification.js";
 
 const exampleYamlObject = {
@@ -64,28 +73,6 @@ describe("config", () => {
     expect(cfg.acquisition.provider).toBe("slskd");
   });
 
-  it("defaults omitted acquisition to enabled and unverified, and allows an empty URL", () => {
-    const raw = structuredClone(exampleYamlObject);
-    delete (raw.acquisition as { verify_status?: string }).verify_status;
-    delete (raw.acquisition as { enabled?: boolean }).enabled;
-    (raw.acquisition as { base_url: string }).base_url = "";
-    const cfg = parseAppConfig(raw);
-    expect(cfg.acquisition.enabled).toBe(true);
-    expect(cfg.acquisition.verify_status).toBe("unverified");
-    expect(cfg.acquisition.base_url).toBe("");
-    expect(cfg.acquisition.provider).toBe("slskd");
-  });
-
-  it("clears acquisition verification when the URL, provider, or API key changes", () => {
-    const current = parseAppConfig(exampleYamlObject).acquisition;
-    expect(current.verify_status).toBe("verified");
-    expect(nextAcquisitionConfig(current, { base_url: "http://other.example" }, false).verify_status).toBe("unverified");
-    expect(nextAcquisitionConfig(current, { provider: "later" }, false).verify_status).toBe("unverified");
-    expect(nextAcquisitionConfig(current, { enabled: false }, false).verify_status).toBe("unverified");
-    expect(nextAcquisitionConfig(current, { enabled: true }, true).verify_status).toBe("unverified");
-    expect(nextAcquisitionConfig(current, { enabled: true }, false).verify_status).toBe("verified");
-  });
-
   it("rejects a missing LLM model (never default a model name)", () => {
     const bad = structuredClone(exampleYamlObject);
     (bad.llm as { model: string }).model = "";
@@ -143,9 +130,59 @@ acquisition:
   base_url: "http://slskd.example"
 `,
     );
+    writeFileSync(path.join(secrets, "slskd_api_key"), "super-secret-key\n");
     const loaded = loadConfig({ configPath: cfgPath });
     expect(loaded.secrets.adminPassword).toBe("test-admin-secret");
+    expect(loaded.secrets.slskdApiKey).toBe("super-secret-key");
     expect(loaded.llm.model).toBe("test-model");
+    expect(loaded.acquisition.enabled).toBe(true);
+    expect(loaded.acquisition.verify_status).toBe("unverified");
+    const pub = JSON.stringify(publicSettings(loaded));
+    expect(publicSettings(loaded).secrets_present.slskd_api_key).toBe(true);
+    expect(pub).not.toContain("super-secret-key");
+  });
+
+  it("defaults acquisition to enabled and unverified and allows an empty URL", () => {
+    const raw = structuredClone(exampleYamlObject);
+    delete (raw.acquisition as { verify_status?: string }).verify_status;
+    delete (raw.acquisition as { enabled?: boolean }).enabled;
+    (raw.acquisition as { base_url: string }).base_url = "  ";
+    const cfg = parseAppConfig(raw);
+    expect(cfg.acquisition.enabled).toBe(true);
+    expect(cfg.acquisition.verify_status).toBe("unverified");
+    expect(cfg.acquisition.base_url).toBe("");
+    expect(cfg.acquisition.provider).toBe("slskd");
+  });
+
+  it("accepts a non-slskd provider name", () => {
+    const raw = structuredClone(exampleYamlObject);
+    (raw.acquisition as { provider: string }).provider = "other-daemon";
+    expect(parseAppConfig(raw).acquisition.provider).toBe("other-daemon");
+  });
+
+  it("persists enabled and verify_status without letting a settings patch self-verify", () => {
+    const current = parseAppConfig(exampleYamlObject);
+    const sameUrl = normalizeAcquisitionSettingsPatch(current.acquisition, {
+      base_url: current.acquisition.base_url,
+      verify_status: "verified",
+      enabled: false,
+    });
+    expect(sameUrl.verify_status).toBeUndefined();
+    expect(sameUrl.enabled).toBe(false);
+    expect(normalizeAcquisitionSettingsPatch(current.acquisition, { base_url: "http://new.example" }).verify_status).toBe(
+      "unverified",
+    );
+    expect(normalizeAcquisitionSettingsPatch(current.acquisition, {}, { apiKeyChanged: true }).verify_status).toBe(
+      "unverified",
+    );
+    const saved = parseAppConfig({
+      ...current,
+      acquisition: { ...current.acquisition, enabled: false, verify_status: "unverified" as const },
+    });
+    const roundTrip = parseAppConfig(parseYaml(serializeAppConfig(saved)));
+    expect(roundTrip.acquisition.enabled).toBe(false);
+    expect(roundTrip.acquisition.verify_status).toBe("unverified");
+    expect(serializeAppConfig(saved)).not.toContain("api_key");
   });
 });
 

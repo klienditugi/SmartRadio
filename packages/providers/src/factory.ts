@@ -47,7 +47,9 @@ export function createProviders(config: RuntimeConfig, fetchImpl?: FetchLike): P
           fetch: fetchImpl,
         })
       : new UnverifiedAcquisitionProvider(
-          config.acquisition.enabled ? "only slskd is a verified acquisition provider" : "acquisition disabled",
+          config.acquisition.enabled
+            ? "only slskd is a verified acquisition provider"
+            : "acquisition is disabled",
         );
   return { llm, library, radio, acquisition };
 }

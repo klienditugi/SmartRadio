@@ -3,9 +3,9 @@ import { api } from "../api";
 import {
   acquisitionStatusLabel,
   providerOptions,
+  type AcquisitionConnectionReport,
   type AcquisitionDraft,
   type AcquisitionSettings,
-  type AcquisitionStatus,
 } from "../acquisition";
 
 type WizardProps = {
@@ -124,7 +124,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
   const [apiKey, setApiKey] = useState("");
   const [downloads, setDownloads] = useState("");
   const [library, setLibrary] = useState("");
-  const [status, setStatus] = useState<AcquisitionStatus | null>(null);
+  const [status, setStatus] = useState<AcquisitionConnectionReport | null>(null);
+  const [testedReady, setTestedReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [savedNote, setSavedNote] = useState(false);
@@ -134,8 +135,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     setEnabled(settings.enabled);
     setProvider(settings.provider || "slskd");
     setBaseUrl(settings.base_url);
-    setDownloads(settings.downloads);
-    setLibrary(settings.library);
+    setDownloads(settings.paths.downloads);
+    setLibrary(settings.paths.library);
     setApiKey("");
   }
 
@@ -145,7 +146,7 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     (async () => {
       try {
         const settings = await api<AcquisitionSettings>("/acquisition/settings");
-        const live = await api<AcquisitionStatus>("/acquisition/status");
+        const live = await api<AcquisitionConnectionReport>("/acquisition/status");
         if (cancel) return;
         applySettings(settings);
         setStatus(live);
@@ -183,8 +184,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     );
   }
 
-  const providers = providerOptions(provider, loaded?.supported_providers);
-  const apiKeyConfigured = loaded?.api_key_configured ?? false;
+  const providers = providerOptions(provider, ["slskd"]);
+  const apiKeyConfigured = loaded?.secrets_present.slskd_api_key ?? false;
 
   function patchLocal(patch: Partial<AcquisitionDraft>) {
     if (patch.enabled !== undefined) setEnabled(patch.enabled);
@@ -200,9 +201,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
       enabled,
       provider,
       base_url: baseUrl,
-      downloads,
-      library,
-      ...(apiKey ? { api_key: apiKey } : {}),
+      paths: { downloads, library },
+      ...(apiKey ? { slskd_api_key: apiKey } : {}),
     };
   }
 
@@ -213,8 +213,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
       enabled !== loaded.enabled ||
       provider !== loaded.provider ||
       baseUrl !== loaded.base_url ||
-      downloads !== loaded.downloads ||
-      library !== loaded.library
+      downloads !== loaded.paths.downloads ||
+      library !== loaded.paths.library
     );
   }
 
@@ -222,6 +222,7 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     setBusy(true);
     setError(null);
     setSavedNote(false);
+    setTestedReady(false);
     try {
       const settings = await api<AcquisitionSettings>("/acquisition/settings", {
         method: "PUT",
@@ -243,7 +244,7 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     const ok = await persist();
     if (!ok) return;
     try {
-      setStatus(await api<AcquisitionStatus>("/acquisition/status"));
+      setStatus(await api<AcquisitionConnectionReport>("/acquisition/status"));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -257,13 +258,10 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     setBusy(true);
     setError(null);
     try {
-      const live = await api<AcquisitionStatus>("/acquisition/test-connection", { method: "POST" });
+      const live = await api<AcquisitionConnectionReport>("/acquisition/test-connection", { method: "POST" });
       setStatus(live);
-      setLoaded((prev) =>
-        prev
-          ? { ...prev, verify_status: live.verify_status, api_key_configured: live.api_key_configured }
-          : prev,
-      );
+      applySettings(live.settings);
+      setTestedReady(live.state === "ready");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -295,12 +293,10 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
             <span className={statusClass(status.state)} role="status">
               {acquisitionStatusLabel(status.state)}
             </span>
-            <span className="muted">saved verification: {status.verify_status}</span>
+            <span className="muted">saved verification: {status.settings.verify_status}</span>
           </div>
           <p className="muted">{status.detail}</p>
-          {status.worker_reload_required ? (
-            <p className="muted">Restart the worker so it reloads this acquisition status.</p>
-          ) : null}
+          {testedReady ? <p className="muted">Restart the worker so it reloads verified acquisition.</p> : null}
         </div>
       ) : null}
       {savedNote ? <p className="muted">Saved. A filled-in form is not a connection. Use Test connection.</p> : null}

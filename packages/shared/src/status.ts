@@ -58,5 +58,18 @@ export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 export const VERIFY_STATUSES = ["verified", "unverified", "needs_server_inspection"] as const;
 export type VerifyStatus = (typeof VERIFY_STATUSES)[number];
 
+/** Live or config-derived acquisition connection states. Never inferred from verify_status alone while probing. */
+export const ACQUISITION_CONNECTION_STATES = [
+  "disabled",
+  "not_configured",
+  "unreachable",
+  "auth_failed",
+  "reachable",
+  "soulseek_not_connected",
+  "soulseek_not_logged_in",
+  "ready",
+] as const;
+export type AcquisitionConnectionState = (typeof ACQUISITION_CONNECTION_STATES)[number];
+
 export const USER_ROLES = ["admin", "operator", "viewer"] as const;
 export type UserRole = (typeof USER_ROLES)[number];

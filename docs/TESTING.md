@@ -13,6 +13,8 @@ pnpm --filter @subwave-ai/api openapi   # regenerates docs/openapi.json
 
 Covers packages (`core`, `shared`, `db`, `providers`) plus `apps/api` and `apps/worker`.
 
+Acquisition settings and test-connection use a mocked slskd. Those tests call only `GET /api/v0/application` and `GET /api/v0/server`. They do not install slskd or enqueue downloads. `verify_status` stays `unverified` until that probe reports application `version` plus Soulseek connected and logged in.
+
 ## Web UI
 
 ```bash

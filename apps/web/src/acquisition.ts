@@ -1,3 +1,4 @@
+/** Live `state` values from GET /api/v1/acquisition/status and POST /api/v1/acquisition/test-connection. */
 export const ACQUISITION_CONNECTION_STATES = [
   "disabled",
   "not_configured",
@@ -11,24 +12,23 @@ export const ACQUISITION_CONNECTION_STATES = [
 
 export type AcquisitionConnectionState = (typeof ACQUISITION_CONNECTION_STATES)[number];
 
+/** GET/PUT /api/v1/acquisition/settings. The API key is never part of this object. */
 export type AcquisitionSettings = {
   enabled: boolean;
   provider: string;
   base_url: string;
-  downloads: string;
-  library: string;
-  api_key_configured: boolean;
   verify_status: string;
-  supported_providers?: string[];
+  paths: { downloads: string; library: string };
+  secrets_present: { slskd_api_key: boolean };
 };
 
-export type AcquisitionStatus = {
+/** Body of GET /acquisition/status and POST /acquisition/test-connection. */
+export type AcquisitionConnectionReport = {
+  ok: boolean;
   state: string;
-  verify_status: string;
+  probed: boolean;
   detail: string;
-  checked_at: string;
-  api_key_configured: boolean;
-  worker_reload_required?: boolean;
+  settings: AcquisitionSettings;
 };
 
 export type AcquisitionDraft = {

@@ -7,18 +7,13 @@ import {
 } from "@subwave-ai/db";
 import {
   SECRET_FILES,
-  loadConfig,
-  mergeAppConfigPatch,
-  nextAcquisitionConfig,
+  normalizeAcquisitionSettingsPatch,
   publicSettings,
-  withAcquisitionVerifyStatus,
-  writableConfigPath,
-  writeAppConfig,
   writeSecretFile,
   type AppConfigPatch,
 } from "@subwave-ai/shared";
 import { hashPassword } from "../auth.js";
-import { replaceRuntimeConfig, seedAdmin, syncProviders } from "../context.js";
+import { commitConfigPatch, commitRuntimeConfig, seedAdmin } from "../context.js";
 import { requireAdmin } from "./auth.js";
 
 type SetupSecrets = {
@@ -49,7 +44,10 @@ function setupGaps(app: FastifyInstance) {
   if (!app.config.radio.base_url) missing.push("radio.base_url");
   if (!app.config.radio.admin_user) missing.push("radio.admin_user");
   if (!pub.secrets_present.subwave_admin_password) missing.push("subwave_admin_password");
-  // Acquisition is optional. Its own screen reports live status.
+  if (app.config.acquisition.enabled) {
+    if (!app.config.acquisition.base_url.trim()) missing.push("acquisition.base_url");
+    if (!pub.secrets_present.slskd_api_key) missing.push("slskd_api_key");
+  }
   const setupComplete = Boolean(getSetting(app.db, "setup_complete"));
   return {
     configured: countUsers(app.db) > 0,
@@ -61,6 +59,9 @@ function setupGaps(app: FastifyInstance) {
 }
 
 async function applySetup(app: FastifyInstance, body: SetupBody, actor?: string): Promise<void> {
+  if (body.config?.acquisition?.verify_status === "verified") {
+    throw new Error("verify_status cannot be set to verified by saving settings; use test-connection");
+  }
   const secretsDir = app.config.paths.secrets_dir;
   const secrets = body.secrets ?? {};
   if (secrets.admin_password) writeSecretFile(secretsDir, SECRET_FILES.adminPassword, secrets.admin_password);
@@ -69,26 +70,20 @@ async function applySetup(app: FastifyInstance, body: SetupBody, actor?: string)
   if (secrets.subwave_admin_password) {
     writeSecretFile(secretsDir, SECRET_FILES.subwaveAdminPassword, secrets.subwave_admin_password);
   }
-  if (secrets.slskd_api_key) writeSecretFile(secretsDir, SECRET_FILES.slskdApiKey, secrets.slskd_api_key);
+  const apiKeyChanged = Boolean(secrets.slskd_api_key?.trim());
+  if (apiKeyChanged && secrets.slskd_api_key) {
+    writeSecretFile(secretsDir, SECRET_FILES.slskdApiKey, secrets.slskd_api_key);
+  }
 
-  const wroteSlskdKey = Boolean(secrets.slskd_api_key);
-  const acquisition = nextAcquisitionConfig(app.config.acquisition, body.config?.acquisition, wroteSlskdKey);
-  const restConfig = { ...(body.config ?? {}) };
-  delete restConfig.acquisition;
-  const patch: AppConfigPatch = {
-    ...restConfig,
-    acquisition: {
-      enabled: acquisition.enabled,
-      provider: acquisition.provider,
-      base_url: acquisition.base_url,
-    },
-  };
-  const merged = withAcquisitionVerifyStatus(mergeAppConfigPatch(app.config, patch), acquisition.verify_status);
-  writeAppConfig(writableConfigPath(), merged);
-
-  const reloaded = loadConfig({ configPath: writableConfigPath() });
-  replaceRuntimeConfig(app, reloaded);
-  syncProviders(app.db, app.config);
+  let patch = body.config;
+  if (patch || apiKeyChanged) {
+    const acquisition = normalizeAcquisitionSettingsPatch(app.config.acquisition, patch?.acquisition, {
+      apiKeyChanged,
+    });
+    patch = { ...(patch ?? {}), acquisition };
+  }
+  if (patch) commitConfigPatch(app, patch);
+  else commitRuntimeConfig(app, app.config);
 
   if (secrets.admin_password && countUsers(app.db) === 0) {
     await seedAdmin(app.db, app.config);

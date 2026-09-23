@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import type { RuntimeConfig } from "@subwave-ai/shared";
 import { CLASSIFICATION_JSON_SCHEMA } from "@subwave-ai/shared";
+import { createProviders } from "./factory.js";
 import { OllamaProvider } from "./llm/ollama.js";
 import { NavidromeProvider } from "./library/navidrome.js";
 import { NeverPlayError, SubWaveProvider } from "./radio/subwave.js";
@@ -297,12 +299,12 @@ describe("SoulseekProvider (slskd)", () => {
     expect(calls[4]?.url).toBe("http://slskd.example/api/v0/transfers/downloads");
   });
 
-  it("health prefers GET /application and GET /server", async () => {
+  it("health prefers GET /application and GET /server and requires Soulseek login", async () => {
     const calls: string[] = [];
     const fetchMock: FetchLike = async (url) => {
       calls.push(String(url));
-      if (String(url).endsWith("/server")) return jsonResponse({ isConnected: true });
-      return jsonResponse({ ok: true });
+      if (String(url).endsWith("/server")) return jsonResponse({ isConnected: true, isLoggedIn: true });
+      return jsonResponse({ version: { current: "0.22.5", full: "0.22.5.0" } });
     };
     const slskd = new SoulseekProvider({
       baseUrl: "http://slskd.example",
@@ -311,10 +313,41 @@ describe("SoulseekProvider (slskd)", () => {
     });
     const health = await slskd.health();
     expect(health.ok).toBe(true);
+    expect(health.detail).toContain("connected and logged in");
     expect(calls).toEqual([
       "http://slskd.example/api/v0/application",
       "http://slskd.example/api/v0/server",
     ]);
+  });
+
+  it("health is not ok when Soulseek is connected but not logged in", async () => {
+    const fetchMock: FetchLike = async (url) => {
+      if (String(url).endsWith("/server")) return jsonResponse({ isConnected: true, isLoggedIn: false });
+      return jsonResponse({ version: { current: "0.22.5" } });
+    };
+    const slskd = new SoulseekProvider({
+      baseUrl: "http://slskd.example",
+      apiKey: "key",
+      fetch: fetchMock,
+    });
+    const health = await slskd.health();
+    expect(health.ok).toBe(false);
+    expect(health.detail).toContain("not logged in");
+  });
+
+  it("unverified SoulseekProvider does not call live endpoints", async () => {
+    const fetchMock: FetchLike = async () => {
+      throw new Error("fetch should not be called");
+    };
+    const slskd = new SoulseekProvider({
+      baseUrl: "http://slskd.example",
+      apiKey: "key",
+      verifyStatus: "unverified",
+      fetch: fetchMock,
+    });
+    const health = await slskd.health();
+    expect(health.ok).toBe(false);
+    expect(health.verifyStatus).toBe("unverified");
   });
 
   it("unverified acquisition never calls fetch", async () => {
@@ -324,5 +357,47 @@ describe("SoulseekProvider (slskd)", () => {
     const health = await unverified.health();
     expect(health.verifyStatus).toBe("unverified");
     expect(health.ok).toBe(false);
+  });
+});
+
+describe("createProviders acquisition gate", () => {
+  function runtime(acquisition: Partial<RuntimeConfig["acquisition"]>): RuntimeConfig {
+    return {
+      llm: {
+        provider: "ollama",
+        base_url: "http://ollama",
+        model: "m",
+        timeout_ms: 1000,
+        verify_status: "verified",
+      },
+      library: {
+        provider: "navidrome",
+        base_url: "http://nd",
+        username: "u",
+        client_name: "c",
+        api_version: "1.16.1",
+        verify_status: "verified",
+      },
+      radio: {
+        provider: "subwave",
+        base_url: "http://radio/api",
+        admin_user: "dj",
+        verify_status: "verified",
+      },
+      acquisition: {
+        enabled: true,
+        provider: "slskd",
+        base_url: "http://slskd.example",
+        verify_status: "verified",
+        ...acquisition,
+      },
+      secrets: { slskdApiKey: "k" },
+    } as RuntimeConfig;
+  }
+
+  it("uses Soulseek only when enabled and provider is slskd", () => {
+    expect(createProviders(runtime({})).acquisition.kind).toBe("slskd");
+    expect(createProviders(runtime({ enabled: false })).acquisition.kind).toBe("unverified");
+    expect(createProviders(runtime({ provider: "other-daemon" })).acquisition.kind).toBe("unverified");
   });
 });
