@@ -75,9 +75,13 @@ export const appConfigSchema = z.object({
     verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("verified"),
   }),
   acquisition: z.object({
-    provider: z.literal("slskd"),
-    base_url: z.string().min(1),
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("verified"),
+    /** Omitted on existing YAML stays enabled so a previously verified slskd config keeps working. */
+    enabled: z.boolean().default(true),
+    /** `slskd` is the only provider with a live check. Other names can be stored. */
+    provider: z.string().min(1).default("slskd"),
+    base_url: z.string().default(""),
+    /** Unverified until POST /acquisition/test-connection records a passing live check. */
+    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
   }),
 });
 
@@ -148,6 +152,10 @@ export function applyEnvOverrides(raw: Record<string, unknown>, env: NodeJS.Proc
 
   const acquisition = (next.acquisition ?? {}) as Record<string, unknown>;
   if (env.SLSKD_URL) set(acquisition, "base_url", env.SLSKD_URL);
+  if (env.SUBWAVE_ACQUISITION_PROVIDER) set(acquisition, "provider", env.SUBWAVE_ACQUISITION_PROVIDER);
+  if (env.SUBWAVE_ACQUISITION_ENABLED === "true" || env.SUBWAVE_ACQUISITION_ENABLED === "false") {
+    set(acquisition, "enabled", env.SUBWAVE_ACQUISITION_ENABLED === "true");
+  }
   next.acquisition = acquisition;
 
   return next;
@@ -250,6 +258,7 @@ export function publicSettings(config: RuntimeConfig) {
       verify_status: config.radio.verify_status,
     },
     acquisition: {
+      enabled: config.acquisition.enabled,
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
       verify_status: config.acquisition.verify_status,
@@ -281,8 +290,49 @@ export type AppConfigPatch = {
   llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms">>;
   library?: Partial<Pick<AppConfig["library"], "base_url" | "username">>;
   radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user">>;
-  acquisition?: Partial<Pick<AppConfig["acquisition"], "base_url">>;
+  acquisition?: Partial<Pick<AppConfig["acquisition"], "enabled" | "provider" | "base_url">>;
 };
+
+export type AcquisitionSettingsInput = {
+  enabled?: boolean;
+  provider?: string;
+  base_url?: string;
+};
+
+/**
+ * Public acquisition writes. Client `verify_status` is not accepted.
+ * URL, provider, a new API key, or turning acquisition off clears verification.
+ */
+export function nextAcquisitionConfig(
+  current: AppConfig["acquisition"],
+  input: AcquisitionSettingsInput | undefined,
+  wroteApiKey: boolean,
+): AppConfig["acquisition"] {
+  const enabled = typeof input?.enabled === "boolean" ? input.enabled : current.enabled;
+  const provider =
+    typeof input?.provider === "string" && input.provider.trim() ? input.provider.trim() : current.provider;
+  const base_url = typeof input?.base_url === "string" ? input.base_url.trim() : current.base_url;
+  const providerChanged = typeof input?.provider === "string" && provider !== current.provider;
+  const urlChanged = typeof input?.base_url === "string" && base_url !== current.base_url.trim();
+  const turnedOff = input?.enabled === false && current.enabled;
+  const resetVerify = wroteApiKey || providerChanged || urlChanged || turnedOff;
+  return {
+    enabled,
+    provider,
+    base_url,
+    verify_status: resetVerify ? "unverified" : current.verify_status,
+  };
+}
+
+export function withAcquisitionVerifyStatus(
+  config: AppConfig,
+  verify_status: AppConfig["acquisition"]["verify_status"],
+): AppConfig {
+  return parseAppConfig({
+    ...config,
+    acquisition: { ...config.acquisition, verify_status },
+  });
+}
 
 export function mergeAppConfigPatch(base: AppConfig, patch: AppConfigPatch): AppConfig {
   const next = structuredClone(base) as AppConfig;
@@ -295,7 +345,12 @@ export function mergeAppConfigPatch(base: AppConfig, patch: AppConfigPatch): App
   if (patch.llm) Object.assign(next.llm, patch.llm);
   if (patch.library) Object.assign(next.library, patch.library);
   if (patch.radio) Object.assign(next.radio, patch.radio);
-  if (patch.acquisition) Object.assign(next.acquisition, patch.acquisition);
+  if (patch.acquisition) {
+    const { enabled, provider, base_url } = patch.acquisition;
+    if (enabled !== undefined) next.acquisition.enabled = enabled;
+    if (provider !== undefined) next.acquisition.provider = provider;
+    if (base_url !== undefined) next.acquisition.base_url = base_url;
+  }
   return parseAppConfig(next);
 }
 
@@ -330,6 +385,7 @@ export function serializeAppConfig(config: AppConfig): string {
       verify_status: config.radio.verify_status,
     },
     acquisition: {
+      enabled: config.acquisition.enabled,
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
       verify_status: config.acquisition.verify_status,

@@ -73,10 +73,11 @@ radio:
   admin_user: "${SUBWAVE_RADIO_ADMIN_USER}"
   verify_status: verified
 
-# Optional until a verified download daemon exists (none on the Oracle VM as of A3).
-# Unverified → doctor.acquire_unavailable. Landing dir is config-only (live example: /music/downloads).
-# A5: when verify_status is verified and slskd is reachable, acquisition runs end-to-end; otherwise SmartRadio still runs.
+# Optional external slskd. Turn this on in the setup UI; do not hand-set verify_status to verified.
+# A live Test connection (GET /api/v0/application + GET /api/v0/server) is what marks it verified.
+# Soulseek username/password belong to slskd, not this file. See docs/SLSKD.md.
 acquisition:
+  enabled: false
   provider: slskd
   base_url: "${SLSKD_URL}"
   verify_status: unverified

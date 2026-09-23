@@ -140,6 +140,8 @@ tr.clickable:hover { background: #1b2631; }
 
 .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.8rem; }
 .field span { color: var(--muted); font-size: 0.82rem; }
+.field.check { flex-direction: row; align-items: center; gap: 0.6rem; }
+.field.check input { width: auto; }
 input, select, textarea {
   background: #0d131a;
   border: 1px solid var(--line);

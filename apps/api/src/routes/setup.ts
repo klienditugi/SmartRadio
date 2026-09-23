@@ -9,7 +9,9 @@ import {
   SECRET_FILES,
   loadConfig,
   mergeAppConfigPatch,
+  nextAcquisitionConfig,
   publicSettings,
+  withAcquisitionVerifyStatus,
   writableConfigPath,
   writeAppConfig,
   writeSecretFile,
@@ -47,8 +49,7 @@ function setupGaps(app: FastifyInstance) {
   if (!app.config.radio.base_url) missing.push("radio.base_url");
   if (!app.config.radio.admin_user) missing.push("radio.admin_user");
   if (!pub.secrets_present.subwave_admin_password) missing.push("subwave_admin_password");
-  if (!app.config.acquisition.base_url) missing.push("acquisition.base_url");
-  if (!pub.secrets_present.slskd_api_key) missing.push("slskd_api_key");
+  // Acquisition is optional. Its own screen reports live status.
   const setupComplete = Boolean(getSetting(app.db, "setup_complete"));
   return {
     configured: countUsers(app.db) > 0,
@@ -70,12 +71,20 @@ async function applySetup(app: FastifyInstance, body: SetupBody, actor?: string)
   }
   if (secrets.slskd_api_key) writeSecretFile(secretsDir, SECRET_FILES.slskdApiKey, secrets.slskd_api_key);
 
-  if (body.config) {
-    const merged = mergeAppConfigPatch(app.config, body.config);
-    writeAppConfig(writableConfigPath(), merged);
-  } else {
-    writeAppConfig(writableConfigPath(), app.config);
-  }
+  const wroteSlskdKey = Boolean(secrets.slskd_api_key);
+  const acquisition = nextAcquisitionConfig(app.config.acquisition, body.config?.acquisition, wroteSlskdKey);
+  const restConfig = { ...(body.config ?? {}) };
+  delete restConfig.acquisition;
+  const patch: AppConfigPatch = {
+    ...restConfig,
+    acquisition: {
+      enabled: acquisition.enabled,
+      provider: acquisition.provider,
+      base_url: acquisition.base_url,
+    },
+  };
+  const merged = withAcquisitionVerifyStatus(mergeAppConfigPatch(app.config, patch), acquisition.verify_status);
+  writeAppConfig(writableConfigPath(), merged);
 
   const reloaded = loadConfig({ configPath: writableConfigPath() });
   replaceRuntimeConfig(app, reloaded);

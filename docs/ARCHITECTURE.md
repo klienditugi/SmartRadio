@@ -79,11 +79,24 @@ Playback handoff continues to use the verified admin APIs under the opaque `/api
 - False-complete removed: one empty poll (or an unrelated transfer) must not advance to `DOWNLOAD_COMPLETE`.
 - Portable: no hard-coded Oracle paths; acquisition stays optional with `acquire_unavailable`.
 
+## Amendment A6 (setup UI + live verify, phases B and C)
+
+Acquisition stays optional and is configured from the setup wizard and Settings. Operators do not hand-edit YAML for a normal slskd setup.
+
+- Settings: `enabled`, `provider` (`slskd` today; other names can be stored), `base_url`, `paths.downloads`, `paths.library`, write-only API key in `secrets/slskd_api_key`. Responses expose `api_key_configured` only.
+- `GET /api/v1/acquisition/settings`, `PUT /api/v1/acquisition/settings`, `GET /api/v1/acquisition/status`, `POST /api/v1/acquisition/test-connection`.
+- Test connection is read-only: slskd `GET /api/v0/application` and `GET /api/v0/server` with `X-API-Key`. It does not search or enqueue downloads.
+- `verify_status: verified` is written only when that probe reports Soulseek `isConnected` and `isLoggedIn`. Saving the URL or key, or `POST /setup`, cannot set verified. Changing the URL, provider, or key, or turning acquisition off, sets `unverified`.
+- Live `state`: `disabled`, `not_configured`, `unreachable`, `auth_failed`, `reachable`, `soulseek_not_connected`, `soulseek_not_logged_in`, `ready`. `GET /status` does not persist verification.
+- `acquisitionUnavailable` is true when acquisition is disabled, the provider is not `slskd`, the URL or key is missing, or `verify_status` is not `verified`.
+- The worker loads config at process start. Restart it after a successful test so acquisition jobs see `verified`.
+- Soulseek username and password stay in slskd. An external slskd process is documented in `docs/SLSKD.md` and is not part of the SmartRadio image.
+
 ## Process split
 
 | Process | Responsibility |
 | --- | --- |
-| `apps/api` | Auth, CRUD, enqueue jobs, OpenAPI. Binds `127.0.0.1` by default. Does **not** call LLM/library/acquisition/radio except to persist config. |
+| `apps/api` | Auth, CRUD, enqueue jobs, OpenAPI. Binds `127.0.0.1` by default. Does **not** call LLM/library/radio except to persist config. The admin acquisition test is the one read-only slskd exception (`GET /api/v0/application` and `GET /api/v0/server` only). |
 | `apps/worker` | Claims leased jobs. Owns LLM classification, library search, optional acquisition, SUB/WAVE playback handoff, live health probes, and the file flow. Does not own DJ copy/voice. |
 | `apps/web` | Vite/React operator console (same origin in production). |
 
@@ -137,6 +150,7 @@ YAML (`config/subwave.yaml`) + env interpolation/overrides + `secrets/` files. N
 - Ops: `/health`, `/ready`, `/doctor` (includes `acquire_unavailable`), OpenAPI at `/openapi.json` and `/docs`
 - `GET /providers`, `GET|PUT /settings`, `GET /admin/jobs`
 - Setup/ops (Phase 4): `GET|POST /setup`, `GET /ops/overview`, `/ops/disk`, `/ops/logs`
+- Acquisition setup (A6): `GET|PUT /acquisition/settings`, `GET /acquisition/status`, `POST /acquisition/test-connection` (read-only slskd health; no search/download)
 - Admin enqueue: **ops-only** Navidrome scan, health probe, radio `refresh_playlist`
 
 Creating a request inserts `RECEIVED` (semantic `REQUESTED`) and enqueues `classify`. The worker advances the machine.

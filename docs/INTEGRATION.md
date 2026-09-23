@@ -75,6 +75,7 @@ Success body: `{ ok, mode, kind, spoken, sfx }`.
 - HTTP `/api/v0`, default port `:5030` **when a slskd exists**
 - Auth: `X-API-Key` or session JWT
 - Health (when verifying): `GET /application` + `GET /server`
+- Admin test connection (`POST /api/v1/acquisition/test-connection`) calls only those two GETs with `X-API-Key`. `verify_status: verified` is stored only when the server body has `isConnected: true` and `isLoggedIn: true`. The call does not search or download. See `docs/SLSKD.md` for running slskd outside this app.
 - Search: `POST /searches` `{ id, searchText }`, then poll `GET /searches/{id}?includeResponses=true` (fallback `GET /searches/{id}/responses`) until complete
 - Select a usable file `{ username, filename, size }` in an isolated selection module
 - Download: `POST /transfers/downloads/{username}` body `[{filename,size}]`

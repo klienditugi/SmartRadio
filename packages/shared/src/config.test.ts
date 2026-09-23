@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyEnvOverrides, interpolateEnv, loadConfig, parseAppConfig } from "./config.js";
+import { applyEnvOverrides, interpolateEnv, loadConfig, nextAcquisitionConfig, parseAppConfig } from "./config.js";
 import { parseClassification, parseClassificationJson, safeParseClassification } from "./classification.js";
 
 const exampleYamlObject = {
@@ -62,6 +62,28 @@ describe("config", () => {
     expect(cfg.library.provider).toBe("navidrome");
     expect(cfg.radio.provider).toBe("subwave");
     expect(cfg.acquisition.provider).toBe("slskd");
+  });
+
+  it("defaults omitted acquisition to enabled and unverified, and allows an empty URL", () => {
+    const raw = structuredClone(exampleYamlObject);
+    delete (raw.acquisition as { verify_status?: string }).verify_status;
+    delete (raw.acquisition as { enabled?: boolean }).enabled;
+    (raw.acquisition as { base_url: string }).base_url = "";
+    const cfg = parseAppConfig(raw);
+    expect(cfg.acquisition.enabled).toBe(true);
+    expect(cfg.acquisition.verify_status).toBe("unverified");
+    expect(cfg.acquisition.base_url).toBe("");
+    expect(cfg.acquisition.provider).toBe("slskd");
+  });
+
+  it("clears acquisition verification when the URL, provider, or API key changes", () => {
+    const current = parseAppConfig(exampleYamlObject).acquisition;
+    expect(current.verify_status).toBe("verified");
+    expect(nextAcquisitionConfig(current, { base_url: "http://other.example" }, false).verify_status).toBe("unverified");
+    expect(nextAcquisitionConfig(current, { provider: "later" }, false).verify_status).toBe("unverified");
+    expect(nextAcquisitionConfig(current, { enabled: false }, false).verify_status).toBe("unverified");
+    expect(nextAcquisitionConfig(current, { enabled: true }, true).verify_status).toBe("unverified");
+    expect(nextAcquisitionConfig(current, { enabled: true }, false).verify_status).toBe("verified");
   });
 
   it("rejects a missing LLM model (never default a model name)", () => {

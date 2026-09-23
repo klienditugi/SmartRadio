@@ -63,9 +63,14 @@ export function syncProviders(db: Db, config: RuntimeConfig): void {
   upsertProvider(db, {
     id: "acquisition-slskd",
     kind: "acquisition",
-    name: "SoulseekProvider",
+    name: config.acquisition.provider === "slskd" ? "SoulseekProvider" : "UnverifiedAcquisitionProvider",
     verifyStatus: config.acquisition.verify_status,
-    config: { base_url: config.acquisition.base_url, provider: "slskd" },
+    enabled: config.acquisition.enabled,
+    config: {
+      base_url: config.acquisition.base_url,
+      provider: config.acquisition.provider,
+      enabled: config.acquisition.enabled,
+    },
   });
 }
 
@@ -77,6 +82,8 @@ export function replaceRuntimeConfig(app: FastifyInstance, next: RuntimeConfig):
 }
 
 export function acquisitionUnavailable(config: RuntimeConfig): boolean {
+  if (!config.acquisition.enabled) return true;
+  if (config.acquisition.provider !== "slskd") return true;
   const url = config.acquisition.base_url.trim();
   const key = (config.secrets.slskdApiKey ?? "").trim();
   return config.acquisition.verify_status !== "verified" || url.length === 0 || key.length === 0;

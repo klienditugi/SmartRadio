@@ -11,6 +11,7 @@ import { registerRequestRoutes } from "./routes/requests.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerOpsRoutes } from "./routes/ops.js";
 import { registerSetupRoutes } from "./routes/setup.js";
+import { registerAcquisitionRoutes } from "./routes/acquisition.js";
 import { seedAdmin, syncProviders } from "./context.js";
 import { registerWebUi } from "./web.js";
 
@@ -63,6 +64,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
       await registerHealthRoutes(scoped);
       await registerAuthRoutes(scoped);
       await registerSetupRoutes(scoped);
+      await registerAcquisitionRoutes(scoped);
       await registerRequestRoutes(scoped);
       await registerAdminRoutes(scoped);
       await registerOpsRoutes(scoped);

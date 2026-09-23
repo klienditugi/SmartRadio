@@ -43,6 +43,15 @@ export {
   serializeAppConfig,
   writeAppConfig,
   mergeAppConfigPatch,
+  nextAcquisitionConfig,
+  withAcquisitionVerifyStatus,
   writableConfigPath,
 } from "./config.js";
-export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions, AppConfigPatch } from "./config.js";
+export type {
+  StationPolicy,
+  AppConfig,
+  RuntimeConfig,
+  LoadConfigOptions,
+  AppConfigPatch,
+  AcquisitionSettingsInput,
+} from "./config.js";
