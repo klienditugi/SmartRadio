@@ -25,6 +25,14 @@ export type { OllamaProviderOptions } from "./llm/ollama.js";
 export type { NavidromeProviderOptions } from "./library/navidrome.js";
 export type { SubWaveProviderOptions } from "./radio/subwave.js";
 export type { SoulseekProviderOptions } from "./acquisition/slskd.js";
+export {
+  apiRoot,
+  acquisitionLiveProbeDecision,
+  probeSlskdConnection,
+  isSlskdApplicationHealthy,
+  readSoulseekServer,
+} from "./acquisition/probe.js";
+export type { SlskdProbe, SlskdProbeChecks } from "./acquisition/probe.js";
 export { extractTransferProgress } from "./acquisition/progress.js";
 export type { TransferProgress } from "./acquisition/progress.js";
 export { selectSearchResult, isSearchComplete } from "./acquisition/select.js";

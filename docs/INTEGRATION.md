@@ -74,10 +74,24 @@ Success body: `{ ok, mode, kind, spoken, sfx }`.
 
 - HTTP `/api/v0`, default port `:5030` **when a slskd exists**
 - Auth: `X-API-Key` or session JWT
-- Health (when verifying): `GET /application` + `GET /server`
+- Health (when verifying): `GET /application` + `GET /server`. Ready requires application `version` plus Soulseek `isConnected` and `isLoggedIn` (or `state` flags). `isConnected` alone is not logged in.
 - Search: `POST /searches` `{ id, searchText }`, then poll `GET /searches/{id}?includeResponses=true` (fallback `GET /searches/{id}/responses`) until complete
 - Select a usable file `{ username, filename, size }` in an isolated selection module
 - Download: `POST /transfers/downloads/{username}` body `[{filename,size}]`
 - Poll `GET /transfers/downloads` until the **correlated** transfer is **Completed** and **Succeeded** (not Errored); then resolve the real file under configured `paths.downloads`
 - If not slskd, leave unverified — do not invent other APIs
-- **Optional:** SmartRadio runs with acquisition unset/unverified → doctor/`acquire_unavailable`. No Oracle/ARM64 requirements in app code. Landing dir is config-only (live example `/music/downloads`).
+- **Optional:** SmartRadio runs with acquisition disabled, unset, or unverified → doctor/`acquire_unavailable`. No Oracle/ARM64 requirements in app code. Landing dir is config-only (live example `/music/downloads`).
+- Soulseek username and password are **not** SmartRadio settings. slskd keeps them. SmartRadio stores only `secrets/slskd_api_key`.
+
+## A6 acquisition settings (no download enqueue)
+
+Admin session required. Responses never include the API key — only `secrets_present.slskd_api_key: boolean`.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/api/v1/acquisition/settings` | `enabled`, `provider` (`slskd`, other names allowed), `base_url`, `paths.downloads`, `paths.library`, `verify_status`, `secrets_present.slskd_api_key` |
+| `PUT` | `/api/v1/acquisition/settings` | Same fields plus write-only `slskd_api_key`. Does **not** set `verified`. Changing provider, base URL, or API key sets `unverified`. |
+| `POST` | `/api/v1/acquisition/test-connection` | Read-only `GET /api/v0/application` and `GET /api/v0/server` with `X-API-Key`. No search or download. Sets `verified` only when the host is reachable, auth succeeds, application JSON includes `version`, and Soulseek is connected and logged in (`isConnected` and `isLoggedIn`, or server `state` flags). Otherwise persists `unverified`. |
+| `GET` | `/api/v1/acquisition/status` | `disabled`, `not_configured`, `unreachable`, `auth_failed`, `reachable`, `soulseek_not_connected`, `soulseek_not_logged_in`, or `ready`. Disabled and not-configured come from config and do not call slskd. Every other state is the live probe, not a copy of saved `verify_status`. |
+
+`POST /api/v1/setup` accepts `config.acquisition.enabled`, `provider`, `base_url`, and `paths.downloads` / `paths.library`, and `secrets.slskd_api_key`. It can persist `verify_status` of `unverified` or `needs_server_inspection`. It cannot set `verified`.

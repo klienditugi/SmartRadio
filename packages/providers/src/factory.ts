@@ -39,13 +39,17 @@ export function createProviders(config: RuntimeConfig, fetchImpl?: FetchLike): P
     fetch: fetchImpl,
   });
   const acquisition =
-    config.acquisition.provider === "slskd"
+    config.acquisition.enabled && config.acquisition.provider === "slskd"
       ? new SoulseekProvider({
           baseUrl: config.acquisition.base_url,
           apiKey: config.secrets.slskdApiKey ?? "",
           verifyStatus: config.acquisition.verify_status,
           fetch: fetchImpl,
         })
-      : new UnverifiedAcquisitionProvider();
+      : new UnverifiedAcquisitionProvider(
+          config.acquisition.enabled
+            ? "only slskd is a verified acquisition provider"
+            : "acquisition is disabled",
+        );
   return { llm, library, radio, acquisition };
 }

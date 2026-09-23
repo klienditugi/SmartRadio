@@ -79,11 +79,18 @@ Playback handoff continues to use the verified admin APIs under the opaque `/api
 - False-complete removed: one empty poll (or an unrelated transfer) must not advance to `DOWNLOAD_COMPLETE`.
 - Portable: no hard-coded Oracle paths; acquisition stays optional with `acquire_unavailable`.
 
+## Amendment A6 (acquisition settings)
+
+- Admin settings persist `acquisition.enabled`, `provider` (slskd, extensible), `base_url`, and `paths.downloads` / `paths.library`. The API key is write-only at `secrets/slskd_api_key`. Responses expose `secrets_present.slskd_api_key` only.
+- `verify_status: verified` is written only by `POST /api/v1/acquisition/test-connection` after read-only `GET /api/v0/application` and `GET /api/v0/server` show a healthy application and a connected, logged-in Soulseek session. Saving a URL and key does not verify.
+- `GET /api/v1/acquisition/status` reports `disabled` or `not_configured` from config without a probe. Otherwise the state comes from the live probe (`unreachable`, `auth_failed`, `reachable`, `soulseek_not_connected`, `soulseek_not_logged_in`, `ready`).
+- `acquire_unavailable` is true when acquisition is disabled, the provider is not slskd, the URL or API key is missing, or `verify_status` is not `verified`. This amendment does not enqueue searches or downloads. Soulseek username/password stay out of SmartRadio.
+
 ## Process split
 
 | Process | Responsibility |
 | --- | --- |
-| `apps/api` | Auth, CRUD, enqueue jobs, OpenAPI. Binds `127.0.0.1` by default. Does **not** call LLM/library/acquisition/radio except to persist config. |
+| `apps/api` | Auth, CRUD, enqueue jobs, OpenAPI. Binds `127.0.0.1` by default. Does **not** call LLM, library, or radio. Acquisition calls are limited to admin test-connection and status: read-only `GET /api/v0/application` and `GET /api/v0/server`. No search or download. |
 | `apps/worker` | Claims leased jobs. Owns LLM classification, library search, optional acquisition, SUB/WAVE playback handoff, live health probes, and the file flow. Does not own DJ copy/voice. |
 | `apps/web` | Vite/React operator console (same origin in production). |
 
