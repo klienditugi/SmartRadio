@@ -7,6 +7,7 @@ export {
   JOB_STATUSES,
   PROVIDER_KINDS,
   VERIFY_STATUSES,
+  ACQUISITION_CONNECTION_STATES,
   USER_ROLES,
 } from "./status.js";
 export type {
@@ -15,6 +16,7 @@ export type {
   JobStatus,
   ProviderKind,
   VerifyStatus,
+  AcquisitionConnectionState,
   UserRole,
 } from "./status.js";
 
@@ -43,6 +45,7 @@ export {
   serializeAppConfig,
   writeAppConfig,
   mergeAppConfigPatch,
+  normalizeAcquisitionSettingsPatch,
   writableConfigPath,
 } from "./config.js";
 export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions, AppConfigPatch } from "./config.js";

@@ -11,19 +11,32 @@ import { registerRequestRoutes } from "./routes/requests.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerOpsRoutes } from "./routes/ops.js";
 import { registerSetupRoutes } from "./routes/setup.js";
+import { registerAcquisitionRoutes } from "./routes/acquisition.js";
 import { seedAdmin, syncProviders } from "./context.js";
 import { registerWebUi } from "./web.js";
 
 export type BuildAppOptions = {
   config: RuntimeConfig;
   db: Db;
-  logger?: boolean;
+  logger?: boolean | Record<string, unknown>;
   serveWeb?: boolean;
 };
 
+const SECRET_LOG_REDACT = [
+  "req.body.slskd_api_key",
+  "req.body.secrets.slskd_api_key",
+  'req.headers["x-api-key"]',
+];
+
+function buildLogger(logger: BuildAppOptions["logger"]): boolean | Record<string, unknown> {
+  if (!logger) return false;
+  if (logger === true) return { redact: SECRET_LOG_REDACT };
+  return { ...logger, redact: SECRET_LOG_REDACT };
+}
+
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: opts.logger ?? false,
+    logger: buildLogger(opts.logger),
   });
   app.decorate("config", opts.config);
   app.decorate("db", opts.db);
@@ -50,6 +63,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         { name: "ops" },
         { name: "providers" },
         { name: "settings" },
+        { name: "acquisition" },
         { name: "admin" },
       ],
     },
@@ -63,6 +77,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
       await registerHealthRoutes(scoped);
       await registerAuthRoutes(scoped);
       await registerSetupRoutes(scoped);
+      await registerAcquisitionRoutes(scoped);
       await registerRequestRoutes(scoped);
       await registerAdminRoutes(scoped);
       await registerOpsRoutes(scoped);

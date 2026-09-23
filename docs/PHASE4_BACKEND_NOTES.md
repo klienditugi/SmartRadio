@@ -14,3 +14,7 @@ Amendment **A3** is documentation-first. Amendment **A4** (later) binds notify t
 8. **Radio events** — semantic `REQUEST_ACCEPTED` and `TRACK_READY` only. A4 notify is admin `POST /dj/say` (`mode: "styled"`, context text only). `TRACK_READY` order is search-visible → say → `/dj/queue-track`. Playback stays on `/dj/search` + `/dj/queue-track`. No DJ personality in SmartRadio. `acquire_unavailable` still means no download daemon and no `REQUEST_ACCEPTED`.
 
 No live production URLs or credentials were added to source. Oracle examples (`127.0.0.1:7700/api`, Tailscale Ollama, `/music/downloads`, `/music/library`) live in docs only.
+
+## A6 acquisition settings
+
+`GET/PUT /api/v1/acquisition/settings`, `POST /api/v1/acquisition/test-connection`, and `GET /api/v1/acquisition/status` back the setup/admin UI. The API key is write-only (`secrets/slskd_api_key`); clients see `secrets_present.slskd_api_key` only. `verified` is persisted only after the read-only application + server probe passes (reachable, auth OK, application `version`, Soulseek `isConnected` and `isLoggedIn`). Saving settings does not verify and does not enqueue downloads. `enabled: false`, a missing URL/key, a non-slskd provider, or `unverified` keeps `acquire_unavailable`. Soulseek username/password are not SmartRadio config.
