@@ -19,3 +19,7 @@ secrets/*
 .idea/
 backups/
 apps/web/dist/
+# Runtime dirs created by deploy/slskd/install-slskd.sh (defaults only).
+deploy/slskd/state/
+deploy/slskd/downloads/
+deploy/slskd/incomplete/

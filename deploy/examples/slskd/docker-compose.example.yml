@@ -1,4 +1,5 @@
-# Optional example: slskd beside SmartRadio. Not part of the SmartRadio image
+# Sketch only. The runnable example is deploy/slskd/docker-compose.yml
+# (persistent /app, install-slskd.sh). Not part of the SmartRadio image
 # and not referenced by deploy/docker-compose.yml.
 #
 # Completed downloads (SLSKD_COMPLETE_DIR) must be the directory SmartRadio uses

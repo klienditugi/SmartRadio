@@ -89,7 +89,7 @@ Relative `./data/downloads` and `./data/library` in the example yaml are **local
 
 ## Optional external slskd
 
-SmartRadio does not install or contain slskd. To run slskd yourself and point the setup UI at it, see `docs/SLSKD.md`. Completed downloads must be the directory SmartRadio uses as `paths.downloads`. Incomplete downloads stay on a different directory. slskd must not write the library directory. Soulseek username and password are slskd settings, not SmartRadio settings.
+SmartRadio does not install or contain slskd. `./install.sh` and the app image do not start it. A portable compose example and `deploy/slskd/install-slskd.sh` are in `deploy/slskd/` (see `docs/SLSKD.md`). Completed downloads must be the directory SmartRadio uses as `paths.downloads`. Incomplete downloads stay on a different directory. slskd must not write the library directory. Soulseek username and password are slskd secrets in that example's `.env`, not SmartRadio settings. After it is up, set `SLSKD_URL` and paste the API key in the setup UI (`secrets/slskd_api_key`), then run **Test connection**.
 
 ## Health
 

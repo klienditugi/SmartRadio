@@ -13,4 +13,5 @@
 #
 # Music must never live only in the container writable layer.
 # Ollama is not started here. slskd is not a service in this file.
-# Optional external slskd examples: docs/SLSKD.md and deploy/examples/slskd/.
+# Optional external slskd: deploy/slskd/ (not part of the SmartRadio image).
+# See docs/SLSKD.md. deploy/examples/slskd/ is a sketch, not the installer.
