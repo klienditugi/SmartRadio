@@ -105,10 +105,12 @@ describe("first boot without Navidrome or SUB/WAVE", () => {
     const unverified = await app.inject({ method: "GET", url: "/api/v1/doctor" });
     expect(unverified.json().integrations.library.state).toBe("configured_unverified");
     expect(unverified.json().integrations.library.detail).toBe("configured but unverified, run test connection");
+    const fingerprint = integrationConfigFingerprint(app.config, "library");
+    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
     upsertIntegrationCheck(db, {
       integration: "library",
       state: "ready",
-      fingerprint: integrationConfigFingerprint(app.config, "library"),
+      fingerprint: fingerprint as string,
       testedAt: Date.now(),
     });
     applyStoredVerification(app.config, listIntegrationChecks(db));

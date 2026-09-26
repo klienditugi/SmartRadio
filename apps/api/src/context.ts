@@ -105,12 +105,15 @@ export function commitRuntimeConfig(app: FastifyInstance, next: AppConfig): void
 
 /** Persist a test-connection probe. `ready` is the only state that verifies the current fingerprint. */
 export function recordIntegrationProbe(app: FastifyInstance, integration: IntegrationName, state: string): void {
-  upsertIntegrationCheck(app.db, {
-    integration,
-    state,
-    fingerprint: integrationConfigFingerprint(app.config, integration),
-    testedAt: Date.now(),
-  });
+  const fingerprint = integrationConfigFingerprint(app.config, integration);
+  if (fingerprint) {
+    upsertIntegrationCheck(app.db, {
+      integration,
+      state,
+      fingerprint,
+      testedAt: Date.now(),
+    });
+  }
   applyStoredVerification(app.config, listIntegrationChecks(app.db));
   syncProviders(app.db, app.config);
 }

@@ -1,9 +1,12 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { listIntegrationChecks } from "@subwave-ai/db";
 import { createProviders } from "@subwave-ai/providers";
-import { loadConfig, resetDeprecatedVerifyStatusWarning } from "@subwave-ai/shared";
+import { loadConfig, resetDeprecatedVerifyStatusWarning, SECRET_FILES } from "@subwave-ai/shared";
 import { buildApp } from "./app.js";
 import { testConfig, testDb } from "./test-harness.js";
 
@@ -296,5 +299,99 @@ describe("integration test-connection", () => {
     });
     expect(JSON.stringify(afterSecret.json())).not.toContain("rotated-library-secret");
     expect(JSON.stringify(afterSecret.json())).not.toContain("library-secret");
+  });
+
+  it("omits the fingerprint from responses and unverifies every integration when the hmac key rotates", async () => {
+    const logs: string[] = [];
+    const stream = new Writable({
+      write(chunk, _encoding, callback) {
+        logs.push(String(chunk));
+        callback();
+      },
+    });
+    const loaded = upgradeConfig();
+    const db = testDb(loaded.config);
+    const app = await buildApp({
+      config: loaded.config,
+      db,
+      serveWeb: false,
+      logger: { level: "info", stream },
+    });
+    fixtures.push(() => {
+      void app.close();
+      loaded.cleanup();
+    });
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "admin", password: "test-admin-password" },
+    });
+    const headers = { authorization: `Bearer ${(login.json() as { token: string }).token}` };
+    vi.stubGlobal("fetch", async (url: string | URL) => {
+      if (String(url).endsWith("/api/tags")) return jsonResponse({ models: [{ name: "station-model" }] });
+      return jsonResponse({ error: "unexpected" }, 500);
+    });
+
+    const tested = await app.inject({ method: "POST", url: "/api/v1/llm/test-connection", headers });
+    expect(tested.json()).toMatchObject({ ok: true, state: "ready" });
+    expect(app.config.llm.verify_status).toBe("verified");
+    const stored = listIntegrationChecks(db).find((row) => row.integration === "llm");
+    expect(stored?.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    const fingerprint = stored?.fingerprint ?? "";
+    const key = app.config.secrets.verificationHmacKey;
+    expect(key?.length).toBe(32);
+    const hidden = [fingerprint, "fingerprint", key?.toString("hex") ?? "", key?.toString("base64") ?? ""];
+
+    const responses = await Promise.all([
+      app.inject({ method: "GET", url: "/api/v1/llm/status", headers }),
+      app.inject({ method: "GET", url: "/api/v1/library/status", headers }),
+      app.inject({ method: "GET", url: "/api/v1/radio/status", headers }),
+      app.inject({ method: "GET", url: "/api/v1/acquisition/status", headers }),
+      app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers }),
+      app.inject({ method: "GET", url: "/api/v1/setup", headers }),
+      app.inject({ method: "GET", url: "/api/v1/settings", headers }),
+      app.inject({ method: "GET", url: "/api/v1/doctor" }),
+    ]);
+    for (const response of [tested, ...responses]) {
+      const text = `${response.body}${JSON.stringify(response.json())}`;
+      for (const secret of hidden) {
+        expect(secret.length).toBeGreaterThan(0);
+        expect(text).not.toContain(secret);
+      }
+    }
+    const logged = logs.join("\n");
+    for (const secret of hidden) expect(logged).not.toContain(secret);
+
+    const keyPath = path.join(app.config.paths.secrets_dir, SECRET_FILES.verificationHmacKey);
+    writeFileSync(keyPath, randomBytes(32), { mode: 0o600 });
+    const rotated = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup",
+      headers,
+      payload: { config: { llm: { timeout_ms: 120000 } } },
+    });
+    expect(rotated.statusCode).toBe(200);
+    expect(app.config.llm.verify_status).toBe("unverified");
+    expect(JSON.stringify(rotated.json())).not.toContain(fingerprint);
+    const afterRotate = await app.inject({ method: "GET", url: "/api/v1/llm/status", headers });
+    expect(afterRotate.json()).toMatchObject({
+      state: "configured_unverified",
+      detail: "configured but unverified, run test connection",
+    });
+    const doctor = await app.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(doctor.json().integrations.llm.state).toBe("configured_unverified");
+    expect(JSON.stringify(doctor.json())).not.toContain(fingerprint);
+
+    unlinkSync(keyPath);
+    const missing = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup",
+      headers,
+      payload: { config: { llm: { timeout_ms: 120000 } } },
+    });
+    expect(missing.statusCode).toBe(200);
+    expect(app.config.llm.verify_status).toBe("unverified");
+    expect(app.config.secrets.verificationHmacKey?.length).toBe(32);
+    expect(app.config.secrets.verificationHmacKey?.equals(key as Buffer)).toBe(false);
   });
 });

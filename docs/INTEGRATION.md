@@ -25,7 +25,7 @@ Navidrome, SUB/WAVE, and Ollama settings are **optional at first boot**. Empty o
 
 `llm.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Ollama until that field is `verified`. Filling in the URL does not set it. If the URL and model are filled and `verify_status` was never written, doctor, the status API, and the dashboard report `configured_unverified` with “configured but unverified, run test connection”. That is not a promotion to verified.
 
-`POST /api/v1/llm/test-connection` is the only writer of a verified LLM result. It stores the probe in `integration_checks` (state, tested_at, fingerprint). It is a read-only `GET /api/tags` and checks that the configured model is in the list. It does not pull, install, or restart Ollama. Failure stores the probe state (`unreachable`, `auth_failed`, or `model_missing`) and leaves `verify_status` unverified. Yaml `verify_status` is ignored. `GET /api/v1/llm/status` reads the stored result and does not call Ollama. Saving settings cannot set `verified`.
+`POST /api/v1/llm/test-connection` is the only writer of a verified LLM result. It stores the probe in `integration_checks` (state, tested_at, and an HMAC-SHA256 fingerprint that is not returned). It is a read-only `GET /api/tags` and checks that the configured model is in the list. It does not pull, install, or restart Ollama. Failure stores the probe state (`unreachable`, `auth_failed`, or `model_missing`) and leaves `verify_status` unverified. Yaml `verify_status` is ignored. `GET /api/v1/llm/status` reads the stored result and does not call Ollama. Saving settings cannot set `verified`.
 
 - HTTP `base_url` configurable (local-dev placeholder often `http://127.0.0.1:11434`; live example above). Not a required default.
 - Classification: `POST /api/chat` with `stream: false` + `format` JSON schema
@@ -39,7 +39,7 @@ Navidrome, SUB/WAVE, and Ollama settings are **optional at first boot**. Empty o
 
 `library.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Navidrome until that field is `verified`. Filling in the URL does not set it. Filled URL, username, and password with no explicit `verify_status` report `configured_unverified` (“configured but unverified, run test connection”).
 
-`POST /api/v1/library/test-connection` is the only writer of a verified library result. It stores the probe in `integration_checks`. It calls Subsonic `GET /rest/ping` with the existing token auth and `f=json`. Ready requires `status: ok`. Failure stores `unreachable` or `auth_failed`. The password is not logged, returned, or stored; the fingerprint includes a hash of it. `GET /api/v1/library/status` reads the stored result and does not call Navidrome.
+`POST /api/v1/library/test-connection` is the only writer of a verified library result. It stores the probe in `integration_checks`. It calls Subsonic `GET /rest/ping` with the existing token auth and `f=json`. Ready requires `status: ok`. Failure stores `unreachable` or `auth_failed`. The password is not logged, returned, or stored. The fingerprint is one HMAC-SHA256 of the settings and the password, keyed by `secrets/verification_hmac_key`. The fingerprint itself is not logged or returned. `GET /api/v1/library/status` reads the stored result and does not call Navidrome.
 
 - Subsonic API 1.16.1 at `{url}/rest`, prefer `f=json`
 - Auth: `u` + `t/s` (md5 token from password + salt)
