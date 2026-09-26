@@ -5,8 +5,8 @@ import { claimJob, completeJob, enqueueJob, getJob } from "./store.js";
 describe("job lease", () => {
   it("lets one worker claim a job and holds the lease against a second worker", () => {
     const db = openDatabase(":memory:");
-    const now = Date.now();
     const job = enqueueJob(db, { type: "classify", payload: { n: 1 } });
+    const now = Date.now();
     const first = claimJob(db, "worker-a", 10_000, now);
     expect(first?.id).toBe(job.id);
     expect(first?.status).toBe("running");
@@ -19,8 +19,8 @@ describe("job lease", () => {
 
   it("reclaims an expired lease and records attempts", () => {
     const db = openDatabase(":memory:");
-    const now = Date.now();
     enqueueJob(db, { type: "classify" });
+    const now = Date.now();
     const first = claimJob(db, "worker-a", 50, now);
     expect(first).not.toBeNull();
 
@@ -31,8 +31,8 @@ describe("job lease", () => {
 
   it("re-queues a failed job until max_attempts, then marks failed", () => {
     const db = openDatabase(":memory:");
-    const now = Date.now();
     const job = enqueueJob(db, { type: "health_probe", maxAttempts: 2 });
+    const now = Date.now();
     const claimed = claimJob(db, "worker-a", 1_000, now);
     expect(claimed?.id).toBe(job.id);
     const retried = completeJob(db, { jobId: job.id, success: false, error: "boom", retryDelayMs: 10 });

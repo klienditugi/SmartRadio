@@ -414,6 +414,53 @@ export function updateProviderHealth(db: Db, id: string, health: unknown): void 
   );
 }
 
+export type IntegrationCheck = {
+  integration: string;
+  state: string;
+  fingerprint: string;
+  testedAt: number;
+};
+
+type IntegrationCheckRow = {
+  integration: string;
+  state: string;
+  fingerprint: string;
+  tested_at: number;
+};
+
+function mapIntegrationCheck(row: IntegrationCheckRow): IntegrationCheck {
+  return {
+    integration: row.integration,
+    state: row.state,
+    fingerprint: row.fingerprint,
+    testedAt: row.tested_at,
+  };
+}
+
+export function upsertIntegrationCheck(
+  db: Db,
+  input: { integration: string; state: string; fingerprint: string; testedAt: number },
+): void {
+  db.prepare(
+    `INSERT INTO integration_checks (integration, state, fingerprint, tested_at)
+     VALUES (@integration, @state, @fingerprint, @tested_at)
+     ON CONFLICT(integration) DO UPDATE SET
+       state = excluded.state,
+       fingerprint = excluded.fingerprint,
+       tested_at = excluded.tested_at`,
+  ).run({
+    integration: input.integration,
+    state: input.state,
+    fingerprint: input.fingerprint,
+    tested_at: input.testedAt,
+  });
+}
+
+export function listIntegrationChecks(db: Db): IntegrationCheck[] {
+  const rows = db.prepare("SELECT integration, state, fingerprint, tested_at FROM integration_checks ORDER BY integration").all() as IntegrationCheckRow[];
+  return rows.map(mapIntegrationCheck);
+}
+
 export function getSetting(db: Db, key: string): unknown {
   const row = db.prepare("SELECT value_json FROM settings WHERE key = ?").get(key) as { value_json: string } | undefined;
   return row ? JSON.parse(row.value_json) : undefined;

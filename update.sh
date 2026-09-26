@@ -37,6 +37,20 @@ if [[ -f "${ROOT}/.env" ]]; then
   load_env_file "${ROOT}/.env"
 fi
 
+SECRETS_DIR="${SUBWAVE_SECRETS_DIR:-${ROOT}/secrets}"
+mkdir -p "${SECRETS_DIR}"
+chmod 700 "${SECRETS_DIR}" || true
+if [[ ! -f "${SECRETS_DIR}/verification_hmac_key" ]]; then
+  umask 077
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand 32 > "${SECRETS_DIR}/verification_hmac_key"
+  else
+    head -c 32 /dev/urandom > "${SECRETS_DIR}/verification_hmac_key"
+  fi
+  chmod 600 "${SECRETS_DIR}/verification_hmac_key"
+  info "created secrets/verification_hmac_key (stored test-connection HMAC; not the session secret)"
+fi
+
 if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^subwave-api.service'; then
   if is_root; then
     systemctl restart subwave-api.service subwave-worker.service

@@ -1,13 +1,25 @@
 /**
  * Correlate a selected search hit with GET /api/v0/transfers/downloads rows.
- * Uses strongest verified identifiers: transfer id, then username + filename + size.
+ *
+ * Match order:
+ * 1. `target.id` when a row has that id. This is a transfer id observed from the
+ *    enqueue response or the transfers list, never a search response/file id.
+ * 2. Exact username, then the exact original filename (backslashes included) and
+ *    equal size. If that filename is present but the size is missing or different,
+ *    there is no match.
+ * 3. Otherwise a case-insensitive basename match, and only when exactly one of
+ *    that user's rows matches the basename AND the size. Rows without a size
+ *    do not match.
  */
 
 export type TransferMatchTarget = {
   username: string;
   filename: string;
   size: number;
-  /** Transfer / file id when known from enqueue or search. */
+  /**
+   * Transfer id from the enqueue response or a transfers row.
+   * Search responses have no id; do not pass `responseId` / `fileId` here.
+   */
   id?: string;
 };
 
@@ -58,13 +70,8 @@ function collectObjects(value: unknown, into: Record<string, unknown>[]): void {
 }
 
 function basenamePath(filename: string): string {
-  const parts = filename.split(/[/\\]/);
+  const parts = filename.split(/[/\\]/).filter((part) => part.length > 0);
   return parts[parts.length - 1] ?? filename;
-}
-
-function filenamesMatch(a: string, b: string): boolean {
-  if (a === b) return true;
-  return basenamePath(a).toLowerCase() === basenamePath(b).toLowerCase();
 }
 
 function stateTokens(state: string): string[] {
@@ -117,11 +124,36 @@ function rowFrom(rec: Record<string, unknown>): CorrelatedTransfer | null {
     state,
     status: state,
     progress: progressFrom(rec),
-    size: num(rec.size) ?? num(rec.bytes) ?? num(rec.length),
+    // `length` is duration on slskd search files and is not a byte size here.
+    size: num(rec.size) ?? num(rec.bytes),
     bytes_transferred: num(rec.bytesTransferred) ?? num(rec.bytesDownloaded) ?? num(rec.transferred),
     id: idStr(rec.id) ?? idStr(rec.Id) ?? idStr(rec.transferId),
     raw_keys: Object.keys(rec),
   };
+}
+
+/**
+ * Transfer id on an enqueue body, when exactly one object has this filename
+ * (and size, if the object has a size) plus an id. `{ ok, status }` has neither.
+ */
+export function observedTransferId(
+  result: unknown,
+  target: { filename: string; size: number },
+): string | undefined {
+  const objects: Record<string, unknown>[] = [];
+  collectObjects(result, objects);
+  const ids = new Set<string>();
+  for (const rec of objects) {
+    const id = idStr(rec.id) ?? idStr(rec.Id) ?? idStr(rec.transferId);
+    if (!id) continue;
+    const filename = str(rec.filename) ?? str(rec.fileName) ?? str(rec.name);
+    if (filename !== target.filename) continue;
+    const size = num(rec.size) ?? num(rec.bytes);
+    if (size !== undefined && size !== target.size) continue;
+    ids.add(id);
+  }
+  if (ids.size !== 1) return undefined;
+  return [...ids][0];
 }
 
 /**
@@ -141,15 +173,18 @@ export function findCorrelatedTransfer(
     if (byId) return byId;
   }
 
-  const matches = rows.filter((row) => {
-    if (!row.user || row.user !== target.username) return false;
-    if (!row.filename || !filenamesMatch(row.filename, target.filename)) return false;
-    return true;
-  });
+  const userRows = rows.filter((row) => row.user === target.username && row.filename);
+  const exactName = userRows.filter((row) => row.filename === target.filename);
+  const exactSized = exactName.filter((row) => row.size === target.size);
+  if (exactSized.length > 0) return exactSized[0] ?? null;
+  // The original path was seen, but no row confirms the size. Do not fall through
+  // to a different file that only shares a basename.
+  if (exactName.length > 0) return null;
 
-  const exact = matches.find((row) => row.size === target.size);
-  if (exact) return exact;
-  // Size may be absent on some transfer rows; username+filename is still strong.
-  const withoutSize = matches.find((row) => row.size === undefined);
-  return withoutSize ?? null;
+  const targetBase = basenamePath(target.filename).toLowerCase();
+  const byBaseAndSize = userRows.filter(
+    (row) => row.filename !== undefined && basenamePath(row.filename).toLowerCase() === targetBase && row.size === target.size,
+  );
+  if (byBaseAndSize.length === 1) return byBaseAndSize[0] ?? null;
+  return null;
 }

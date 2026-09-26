@@ -1,14 +1,13 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { RuntimeConfig } from "@subwave-ai/shared";
-import { CLASSIFICATION_JSON_SCHEMA } from "@subwave-ai/shared";
+import { CLASSIFICATION_JSON_SCHEMA, parseAppConfig, type RuntimeConfig } from "@subwave-ai/shared";
 import { createProviders } from "./factory.js";
 import { OllamaProvider } from "./llm/ollama.js";
 import { NavidromeProvider } from "./library/navidrome.js";
 import { NeverPlayError, SubWaveProvider } from "./radio/subwave.js";
 import { SoulseekProvider } from "./acquisition/slskd.js";
 import { UnverifiedAcquisitionProvider } from "./acquisition/unverified.js";
-import { UnverifiedAdapterError } from "./http.js";
+import { NotConfiguredError, UnverifiedAdapterError } from "./http.js";
 import type { FetchLike } from "./http.js";
 
 function jsonResponse(body: unknown, status = 200, url = "http://example"): Response {
@@ -39,6 +38,7 @@ describe("OllamaProvider", () => {
     const llm = new OllamaProvider({
       baseUrl: "http://ollama.example:11434",
       model: "configured-from-env",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     const result = await llm.classify({ text: "play some techno" });
@@ -59,10 +59,30 @@ describe("OllamaProvider", () => {
       urls.push(String(url));
       return jsonResponse({ version: "0.0.0" });
     };
-    const llm = new OllamaProvider({ baseUrl: "http://ollama.example", model: "x", fetch: fetchMock });
+    const llm = new OllamaProvider({
+      baseUrl: "http://ollama.example",
+      model: "x",
+      verifyStatus: "verified",
+      fetch: fetchMock,
+    });
     const health = await llm.health();
     expect(health.ok).toBe(true);
     expect(urls).toEqual(["http://ollama.example/api/version"]);
+  });
+
+  it("omits verifyStatus as unverified and does not call fetch", async () => {
+    const llm = new OllamaProvider({
+      baseUrl: "http://ollama.example",
+      model: "x",
+      fetch: async () => {
+        throw new Error("fetch should not be called");
+      },
+    });
+    expect(llm.verifyStatus).toBe("unverified");
+    await expect(llm.classify({ text: "play something" })).rejects.toThrow(/configured but unverified, run test connection/);
+    const health = await llm.health();
+    expect(health.ok).toBe(false);
+    expect(health.verifyStatus).toBe("unverified");
   });
 });
 
@@ -83,6 +103,7 @@ describe("NavidromeProvider", () => {
       baseUrl: "http://navidrome.example",
       username: "user",
       password: "secret",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     const songs = await nd.search3("query");
@@ -108,12 +129,29 @@ describe("NavidromeProvider", () => {
       baseUrl: "http://navidrome.example",
       username: "u",
       password: "p",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     await nd.getScanStatus();
     await nd.startScan({ fullScan: true });
     await nd.getSong("abc");
     expect(paths).toEqual(["/rest/getScanStatus", "/rest/startScan", "/rest/getSong"]);
+  });
+
+  it("omits verifyStatus as unverified and does not call fetch", async () => {
+    const nd = new NavidromeProvider({
+      baseUrl: "http://navidrome.example",
+      username: "u",
+      password: "p",
+      fetch: async () => {
+        throw new Error("fetch should not be called");
+      },
+    });
+    expect(nd.verifyStatus).toBe("unverified");
+    await expect(nd.search3("q")).rejects.toThrow(/configured but unverified, run test connection/);
+    const health = await nd.health();
+    expect(health.ok).toBe(false);
+    expect(health.verifyStatus).toBe("unverified");
   });
 });
 
@@ -129,6 +167,7 @@ describe("SubWaveProvider", () => {
       baseUrl: "http://station.example:7700/api",
       adminUser: "admin",
       adminPassword: "pass",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     await radio.djSearch("bowie", { limit: 10 });
@@ -152,6 +191,7 @@ describe("SubWaveProvider", () => {
       baseUrl: "http://station.example/api",
       adminUser: "a",
       adminPassword: "b",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     await radio.health();
@@ -182,6 +222,7 @@ describe("SubWaveProvider", () => {
       baseUrl: "http://station.example:7700/api/",
       adminUser: "admin",
       adminPassword: "pass",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     const result = await radio.say({ text: "  Listener's requested song is coming.  " });
@@ -208,6 +249,7 @@ describe("SubWaveProvider", () => {
       baseUrl: "http://station.example/api",
       adminUser: "a",
       adminPassword: "b",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     await radio.say({ text: "context", kind: "link", sfx: { cue: "sting" } });
@@ -229,6 +271,7 @@ describe("SubWaveProvider", () => {
       baseUrl: "http://station.example/api",
       adminUser: "a",
       adminPassword: "b",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     await expect(radio.say({ text: "   " })).rejects.toThrow(/required/);
@@ -246,7 +289,19 @@ describe("SubWaveProvider", () => {
         throw new Error("live fetch");
       },
     });
-    await expect(unverified.say({ text: "context" })).rejects.toThrow(/unverified radio adapter/);
+    await expect(unverified.say({ text: "context" })).rejects.toThrow(/configured but unverified, run test connection/);
+
+    const omitted = new SubWaveProvider({
+      baseUrl: "http://station.example/api",
+      adminUser: "a",
+      adminPassword: "b",
+      fetch: async () => {
+        throw new Error("fetch should not be called");
+      },
+    });
+    expect(omitted.verifyStatus).toBe("unverified");
+    await expect(omitted.health()).resolves.toMatchObject({ ok: false, verifyStatus: "unverified" });
+    await expect(omitted.say({ text: "context" })).rejects.toThrow(/configured but unverified, run test connection/);
   });
 
   it("sends optional album on queue-track and treats HTTP 409 as never-play", async () => {
@@ -260,6 +315,7 @@ describe("SubWaveProvider", () => {
       baseUrl: "http://station.example/api",
       adminUser: "a",
       adminPassword: "b",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     await radio.queueTrack({ id: "t1", title: "Heroes", artist: "Bowie", album: "Lodger" });
@@ -297,6 +353,31 @@ describe("SoulseekProvider (slskd)", () => {
     expect(calls[2]?.url).toBe("http://slskd.example/api/v0/searches/search-1/responses");
     expect(calls[3]?.url).toBe("http://slskd.example/api/v0/transfers/downloads/peer");
     expect(calls[4]?.url).toBe("http://slskd.example/api/v0/transfers/downloads");
+  });
+
+  it("enqueues the original filename verbatim and the size", async () => {
+    const filename = "C:\\Users\\share\\Album\\01 Get Lucky.flac";
+    let body = "";
+    let method: string | undefined;
+    let url = "";
+    const fetchMock: FetchLike = async (input, init) => {
+      url = String(input);
+      method = init?.method;
+      body = String(init?.body ?? "");
+      return new Response(null, { status: 201 });
+    };
+    const slskd = new SoulseekProvider({
+      baseUrl: "http://slskd.example",
+      apiKey: "key-from-secrets",
+      fetch: fetchMock,
+    });
+    await slskd.enqueueDownload("peer", [{ filename, size: 44_000_000 }]);
+    expect(method).toBe("POST");
+    expect(url).toBe("http://slskd.example/api/v0/transfers/downloads/peer");
+    expect(JSON.parse(body)).toEqual([{ filename, size: 44_000_000 }]);
+    expect(body).toContain("C:\\\\Users\\\\share\\\\Album\\\\01 Get Lucky.flac");
+    expect(body).not.toContain("C:/Users");
+    expect(JSON.parse(body)[0].filename).not.toBe("01 Get Lucky.flac");
   });
 
   it("health prefers GET /application and GET /server and requires Soulseek login", async () => {
@@ -395,9 +476,135 @@ describe("createProviders acquisition gate", () => {
     } as RuntimeConfig;
   }
 
+  it("leaves llm, library, and radio unverified when config omits verify_status", async () => {
+    let called = false;
+    const parsed = parseAppConfig({
+      server: { host: "127.0.0.1", port: 8788 },
+      database: { path: ":memory:" },
+      paths: { secrets_dir: "./secrets", downloads: "./dl", staging: "./st", library: "./lib" },
+      llm: { base_url: "http://ollama.example", model: "m" },
+      library: { base_url: "http://nd.example", username: "u" },
+      radio: { base_url: "http://radio.example/api", admin_user: "dj" },
+      acquisition: { provider: "slskd", base_url: "", verify_status: "unverified" },
+    });
+    const providers = createProviders(
+      { ...parsed, secrets: { navidromePassword: "pw", subwaveAdminPassword: "pw" } },
+      async () => {
+        called = true;
+        throw new Error("fetch should not be called");
+      },
+    );
+    expect(parsed.llm.verify_status).toBe("unverified");
+    expect(parsed.library.verify_status).toBe("unverified");
+    expect(parsed.radio.verify_status).toBe("unverified");
+    expect(providers.llm.verifyStatus).toBe("unverified");
+    expect(providers.library.verifyStatus).toBe("unverified");
+    expect(providers.radio.verifyStatus).toBe("unverified");
+    await expect(providers.llm.classify({ text: "track" })).rejects.toThrow(/configured but unverified, run test connection/);
+    await expect(providers.library.search3("track")).rejects.toThrow(/configured but unverified, run test connection/);
+    await expect(providers.radio.say({ text: "track" })).rejects.toThrow(/configured but unverified, run test connection/);
+    expect(called).toBe(false);
+  });
+
   it("uses Soulseek only when enabled and provider is slskd", () => {
     expect(createProviders(runtime({})).acquisition.kind).toBe("slskd");
     expect(createProviders(runtime({ enabled: false })).acquisition.kind).toBe("unverified");
     expect(createProviders(runtime({ provider: "other-daemon" })).acquisition.kind).toBe("unverified");
+  });
+});
+
+describe("integrations that are not configured", () => {
+  it("does not call Navidrome and returns not_configured, distinct from unreachable", async () => {
+    let calls = 0;
+    const fetchMock: FetchLike = async () => {
+      calls += 1;
+      throw new Error("connect ECONNREFUSED");
+    };
+    const missing = new NavidromeProvider({
+      baseUrl: "  ",
+      username: "",
+      password: "",
+      fetch: fetchMock,
+    });
+    const health = await missing.health();
+    expect(health.state).toBe("not_configured");
+    expect(health.ok).toBe(false);
+    expect(health.detail).toBe("navidrome is not configured");
+    await expect(missing.search3("query")).rejects.toBeInstanceOf(NotConfiguredError);
+    await expect(missing.getSong("1")).rejects.toThrow(/navidrome is not configured/);
+    expect(calls).toBe(0);
+
+    const partial = new NavidromeProvider({
+      baseUrl: "http://navidrome.example",
+      username: "nd",
+      password: "   ",
+      fetch: fetchMock,
+    });
+    expect((await partial.health()).state).toBe("not_configured");
+    expect(calls).toBe(0);
+
+    const down = new NavidromeProvider({
+      baseUrl: "http://navidrome.example",
+      username: "nd",
+      password: "secret",
+      verifyStatus: "verified",
+      fetch: fetchMock,
+    });
+    const unreachable = await down.health();
+    expect(unreachable.state).toBe("unreachable");
+    expect(unreachable.detail).not.toMatch(/not configured/);
+    expect(calls).toBe(1);
+  });
+
+  it("does not call SUB/WAVE say, search, or queue-track when unset", async () => {
+    let calls = 0;
+    const fetchMock: FetchLike = async () => {
+      calls += 1;
+      throw new Error("connect ECONNREFUSED");
+    };
+    const radio = new SubWaveProvider({
+      baseUrl: "",
+      adminUser: "",
+      adminPassword: "",
+      fetch: fetchMock,
+    });
+    expect((await radio.health()).state).toBe("not_configured");
+    await expect(radio.say({ text: "REQUEST_ACCEPTED. Track: A — T." })).rejects.toThrow(/subwave radio is not configured/);
+    await expect(radio.djSearch("query")).rejects.toBeInstanceOf(NotConfiguredError);
+    await expect(radio.queueTrack({ id: "1", title: "T" })).rejects.toThrow(/subwave radio is not configured/);
+    expect(calls).toBe(0);
+
+    const down = new SubWaveProvider({
+      baseUrl: "http://radio.example/api",
+      adminUser: "dj",
+      adminPassword: "secret",
+      verifyStatus: "verified",
+      fetch: fetchMock,
+    });
+    expect((await down.health()).state).toBe("unreachable");
+    expect(calls).toBe(1);
+  });
+
+  it("does not call Ollama or invent a model when URL and model are empty", async () => {
+    let calls = 0;
+    const fetchMock: FetchLike = async () => {
+      calls += 1;
+      throw new Error("connect ECONNREFUSED");
+    };
+    const llm = new OllamaProvider({ baseUrl: "", model: "", fetch: fetchMock });
+    const health = await llm.health();
+    expect(health.state).toBe("not_configured");
+    expect(health.detail).toMatch(/refusing to hard-code a model name/);
+    await expect(llm.classify({ text: "play techno" })).rejects.toBeInstanceOf(NotConfiguredError);
+    expect(calls).toBe(0);
+
+    const down = new OllamaProvider({
+      baseUrl: "http://ollama.example",
+      model: "configured-model",
+      verifyStatus: "verified",
+      fetch: fetchMock,
+    });
+    expect((await down.health()).state).toBe("unreachable");
+    expect(calls).toBe(1);
   });
 });

@@ -3,12 +3,18 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { AcquisitionForm } from "../components/AcquisitionForm";
+import { IntegrationProbe } from "../components/IntegrationProbe";
 
 type SettingsResponse = {
   config: {
     llm: { base_url: string; model: string };
     library: { base_url: string; username: string };
     radio: { base_url: string; admin_user: string };
+    integrations?: {
+      llm: { state: string | null };
+      library: { state: string | null };
+      radio: { state: string | null };
+    };
     acquisition: { base_url: string };
     policy: {
       require_electronic: boolean;
@@ -72,13 +78,22 @@ export function SettingsPage() {
           <div className="card">
             <h2>Integrations</h2>
             <p>
-              <strong>Ollama</strong> {cfg.llm.base_url} · model {cfg.llm.model || "(unset)"}
+              <strong>Ollama</strong>{" "}
+              {cfg.integrations?.llm.state === "not_configured"
+                ? "not_configured"
+                : `${cfg.llm.base_url} · model ${cfg.llm.model}`}
             </p>
             <p>
-              <strong>Navidrome</strong> {cfg.library.base_url} · {cfg.library.username}
+              <strong>Navidrome</strong>{" "}
+              {cfg.integrations?.library.state === "not_configured"
+                ? "not_configured"
+                : `${cfg.library.base_url} · ${cfg.library.username}`}
             </p>
             <p>
-              <strong>SUB/WAVE</strong> {cfg.radio.base_url} · {cfg.radio.admin_user}
+              <strong>SUB/WAVE</strong>{" "}
+              {cfg.integrations?.radio.state === "not_configured"
+                ? "not_configured"
+                : `${cfg.radio.base_url} · ${cfg.radio.admin_user}`}
             </p>
             <p>
               <strong>Acquisition</strong> slskd URL and API key are edited below. Soulseek username and password stay in slskd.
@@ -106,6 +121,13 @@ export function SettingsPage() {
           </div>
         </div>
       ) : null}
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h2>Connection tests</h2>
+        <p className="muted">These checks are read-only. They are the only action that can mark an integration verified.</p>
+        <IntegrationProbe kind="llm" readOnly={user?.role !== "admin"} />
+        <IntegrationProbe kind="library" readOnly={user?.role !== "admin"} />
+        <IntegrationProbe kind="radio" readOnly={user?.role !== "admin"} />
+      </div>
       <div className="card" style={{ marginTop: "1rem" }}>
         <h2>Acquisition</h2>
         <AcquisitionForm mode="settings" readOnly={user?.role !== "admin"} />

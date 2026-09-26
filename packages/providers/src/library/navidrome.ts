@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { VerifyStatus } from "@subwave-ai/shared";
-import { defaultFetch, joinUrl, readJson, type FetchLike, type ProviderHealth } from "../http.js";
+import { CONFIGURED_UNVERIFIED_MESSAGE, NAVIDROME_NOT_CONFIGURED, type VerifyStatus } from "@subwave-ai/shared";
+import { defaultFetch, joinUrl, NotConfiguredError, ProviderHttpError, readJson, type FetchLike, type ProviderHealth } from "../http.js";
 import type { LibrarySong, MusicLibraryProvider } from "../types.js";
 
 export type NavidromeProviderOptions = {
@@ -36,6 +36,7 @@ function asSong(raw: SubsonicSong): LibrarySong {
 export class NavidromeProvider implements MusicLibraryProvider {
   readonly kind = "navidrome" as const;
   readonly verifyStatus: VerifyStatus;
+  private readonly configured: boolean;
   private readonly restBase: string;
   private readonly username: string;
   private readonly password: string;
@@ -44,14 +45,19 @@ export class NavidromeProvider implements MusicLibraryProvider {
   private readonly fetchImpl: FetchLike;
 
   constructor(opts: NavidromeProviderOptions) {
-    const trimmed = opts.baseUrl.replace(/\/+$/, "");
-    this.restBase = trimmed.endsWith("/rest") ? trimmed : `${trimmed}/rest`;
-    this.username = opts.username;
+    const trimmed = opts.baseUrl.trim().replace(/\/+$/, "");
+    this.username = opts.username.trim();
     this.password = opts.password;
+    this.configured = Boolean(trimmed && this.username && opts.password.trim());
+    this.restBase = trimmed.endsWith("/rest") ? trimmed : `${trimmed}/rest`;
     this.clientName = opts.clientName ?? "subwave-ai";
     this.apiVersion = opts.apiVersion ?? "1.16.1";
     this.fetchImpl = opts.fetch ?? defaultFetch();
-    this.verifyStatus = opts.verifyStatus ?? "verified";
+    this.verifyStatus = opts.verifyStatus ?? "unverified";
+  }
+
+  private assertConfigured(): void {
+    if (!this.configured) throw new NotConfiguredError(NAVIDROME_NOT_CONFIGURED);
   }
 
   private authParams(): Record<string, string> {
@@ -67,10 +73,15 @@ export class NavidromeProvider implements MusicLibraryProvider {
     };
   }
 
+  private refuseUnverified(): void {
+    if (this.verifyStatus !== "unverified") return;
+    if (this.configured) throw new Error(CONFIGURED_UNVERIFIED_MESSAGE);
+    throw new Error("unverified library adapter: live endpoints not called");
+  }
+
   private async rest<T>(method: string, extra: Record<string, string | number | boolean | undefined> = {}): Promise<T> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified library adapter: live endpoints not called");
-    }
+    this.assertConfigured();
+    this.refuseUnverified();
     const url = new URL(joinUrl(this.restBase, method));
     for (const [k, v] of Object.entries({ ...this.authParams(), ...extra })) {
       if (v === undefined) continue;
@@ -120,14 +131,34 @@ export class NavidromeProvider implements MusicLibraryProvider {
 
   async health(): Promise<ProviderHealth> {
     const checked_at = new Date().toISOString();
+    if (!this.configured) {
+      return {
+        ok: false,
+        state: "not_configured",
+        verifyStatus: this.verifyStatus,
+        detail: NAVIDROME_NOT_CONFIGURED,
+        checked_at,
+      };
+    }
     if (this.verifyStatus === "unverified") {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: "unverified adapter; not calling live endpoints", checked_at };
+      return {
+        ok: false,
+        verifyStatus: this.verifyStatus,
+        detail: CONFIGURED_UNVERIFIED_MESSAGE,
+        checked_at,
+      };
     }
     try {
       await this.getScanStatus();
-      return { ok: true, verifyStatus: this.verifyStatus, detail: "GET /rest/getScanStatus", checked_at };
+      return { ok: true, state: "reachable", verifyStatus: this.verifyStatus, detail: "GET /rest/getScanStatus", checked_at };
     } catch (err) {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: (err as Error).message, checked_at };
+      if (err instanceof NotConfiguredError) {
+        return { ok: false, state: "not_configured", verifyStatus: this.verifyStatus, detail: err.message, checked_at };
+      }
+      if (err instanceof ProviderHttpError) {
+        return { ok: false, state: "reachable", verifyStatus: this.verifyStatus, detail: err.message, checked_at };
+      }
+      return { ok: false, state: "unreachable", verifyStatus: this.verifyStatus, detail: (err as Error).message, checked_at };
     }
   }
 }

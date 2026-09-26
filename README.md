@@ -12,7 +12,7 @@ sudo ./install.sh
 
 That is the supported production install path. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
-Ollama is an **external** service. This project never installs, updates, or pulls Ollama or any model (including Qwen). Configure `OLLAMA_BASE_URL` and `OLLAMA_MODEL` only — there is no default model name.
+Ollama is an **external** service. This project never installs, updates, or pulls Ollama or any model (including Qwen). `OLLAMA_BASE_URL` and `OLLAMA_MODEL` are optional at boot and have no default model name. Navidrome and SUB/WAVE URL, user, and password are optional too: empty is the same as unset, the API still starts, and those integrations report `not_configured` until you set them in the wizard.
 
 ## Layout
 
@@ -47,8 +47,9 @@ Compose: `./install.sh --mode compose` with host paths `SUBWAVE_DATA_DIR` and `S
 cp .env.example .env
 cp config/subwave.example.yaml config/subwave.yaml
 mkdir -p secrets data/downloads data/staging data/library
-# secrets/admin_password, session_secret, navidrome_password,
-# subwave_admin_password, slskd_api_key
+# secrets/admin_password and session_secret are required to sign in.
+# navidrome_password, subwave_admin_password, and slskd_api_key are optional.
+# verification_hmac_key (32 bytes) is created by install.sh or on first use. Do not commit it.
 # The setup UI writes slskd_api_key and does not store a Soulseek password.
 pnpm install
 pnpm typecheck

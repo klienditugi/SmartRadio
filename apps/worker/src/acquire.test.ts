@@ -181,10 +181,11 @@ function harness(state: AcqState = {}) {
   };
 }
 
+const TRACK_SIZE = 8 * 1024 * 1024;
 const HIT = {
   username: "peer-a",
   id: "resp-a",
-  files: [{ filename: "\\\\music\\\\track.flac", size: 100, extension: "flac", id: 7 }],
+  files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE, extension: "flac", id: 7 }],
 };
 
 describe("A5 acquisition worker", () => {
@@ -227,7 +228,7 @@ describe("A5 acquisition worker", () => {
       {
         username: "peer-a",
         filename: "\\\\music\\\\track.flac",
-        size: 100,
+        size: TRACK_SIZE,
         state: "InProgress",
         percentComplete: 10,
       },
@@ -238,7 +239,7 @@ describe("A5 acquisition worker", () => {
       enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
     );
     expect(enq).toMatchObject({ enqueued: true });
-    expect(enqueued).toEqual([{ user: "peer-a", files: [{ filename: "\\\\music\\\\track.flac", size: 100 }] }]);
+    expect(enqueued).toEqual([{ user: "peer-a", files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE }] }]);
     expect(order).toContain("enqueue");
     expect(order).toContain("say");
     expect(say[0]?.text).toContain("REQUEST_ACCEPTED");
@@ -443,6 +444,141 @@ describe("A5 acquisition worker", () => {
       ),
     ).rejects.toThrow(/download missing/);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
+  });
+
+  it("enqueues the clean file unless the request title asks for the remix", async () => {
+    const album = "\\\\music\\\\Album\\\\Get Lucky.flac";
+    const remix = "\\\\music\\\\Remix\\\\Get Lucky (Remix).flac";
+    const responses = [
+      {
+        username: "remix-peer",
+        hasFreeUploadSlot: true,
+        queueLength: 0,
+        uploadSpeed: 9_000_000,
+        files: [
+          {
+            filename: remix,
+            size: 30_000_000,
+            extension: "flac",
+            // 48 kHz stays eligible. This case is the version penalty, not the sample-rate cap.
+            bitDepth: 24,
+            sampleRate: 48000,
+            length: 400,
+          },
+        ],
+      },
+      {
+        username: "album-peer",
+        hasFreeUploadSlot: true,
+        queueLength: 2,
+        uploadSpeed: 100_000,
+        files: [
+          {
+            filename: album,
+            size: 40_000_000,
+            extension: "flac",
+            bitDepth: 16,
+            sampleRate: 44100,
+            length: 248,
+          },
+        ],
+      },
+    ];
+
+    async function chosen(title: string) {
+      const { config, db, cleanup } = fixture();
+      cleanups.push(cleanup);
+      const { acquisition, radio, library, enqueued } = harness({ responses });
+      const request = createRequest(db, { rawQuery: `Daft Punk - ${title}` });
+      advance(db, request.id, "QUEUED", { artist: "Daft Punk", title });
+      await handleDownload(
+        {
+          db,
+          config,
+          providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+          workerId: "worker-test",
+        },
+        enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
+      );
+      return enqueued;
+    }
+
+    expect(await chosen("Get Lucky")).toEqual([{ user: "album-peer", files: [{ filename: album, size: 40_000_000 }] }]);
+    expect(await chosen("Get Lucky Remix")).toEqual([
+      { user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] },
+    ]);
+  });
+
+  it("fails QUEUED with no_suitable_result when filters remove every candidate and does not enqueue", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const mib = 1024 * 1024;
+    const { acquisition, radio, library, order, say, enqueued } = harness({
+      responses: [
+        {
+          username: "peer",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 1_000_000,
+          files: [
+            { filename: "\\\\music\\\\notes.txt", size: 1000, extension: "txt" },
+            { filename: "\\\\music\\\\huge.flac", size: 400 * mib, extension: "flac", bitDepth: 16, sampleRate: 44100 },
+            { filename: "\\\\music\\\\hires.flac", size: 40 * mib, extension: "flac", bitDepth: 24, sampleRate: 192000 },
+            { filename: "\\\\music\\\\deep.flac", size: 40 * mib, extension: "flac", bitDepth: 32, sampleRate: 44100 },
+            {
+              filename: "\\\\music\\\\locked.flac",
+              size: 40 * mib,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+              isLocked: true,
+            },
+          ],
+          lockedFiles: [
+            { filename: "\\\\music\\\\album.flac", size: 40 * mib, extension: "flac", bitDepth: 16, sampleRate: 44100 },
+          ],
+        },
+      ],
+    });
+    const request = createRequest(db, { rawQuery: "Daft Punk - Get Lucky" });
+    advance(db, request.id, "QUEUED", { artist: "Daft Punk", title: "Get Lucky" });
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    await expect(
+      handleDownload(
+        {
+          db,
+          config,
+          providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+          workerId: "worker-test",
+        },
+        job,
+      ),
+    ).rejects.toThrow(/no_suitable_result/);
+    const row = getRequest(db, request.id);
+    expect(row?.status).toBe("FAILED");
+    expect(row?.error).toBe(
+      "no_suitable_result: locked=1, junk=0, extensions=1, min_file_size=0, max_file_size=1, max_duration=0, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
+    );
+    const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
+    expect(failed?.from_status).toBe("QUEUED");
+    expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({
+      outcome: "no_suitable_result",
+      removed: {
+        locked: 1,
+        junk: 0,
+        extensions: 1,
+        min_file_size: 0,
+        max_file_size: 1,
+        max_duration: 0,
+        max_sample_rate: 1,
+        max_bit_depth: 1,
+        title_mismatch: 0,
+      },
+    });
+    expect(enqueued).toEqual([]);
+    expect(say).toEqual([]);
+    expect(order).toEqual(["get-search"]);
+    expect(listJobsForRequest(db, request.id).filter((item) => item.type === "download")).toHaveLength(1);
   });
 
   it("surfaces acquire_unavailable without calling the provider", async () => {

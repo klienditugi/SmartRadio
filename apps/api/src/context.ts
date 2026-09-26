@@ -2,14 +2,25 @@ import type { FastifyInstance } from "fastify";
 import {
   countUsers,
   insertUser,
+  listIntegrationChecks,
   listProviders,
   listSettings,
   openDatabase,
   putSetting,
+  upsertIntegrationCheck,
   upsertProvider,
   type Db,
 } from "@subwave-ai/db";
 import {
+  applyStoredVerification,
+  CONFIGURED_UNVERIFIED_MESSAGE,
+  findMatchingIntegrationCheck,
+  integrationConfigFingerprint,
+  integrationIsConfigured,
+  integrationStatus,
+  isNavidromeConfigured,
+  isOllamaConfigured,
+  isSubwaveRadioConfigured,
   loadConfig,
   mergeAppConfigPatch,
   publicSettings,
@@ -17,7 +28,11 @@ import {
   writeAppConfig,
   type AppConfig,
   type AppConfigPatch,
+  type CoreIntegration,
+  type IntegrationName,
+  type IntegrationReport,
   type RuntimeConfig,
+  type StoredIntegrationCheck,
 } from "@subwave-ai/shared";
 import { hashPassword } from "./auth.js";
 import { diskReport } from "./disk.js";
@@ -83,8 +98,28 @@ export function syncProviders(db: Db, config: RuntimeConfig): void {
 export function commitRuntimeConfig(app: FastifyInstance, next: AppConfig): void {
   writeAppConfig(writableConfigPath(), next);
   const reloaded = loadConfig({ configPath: writableConfigPath() });
+  applyStoredVerification(reloaded, listIntegrationChecks(app.db));
   replaceRuntimeConfig(app, reloaded);
   syncProviders(app.db, app.config);
+}
+
+/** Persist a test-connection probe. `ready` is the only state that verifies the current fingerprint. */
+export function recordIntegrationProbe(app: FastifyInstance, integration: IntegrationName, state: string): void {
+  const fingerprint = integrationConfigFingerprint(app.config, integration);
+  if (fingerprint) {
+    upsertIntegrationCheck(app.db, {
+      integration,
+      state,
+      fingerprint,
+      testedAt: Date.now(),
+    });
+  }
+  applyStoredVerification(app.config, listIntegrationChecks(app.db));
+  syncProviders(app.db, app.config);
+}
+
+export function matchingIntegrationCheck(config: RuntimeConfig, db: Db, integration: IntegrationName): StoredIntegrationCheck | null {
+  return findMatchingIntegrationCheck(config, integration, listIntegrationChecks(db));
 }
 
 export function commitConfigPatch(app: FastifyInstance, patch: AppConfigPatch): void {
@@ -107,6 +142,42 @@ export function acquisitionUnavailable(config: RuntimeConfig): boolean {
   return config.acquisition.verify_status !== "verified";
 }
 
+function integrationDoctor(
+  config: RuntimeConfig,
+  kind: CoreIntegration,
+  probed: IntegrationReport,
+  checks: StoredIntegrationCheck[],
+) {
+  if (!integrationIsConfigured(config, kind)) {
+    return { state: "not_configured" as const, detail: probed.detail, probed: false };
+  }
+  const check = findMatchingIntegrationCheck(config, kind, checks);
+  if (!check) {
+    return { state: "configured_unverified" as const, detail: CONFIGURED_UNVERIFIED_MESSAGE, probed: false };
+  }
+  if (check.state !== "ready") {
+    return { state: check.state, detail: check.state, probed: true };
+  }
+  if (probed.state) return { state: probed.state, detail: probed.detail, probed: probed.probed };
+  return { state: "ready" as const, detail: "ready", probed: true };
+}
+
+function acquisitionDoctor(config: RuntimeConfig, checks: StoredIntegrationCheck[]) {
+  if (!config.acquisition.enabled) {
+    return { state: "disabled" as const, detail: "acquisition is disabled", probed: false };
+  }
+  const url = config.acquisition.base_url.trim();
+  const key = Boolean(config.secrets.slskdApiKey?.trim());
+  if (config.acquisition.provider !== "slskd" || !url || !key) {
+    return { state: "not_configured" as const, detail: "acquisition is missing base_url or API key", probed: false };
+  }
+  const check = findMatchingIntegrationCheck(config, "acquisition", checks);
+  if (!check) {
+    return { state: "configured_unverified" as const, detail: CONFIGURED_UNVERIFIED_MESSAGE, probed: false };
+  }
+  return { state: check.state, detail: check.state === "ready" ? "ready" : check.state, probed: true };
+}
+
 export function doctorReport(db: Db, config: RuntimeConfig) {
   let dbOk = true;
   try {
@@ -115,18 +186,35 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
     dbOk = false;
   }
   const disk = diskReport(config);
-  const modelConfigured = Boolean(config.llm.model);
   const acquire_unavailable = acquisitionUnavailable(config);
+  const providers = listProviders(db) as Array<{ id: string; last_health_json: string | null }>;
+  const checks = listIntegrationChecks(db);
+  const healthOf = (id: string) => providers.find((row) => row.id === id)?.last_health_json ?? null;
+  const probed = integrationStatus(config, {
+    llm: healthOf("llm-ollama"),
+    library: healthOf("library-navidrome"),
+    radio: healthOf("radio-subwave"),
+  });
+  const integrations = {
+    llm: integrationDoctor(config, "llm", probed.llm, checks),
+    library: integrationDoctor(config, "library", probed.library, checks),
+    radio: integrationDoctor(config, "radio", probed.radio, checks),
+    acquisition: acquisitionDoctor(config, checks),
+  };
+  const upgradeNotes = (["llm", "library", "radio", "acquisition"] as const)
+    .filter((kind) => integrations[kind].state === "configured_unverified")
+    .map((kind) => `${kind}: ${CONFIGURED_UNVERIFIED_MESSAGE}`);
   return {
-    ok: dbOk && modelConfigured && disk.ok,
+    ok: dbOk && disk.ok,
     database: dbOk,
     disk,
     bind: { host: config.server.host, port: config.server.port },
     ollama: "external-only",
+    integrations,
     acquire_unavailable,
     config: publicSettings(config),
     settings: listSettings(db),
-    providers: listProviders(db),
+    providers,
     notes: [
       "API is sync+enqueue only. Workers own LLM, library, acquisition, radio, and live health probes.",
       "Ollama is never installed, updated, or pulled by this process.",
@@ -137,6 +225,10 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
       ...(acquire_unavailable
         ? ["AcquisitionProvider is optional until a verified download daemon exists (acquire_unavailable)."]
         : []),
+      ...upgradeNotes,
+      ...(!isOllamaConfigured(config) ? ["Ollama is not_configured. Set OLLAMA_BASE_URL and OLLAMA_MODEL on the external host. This process does not install or pull a model."] : []),
+      ...(!isNavidromeConfigured(config) ? ["Navidrome is not_configured until URL, username, and password are set."] : []),
+      ...(!isSubwaveRadioConfigured(config) ? ["SUB/WAVE radio is not_configured until URL, admin user, and password are set."] : []),
     ],
   };
 }

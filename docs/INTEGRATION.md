@@ -7,6 +7,8 @@
 
 Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
+Navidrome, SUB/WAVE, and Ollama settings are **optional at first boot**. Empty or unset URL, user, and password/secret values are the same thing. The API still starts. Status is `not_configured` until they are set (distinct from `unreachable`, which is only used after a configured health probe cannot connect). Calls that need the integration fail with a not-configured error. Ollama is never installed, and no model name is defaulted.
+
 ## Live environment examples (A3 — operator config only)
 
 - Oracle VM: aarch64 Linux
@@ -21,6 +23,10 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
 ## Ollama (VERIFIED docs) — external only, never install/manage
 
+`llm.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Ollama until that field is `verified`. Filling in the URL does not set it. If the URL and model are filled and `verify_status` was never written, doctor, the status API, and the dashboard report `configured_unverified` with “configured but unverified, run test connection”. That is not a promotion to verified.
+
+`POST /api/v1/llm/test-connection` is the only writer of a verified LLM result. It stores the probe in `integration_checks` (state, tested_at, and an HMAC-SHA256 fingerprint that is not returned). It is a read-only `GET /api/tags` and checks that the configured model is in the list. It does not pull, install, or restart Ollama. Failure stores the probe state (`unreachable`, `auth_failed`, or `model_missing`) and leaves `verify_status` unverified. Yaml `verify_status` is ignored. `GET /api/v1/llm/status` reads the stored result and does not call Ollama. Saving settings cannot set `verified`.
+
 - HTTP `base_url` configurable (local-dev placeholder often `http://127.0.0.1:11434`; live example above). Not a required default.
 - Classification: `POST /api/chat` with `stream: false` + `format` JSON schema
 - Health: `GET /api/tags` or `GET /api/version`
@@ -31,6 +37,10 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
 ## Navidrome (VERIFIED docs) — MusicLibraryProvider — **passive**
 
+`library.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Navidrome until that field is `verified`. Filling in the URL does not set it. Filled URL, username, and password with no explicit `verify_status` report `configured_unverified` (“configured but unverified, run test connection”).
+
+`POST /api/v1/library/test-connection` is the only writer of a verified library result. It stores the probe in `integration_checks`. It calls Subsonic `GET /rest/ping` with the existing token auth and `f=json`. Ready requires `status: ok`. Failure stores `unreachable` or `auth_failed`. The password is not logged, returned, or stored. The fingerprint is one HMAC-SHA256 of the settings and the password, keyed by `secrets/verification_hmac_key`. The fingerprint itself is not logged or returned. `GET /api/v1/library/status` reads the stored result and does not call Navidrome.
+
 - Subsonic API 1.16.1 at `{url}/rest`, prefer `f=json`
 - Auth: `u` + `t/s` (md5 token from password + salt)
 - Happy-path methods: `search3`, `getSong`
@@ -39,6 +49,10 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 - A3: SmartRadio does **not** manage Navidrome scanning on the happy path. After a validated file is in `/music/library`, the existing ~1 minute scanner discovers it.
 
 ## SUB/WAVE (VERIFIED = perminder-klair/subwave) — RadioProvider
+
+`radio.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call SUB/WAVE until that field is `verified`. Filling in the URL does not set it. Filled URL, admin user, and password with no explicit `verify_status` report `configured_unverified` (“configured but unverified, run test connection”).
+
+`POST /api/v1/radio/test-connection` is the only writer of a verified radio result. It stores the probe in `integration_checks`. It calls public `GET /health` (must report `{"status":"on-air"}`) and one authenticated read-only admin call, `GET /dj/search?q=a&limit=1`. It does not call `/dj/say` or `/dj/queue-track`. Failure stores `unreachable`, `auth_failed`, or `unhealthy`. Credentials are not logged or returned. `GET /api/v1/radio/status` reads the stored result and does not call SUB/WAVE.
 
 - HTTP JSON; treat `base_url` as opaque (live example already includes `/api`: `http://127.0.0.1:7700/api`)
 - Public (relative to that opaque base): `GET /health` → `{"status":"on-air"}`, `GET /now-playing`, `GET /state`; `POST /request` (202+requestId); `GET /request/:id`
@@ -76,9 +90,9 @@ Success body: `{ ok, mode, kind, spoken, sfx }`.
 - Auth: `X-API-Key` or session JWT
 - Health (when verifying): `GET /application` + `GET /server`. Ready requires application `version` plus Soulseek `isConnected` and `isLoggedIn` (or `state` flags). `isConnected` alone is not logged in. Optional external slskd: `docs/SLSKD.md`.
 - Search: `POST /searches` `{ id, searchText }`, then poll `GET /searches/{id}?includeResponses=true` (fallback `GET /searches/{id}/responses`) until complete
-- Select a usable file `{ username, filename, size }` in an isolated selection module
-- Download: `POST /transfers/downloads/{username}` body `[{filename,size}]`
-- Poll `GET /transfers/downloads` until the **correlated** transfer is **Completed** and **Succeeded** (not Errored); then resolve the real file under configured `paths.downloads`
+- Select a usable file `{ username, filename, size }` in an isolated selection module. Config: `acquisition.selection.min_file_size_mb` (default 1 mebibyte) and `max_file_size_mb` (default 200), optional `max_duration_seconds` (no limit unless set; uses slskd `length`), `max_sample_rate` (default 48000 Hz) and `max_bit_depth` (default 24, both broadcast-friendly and configurable), and `version_penalty_terms` (including stem, stems, multitrack, and acapella / a cappella / acappella). Junk paths (`._` basename or a `__MACOSX` segment) are excluded. A reported sample rate or bit depth above its cap is excluded; a file that omits the field stays eligible and ranks neutral on that key. When a request title is passed, its significant tokens must appear in the basename or a parent folder (diacritics stripped, bracketed feat/ft credits dropped, version terms not required). Artist tokens are a tiebreak, not a filter. A call with no title skips that filter; the worker always passes artist and title. Rank: extension (`.flac`, `.wav`, `.m4a`, `.mp3`, `.ogg`), then a requested version above a clean file above a penalized one, then artist tokens in the path, then peer availability (free upload slot, then shorter queue, then faster upload; missing fields last), then bit depth / sample rate / bit rate at or under the caps (a higher rate beyond the cap is not rewarded), then size closest to the same-extension median, then username and filename. `lockedFiles` and `isLocked: true` are never chosen. An empty `extension` falls back to the filename. If the filters remove every candidate, the selector returns no pick and does not relax them; the worker fails the request as `no_suitable_result` (counts per filter, including `junk`, `min_file_size`, and `title_mismatch`) without enqueueing. Zero responses are `no usable search result`, not that outcome. Search responses have no id.
+- Download: `POST /transfers/downloads/{username}` body `[{filename,size}]` with the original filename string (Windows backslashes are not rewritten)
+- Poll `GET /transfers/downloads` until the **correlated** transfer is **Completed** and **Succeeded** (not Errored). Correlation prefers a transfer id observed from the enqueue response; otherwise exact username + full filename + size. A basename match is used only when exactly one of that user's rows matches the basename and the size. Then resolve the real file under configured `paths.downloads`
 - If not slskd, leave unverified — do not invent other APIs
 - **Optional:** SmartRadio runs with acquisition disabled, unset, or unverified → doctor/`acquire_unavailable`. No Oracle/ARM64 requirements in app code. Landing dir is config-only (live example `/music/downloads`).
 - Soulseek username and password are **not** SmartRadio settings. slskd keeps them. SmartRadio stores only `secrets/slskd_api_key`.
@@ -92,6 +106,6 @@ Admin session required. Responses never include the API key — only `secrets_pr
 | `GET` | `/api/v1/acquisition/settings` | `enabled`, `provider` (`slskd`, other names allowed), `base_url`, `paths.downloads`, `paths.library`, `verify_status`, `secrets_present.slskd_api_key` |
 | `PUT` | `/api/v1/acquisition/settings` | Same fields plus write-only `slskd_api_key`. Does **not** set `verified`. Changing provider, base URL, or API key sets `unverified`. |
 | `POST` | `/api/v1/acquisition/test-connection` | Read-only `GET /api/v0/application` and `GET /api/v0/server` with `X-API-Key`. No search or download. Sets `verified` only when the host is reachable, auth succeeds, application JSON includes `version`, and Soulseek is connected and logged in (`isConnected` and `isLoggedIn`, or server `state` flags). Otherwise persists `unverified`. |
-| `GET` | `/api/v1/acquisition/status` | `disabled`, `not_configured`, `unreachable`, `auth_failed`, `reachable`, `soulseek_not_connected`, `soulseek_not_logged_in`, or `ready`. Disabled and not-configured come from config and do not call slskd. Every other state is the live probe, not a copy of saved `verify_status`. |
+| `GET` | `/api/v1/acquisition/status` | `disabled`, `not_configured`, `configured_unverified`, or the stored probe state (`unreachable`, `auth_failed`, `reachable`, `soulseek_not_connected`, `soulseek_not_logged_in`, `ready`). It does not call slskd. `POST /acquisition/test-connection` is the live probe and the only writer of a verified row. |
 
 `POST /api/v1/setup` accepts `config.acquisition.enabled`, `provider`, `base_url`, and `paths.downloads` / `paths.library`, and `secrets.slskd_api_key`. It can persist `verify_status` of `unverified` or `needs_server_inspection`. It cannot set `verified`.

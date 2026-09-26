@@ -16,7 +16,7 @@ sudo ./install.sh
 
 `install.sh` checks OS/arch/resources, creates persistent directories, writes `.env` / `config/subwave.yaml` / `secrets/` from **your** answers (no hard-coded production IPs, credentials, or model names), installs Node dependencies, builds the web UI, and installs systemd units **or** Compose.
 
-Ollama is **external**. The installer never installs, updates, pulls, or otherwise manages Ollama or any LLM weights.
+Ollama is **external**. The installer never installs, updates, pulls, or otherwise manages Ollama or any LLM weights. Navidrome, SUB/WAVE, and Ollama URL/user/password/model values may be left empty on first boot. Empty is the same as unset. The API starts and reports those integrations as `not_configured` until the setup wizard or `.env` fills them in. `unreachable` is a later live-probe result, not a missing setting.
 
 After install it prints the web UI URL (API + UI on the same origin when `apps/web/dist` exists).
 
@@ -32,7 +32,8 @@ Documented so operators can fill yaml/env on an Oracle aarch64 Linux VM. **Do no
 | Ollama | `OLLAMA_BASE_URL=http://100.119.17.28:11434` (v0.34.0 over Tailscale). Set `OLLAMA_MODEL` yourself — do not hard-code `qwen3:8b` even if that tag exists. |
 | Downloads / landing | `SUBWAVE_DOWNLOADS_DIR=/music/downloads` (acquisition landing/staging) |
 | Library | `SUBWAVE_LIBRARY_DIR=/music/library` (final library; Navidrome discovers files here) |
-| Acquisition | **No daemon on Oracle today.** Leave slskd disabled, or URL/key unset, or `verify_status: unverified`. `verified` is set only by admin test-connection. Doctor reports `acquire_unavailable`. |
+| LLM / library / radio | A blank config does not call Ollama, Navidrome, or SUB/WAVE (`not_configured`). `verified` is a stored test-connection result, never a yaml or env `verify_status`. A filled config without a matching `ready` row is `configured_unverified`: “configured but unverified, run test connection” in `GET /api/v1/doctor` (printed by `./doctor.sh`). |
+| Acquisition | **No daemon on Oracle today.** Leave slskd disabled or the URL/key unset. `verified` is a stored test-connection result. An install whose yaml said `verified` shows `configured_unverified` until test-connection is run again. Doctor reports `acquire_unavailable` until then. |
 
 Navidrome is **passive** on the happy path: once a validated track is in `/music/library`, the existing ~1 minute scanner indexes it. Do not configure SmartRadio as if it must call `startScan` for production ingest. Admin scan remains optional ops.
 

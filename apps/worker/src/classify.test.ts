@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "@subwave-ai/shared";
 import { createRequest, enqueueJob, getRequest, listRequestEvents, openDatabase } from "@subwave-ai/db";
-import { OllamaProvider, type ProviderBundle } from "@subwave-ai/providers";
+import { createProviders, OllamaProvider, type ProviderBundle } from "@subwave-ai/providers";
 import { claimAndRun } from "./dispatch.js";
 import type { WorkerContext } from "./context.js";
 
@@ -79,6 +79,7 @@ describe("worker classify", () => {
     const llm = new OllamaProvider({
       baseUrl: "http://ollama.test",
       model: "test-model",
+      verifyStatus: "verified",
       fetch: async () =>
         new Response(JSON.stringify({ message: { content: JSON.stringify(classification) } }), {
           status: 200,
@@ -109,6 +110,7 @@ describe("worker classify", () => {
     const llm = new OllamaProvider({
       baseUrl: "http://ollama.test",
       model: "test-model",
+      verifyStatus: "verified",
       fetch: async () =>
         new Response(
           JSON.stringify({
@@ -133,5 +135,22 @@ describe("worker classify", () => {
       workerId: "worker-test",
     });
     expect(getRequest(db, request.id)?.status).toBe("REJECTED");
+  });
+
+  it("fails a filled but unverified Ollama config with an actionable message and does not call it", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    let called = false;
+    const providers = createProviders(config, async () => {
+      called = true;
+      throw new Error("fetch should not be called");
+    });
+    const request = createRequest(db, { rawQuery: "play that techno track" });
+    enqueueJob(db, { type: "classify", requestId: request.id });
+    await claimAndRun({ db, config, providers, workerId: "worker-test" });
+    const updated = getRequest(db, request.id);
+    expect(updated?.status).toBe("FAILED");
+    expect(updated?.error).toBe("configured but unverified, run test connection");
+    expect(called).toBe(false);
   });
 });

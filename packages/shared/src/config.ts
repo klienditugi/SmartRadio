@@ -3,8 +3,121 @@ import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { loadSecrets, type LoadedSecrets } from "./secrets.js";
+import {
+  describeIntegration,
+  NAVIDROME_NOT_CONFIGURED,
+  ollamaNotConfiguredDetail,
+  SUBWAVE_RADIO_NOT_CONFIGURED,
+  type IntegrationReport,
+} from "./status.js";
 
-const envString = z.string().min(1);
+/** Blank, whitespace, null, and missing are the same unset value. No invented default. */
+const optionalSetting = z.preprocess((value) => {
+  if (value === undefined || value === null) return "";
+  return value;
+}, z.string().trim());
+
+function nonemptyEnv(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/** Mebibytes (1024×1024 bytes). Default search-hit size cap. */
+export const DEFAULT_MAX_FILE_SIZE_MB = 200;
+
+/** Mebibytes (1024×1024 bytes). Default search-hit size floor. */
+export const DEFAULT_MIN_FILE_SIZE_MB = 1;
+
+/** Broadcast-friendly sample-rate cap (Hz). Files that report a higher rate are not selected. */
+export const DEFAULT_MAX_SAMPLE_RATE = 48_000;
+
+/** Broadcast-friendly bit-depth cap. Files that report a higher depth are not selected. */
+export const DEFAULT_MAX_BIT_DEPTH = 24;
+
+/**
+ * Basename / parent-folder words that rank below a clean match.
+ * Word-boundary and case-insensitive. When the request artist or title contains
+ * a term, files that match that term rank above files that do not.
+ */
+export const DEFAULT_VERSION_PENALTY_TERMS = [
+  "remix",
+  "live",
+  "edit",
+  "extended",
+  "radio edit",
+  "instrumental",
+  "karaoke",
+  "cover",
+  "acapella",
+  "a cappella",
+  "acappella",
+  "stem",
+  "stems",
+  "multitrack",
+  "demo",
+] as const;
+
+/**
+ * Basename tokens that rank below a full track when the basename itself does
+ * not contain the request title. Penalty only — the file can still be selected.
+ * Whole tokens, case-insensitive. `song` covers Rock Band `song.ogg`.
+ */
+export const DEFAULT_INSTRUMENT_PART_BASENAMES = [
+  "drums",
+  "drum",
+  "bass",
+  "guitar",
+  "guitars",
+  "vocals",
+  "vocal",
+  "vox",
+  "keys",
+  "piano",
+  "synth",
+  "backing",
+  "click",
+  "rhythm",
+  "lead",
+  "song",
+  "crowd",
+  "preview",
+] as const;
+
+const acquisitionSelectionSchema = z
+  .object({
+    /** Files larger than this (mebibytes, 1024×1024) are not selected. */
+    max_file_size_mb: z.number().positive().default(DEFAULT_MAX_FILE_SIZE_MB),
+    /**
+     * Files smaller than this (mebibytes, 1024×1024) are not selected.
+     * Omit for 1. Null disables the floor.
+     */
+    min_file_size_mb: z.number().positive().nullable().default(DEFAULT_MIN_FILE_SIZE_MB),
+    /**
+     * When set, files whose slskd `length` (seconds) is greater than this are not selected.
+     * Omit or null: no duration limit. Files that do not report `length` stay eligible.
+     */
+    max_duration_seconds: z.number().positive().nullable().optional(),
+    /**
+     * Hz. Files that report `sampleRate` above this are not selected.
+     * Omit for the broadcast-friendly default (48000). Null disables the cap.
+     * Files that do not report `sampleRate` stay eligible.
+     */
+    max_sample_rate: z.number().int().positive().nullable().default(DEFAULT_MAX_SAMPLE_RATE),
+    /**
+     * Files that report `bitDepth` above this are not selected.
+     * Omit for the broadcast-friendly default (24). Null disables the cap.
+     * Files that do not report `bitDepth` stay eligible.
+     */
+    max_bit_depth: z.number().int().positive().nullable().default(DEFAULT_MAX_BIT_DEPTH),
+    version_penalty_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_VERSION_PENALTY_TERMS]),
+    /**
+     * Basename tokens that rank below a track file when the basename does not
+     * contain the request title. Empty array disables the penalty.
+     */
+    instrument_part_basenames: z.array(z.string().min(1)).default(() => [...DEFAULT_INSTRUMENT_PART_BASENAMES]),
+  })
+  .default({});
 
 export const stationPolicySchema = z.object({
   require_electronic: z.boolean().default(true),
@@ -53,27 +166,39 @@ export const appConfigSchema = z.object({
     })
     .default({}),
   policy: stationPolicySchema.default({}),
-  llm: z.object({
-    provider: z.literal("ollama").default("ollama"),
-    base_url: envString,
-    model: z.string().min(1),
-    timeout_ms: z.number().int().positive().default(120_000),
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("verified"),
-  }),
-  library: z.object({
-    provider: z.literal("navidrome").default("navidrome"),
-    base_url: z.string().min(1),
-    username: z.string().min(1),
-    client_name: z.string().min(1).default("subwave-ai"),
-    api_version: z.string().min(1).default("1.16.1"),
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("verified"),
-  }),
-  radio: z.object({
-    provider: z.literal("subwave").default("subwave"),
-    base_url: z.string().min(1),
-    admin_user: z.string().min(1),
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("verified"),
-  }),
+  llm: z
+    .object({
+      provider: z.literal("ollama").default("ollama"),
+      /** Optional. Empty is unset. Never default a model name or host. */
+      base_url: optionalSetting,
+      model: optionalSetting,
+      timeout_ms: z.number().int().positive().default(120_000),
+      /** Parsed for old configs. Ignored as a source of verified. */
+      verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    })
+    .default({}),
+  library: z
+    .object({
+      provider: z.literal("navidrome").default("navidrome"),
+      /** Optional. Empty URL, username, or password is `not_configured`. */
+      base_url: optionalSetting,
+      username: optionalSetting,
+      client_name: z.string().min(1).default("subwave-ai"),
+      api_version: z.string().min(1).default("1.16.1"),
+      /** Parsed for old configs. Ignored as a source of verified. */
+      verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    })
+    .default({}),
+  radio: z
+    .object({
+      provider: z.literal("subwave").default("subwave"),
+      /** Optional. Empty URL, admin user, or password is `not_configured`. */
+      base_url: optionalSetting,
+      admin_user: optionalSetting,
+      /** Parsed for old configs. Ignored as a source of verified. */
+      verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    })
+    .default({}),
   acquisition: z.object({
     /** Omitted field stays on so existing verified installs keep working. Set false to disable. */
     enabled: z.boolean().default(true),
@@ -82,12 +207,63 @@ export const appConfigSchema = z.object({
     base_url: z.string().trim().default(""),
     /** Omitted means unverified. `verified` is written only after a live test connection. */
     verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    /** Deterministic search-hit ranking. Yaml/env; the settings UI does not edit this. */
+    selection: acquisitionSelectionSchema,
   }),
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
 
-export type RuntimeConfig = AppConfig & { secrets: LoadedSecrets };
+export type CoreIntegration = "llm" | "library" | "radio";
+
+/** Shown when settings are filled and no stored test-connection result matches. Not a promotion to verified. */
+export const CONFIGURED_UNVERIFIED_MESSAGE = "configured but unverified, run test connection";
+
+const VERIFY_STATUS_SECTIONS = ["llm", "library", "radio", "acquisition"] as const;
+
+let verifyStatusDeprecationLogged = false;
+
+/** Test helper. Production logs at most once per process. */
+export function resetDeprecatedVerifyStatusWarning(): void {
+  verifyStatusDeprecationLogged = false;
+}
+
+/**
+ * One non-secret warning when yaml or env still carries verify_status.
+ * The value is ignored. Section and env key names only.
+ */
+export function warnDeprecatedVerifyStatus(raw: unknown, env: NodeJS.ProcessEnv): void {
+  if (verifyStatusDeprecationLogged) return;
+  const root = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const sections = VERIFY_STATUS_SECTIONS.filter((key) => {
+    const section = root[key];
+    return Boolean(section && typeof section === "object" && !Array.isArray(section) && "verify_status" in section);
+  });
+  const envKeys = Object.keys(env).filter((key) => /verify_status/i.test(key));
+  if (sections.length === 0 && envKeys.length === 0) return;
+  verifyStatusDeprecationLogged = true;
+  const where = [...sections, ...envKeys].join(", ");
+  console.warn(
+    `verify_status in yaml or env is deprecated and ignored (${where}). Verified comes only from a stored test-connection result.`,
+  );
+}
+
+export type VerifyStatusExplicit = Record<CoreIntegration, boolean>;
+
+export function readVerifyStatusExplicit(raw: unknown): VerifyStatusExplicit {
+  const root = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const present = (key: CoreIntegration) => {
+    const section = root[key];
+    return Boolean(section && typeof section === "object" && !Array.isArray(section) && "verify_status" in section);
+  };
+  return { llm: present("llm"), library: present("library"), radio: present("radio") };
+}
+
+export type RuntimeConfig = AppConfig & {
+  secrets: LoadedSecrets;
+  /** False when that section's yaml/env object omitted verify_status and the schema default applied. */
+  verify_status_explicit?: VerifyStatusExplicit;
+};
 
 const ENV_INTERPOLATION = /\$\{([A-Z0-9_]+)\}/g;
 
@@ -136,22 +312,71 @@ export function applyEnvOverrides(raw: Record<string, unknown>, env: NodeJS.Proc
   next.auth = auth;
 
   const llm = (next.llm ?? {}) as Record<string, unknown>;
-  if (env.OLLAMA_BASE_URL) set(llm, "base_url", env.OLLAMA_BASE_URL);
-  if (env.OLLAMA_MODEL) set(llm, "model", env.OLLAMA_MODEL);
+  const ollamaUrl = nonemptyEnv(env.OLLAMA_BASE_URL);
+  const ollamaModel = nonemptyEnv(env.OLLAMA_MODEL);
+  if (ollamaUrl) set(llm, "base_url", ollamaUrl);
+  if (ollamaModel) set(llm, "model", ollamaModel);
   next.llm = llm;
 
   const library = (next.library ?? {}) as Record<string, unknown>;
-  if (env.NAVIDROME_URL) set(library, "base_url", env.NAVIDROME_URL);
-  if (env.NAVIDROME_USER) set(library, "username", env.NAVIDROME_USER);
+  const navidromeUrl = nonemptyEnv(env.NAVIDROME_URL);
+  const navidromeUser = nonemptyEnv(env.NAVIDROME_USER);
+  if (navidromeUrl) set(library, "base_url", navidromeUrl);
+  if (navidromeUser) set(library, "username", navidromeUser);
   next.library = library;
 
   const radio = (next.radio ?? {}) as Record<string, unknown>;
-  if (env.SUBWAVE_RADIO_URL) set(radio, "base_url", env.SUBWAVE_RADIO_URL);
-  if (env.SUBWAVE_RADIO_ADMIN_USER) set(radio, "admin_user", env.SUBWAVE_RADIO_ADMIN_USER);
+  const radioUrl = nonemptyEnv(env.SUBWAVE_RADIO_URL);
+  const radioUser = nonemptyEnv(env.SUBWAVE_RADIO_ADMIN_USER);
+  if (radioUrl) set(radio, "base_url", radioUrl);
+  if (radioUser) set(radio, "admin_user", radioUser);
   next.radio = radio;
 
   const acquisition = (next.acquisition ?? {}) as Record<string, unknown>;
   if (env.SLSKD_URL) set(acquisition, "base_url", env.SLSKD_URL);
+  const selection = { ...((acquisition.selection ?? {}) as Record<string, unknown>) };
+  let selectionTouched = false;
+  const sizeMb = env.SLSKD_MAX_FILE_SIZE_MB?.trim();
+  if (sizeMb) {
+    const mb = Number(sizeMb);
+    if (Number.isFinite(mb) && mb > 0) {
+      selection.max_file_size_mb = mb;
+      selectionTouched = true;
+    }
+  }
+  const minSizeMb = env.SLSKD_MIN_FILE_SIZE_MB?.trim();
+  if (minSizeMb) {
+    const mb = Number(minSizeMb);
+    if (Number.isFinite(mb) && mb > 0) {
+      selection.min_file_size_mb = mb;
+      selectionTouched = true;
+    }
+  }
+  const durationRaw = env.SLSKD_MAX_DURATION_SECONDS?.trim();
+  if (durationRaw) {
+    const seconds = Number(durationRaw);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      selection.max_duration_seconds = seconds;
+      selectionTouched = true;
+    }
+  }
+  const sampleRateRaw = env.SLSKD_MAX_SAMPLE_RATE?.trim();
+  if (sampleRateRaw) {
+    const sampleRate = Number(sampleRateRaw);
+    if (Number.isFinite(sampleRate) && sampleRate > 0) {
+      selection.max_sample_rate = sampleRate;
+      selectionTouched = true;
+    }
+  }
+  const bitDepthRaw = env.SLSKD_MAX_BIT_DEPTH?.trim();
+  if (bitDepthRaw) {
+    const bitDepth = Number(bitDepthRaw);
+    if (Number.isFinite(bitDepth) && bitDepth > 0) {
+      selection.max_bit_depth = bitDepth;
+      selectionTouched = true;
+    }
+  }
+  if (selectionTouched) acquisition.selection = selection;
   next.acquisition = acquisition;
 
   return next;
@@ -207,17 +432,10 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
   const rawYaml = parseYaml(readFileSync(configPath, "utf8"));
   const interpolated = interpolateEnv(rawYaml, env) as Record<string, unknown>;
   const overridden = applyEnvOverrides(interpolated, env);
-  let parsed: AppConfig;
-  try {
-    parsed = parseAppConfig(overridden);
-  } catch (err) {
-    const llm = (overridden.llm ?? {}) as { model?: string };
-    if (!llm.model) {
-      throw new Error(
-        "LLM model is not configured. Set OLLAMA_MODEL (or llm.model in yaml) to a model already present on the external Ollama host. This app never defaults or pulls a model name.",
-      );
-    }
-    throw err;
+  const parsed = parseAppConfig(overridden);
+  warnDeprecatedVerifyStatus(overridden, env);
+  for (const section of VERIFY_STATUS_SECTIONS) {
+    parsed[section].verify_status = "unverified";
   }
   const secretsDir = options.secretsDir
     ? path.resolve(options.secretsDir)
@@ -227,7 +445,57 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
     ...parsed,
     paths: { ...parsed.paths, secrets_dir: secretsDir },
     secrets,
+    verify_status_explicit: readVerifyStatusExplicit(overridden),
   };
+}
+
+export function isOllamaConfigured(config: RuntimeConfig): boolean {
+  return Boolean(config.llm.base_url.trim() && config.llm.model.trim());
+}
+
+export function isNavidromeConfigured(config: RuntimeConfig): boolean {
+  return Boolean(
+    config.library.base_url.trim() && config.library.username.trim() && config.secrets.navidromePassword?.trim(),
+  );
+}
+
+export function isSubwaveRadioConfigured(config: RuntimeConfig): boolean {
+  return Boolean(
+    config.radio.base_url.trim() && config.radio.admin_user.trim() && config.secrets.subwaveAdminPassword?.trim(),
+  );
+}
+
+export type IntegrationStatusMap = {
+  llm: IntegrationReport;
+  library: IntegrationReport;
+  radio: IntegrationReport;
+};
+
+export function integrationStatus(
+  config: RuntimeConfig,
+  health: { llm?: string | null; library?: string | null; radio?: string | null } = {},
+): IntegrationStatusMap {
+  return {
+    llm: describeIntegration(
+      isOllamaConfigured(config),
+      ollamaNotConfiguredDetail({ baseUrl: config.llm.base_url, model: config.llm.model }),
+      health.llm,
+    ),
+    library: describeIntegration(isNavidromeConfigured(config), NAVIDROME_NOT_CONFIGURED, health.library),
+    radio: describeIntegration(isSubwaveRadioConfigured(config), SUBWAVE_RADIO_NOT_CONFIGURED, health.radio),
+  };
+}
+
+export function integrationIsConfigured(config: RuntimeConfig, kind: CoreIntegration): boolean {
+  if (kind === "llm") return isOllamaConfigured(config);
+  if (kind === "library") return isNavidromeConfigured(config);
+  return isSubwaveRadioConfigured(config);
+}
+
+/** Filled settings that are not verified by a stored test-connection result. */
+export function isConfiguredUnverified(config: RuntimeConfig, kind: CoreIntegration): boolean {
+  if (!integrationIsConfigured(config, kind)) return false;
+  return config[kind].verify_status !== "verified";
 }
 
 export function publicSettings(config: RuntimeConfig) {
@@ -258,7 +526,9 @@ export function publicSettings(config: RuntimeConfig) {
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
       verify_status: config.acquisition.verify_status,
+      selection: selectionSettings(config.acquisition.selection),
     },
+    integrations: integrationStatus(config),
     secrets_present: {
       admin_password: Boolean(config.secrets.adminPassword),
       session_secret: Boolean(config.secrets.sessionSecret),
@@ -283,9 +553,9 @@ export type AppConfigPatch = {
   files?: Partial<AppConfig["files"]>;
   auth?: Partial<Pick<AppConfig["auth"], "admin_username" | "session_ttl_hours">>;
   policy?: Partial<AppConfig["policy"]>;
-  llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms">>;
-  library?: Partial<Pick<AppConfig["library"], "base_url" | "username">>;
-  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user">>;
+  llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms" | "verify_status">>;
+  library?: Partial<Pick<AppConfig["library"], "base_url" | "username" | "verify_status">>;
+  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user" | "verify_status">>;
   acquisition?: Partial<Pick<AppConfig["acquisition"], "enabled" | "provider" | "base_url" | "verify_status">>;
 };
 
@@ -293,6 +563,56 @@ export type AppConfigPatch = {
  * Settings saves may persist enabled, provider, base URL, and a non-verified status.
  * They cannot promote verify_status to verified. URL, provider, or API key changes clear it.
  */
+const SETTINGS_CANNOT_VERIFY = "verify_status cannot be set to verified by saving settings; use test-connection";
+
+/** Setup and settings saves cannot promote any integration to verified. */
+export function assertSettingsDoNotVerify(patch: AppConfigPatch | undefined): void {
+  const sections = [patch?.llm, patch?.library, patch?.radio, patch?.acquisition];
+  if (sections.some((section) => section?.verify_status === "verified")) {
+    throw new Error(SETTINGS_CANNOT_VERIFY);
+  }
+}
+
+/**
+ * URL, model, username, or password changes clear verify_status.
+ * They do not grant verified.
+ */
+export function clearIntegrationVerifyOnChange(
+  current: AppConfig,
+  patch: AppConfigPatch,
+  changed: { navidromePassword?: boolean; radioPassword?: boolean } = {},
+): AppConfigPatch {
+  const next: AppConfigPatch = { ...patch };
+  const llm = next.llm;
+  const llmChanged = Boolean(
+    llm &&
+      ((llm.base_url !== undefined && llm.base_url !== current.llm.base_url) ||
+        (llm.model !== undefined && llm.model !== current.llm.model)),
+  );
+  if (llmChanged && llm) next.llm = { ...llm, verify_status: "unverified" };
+
+  const library = next.library;
+  const libraryChanged =
+    Boolean(changed.navidromePassword) ||
+    Boolean(
+      library &&
+        ((library.base_url !== undefined && library.base_url !== current.library.base_url) ||
+          (library.username !== undefined && library.username !== current.library.username)),
+    );
+  if (libraryChanged) next.library = { ...(library ?? {}), verify_status: "unverified" };
+
+  const radio = next.radio;
+  const radioChanged =
+    Boolean(changed.radioPassword) ||
+    Boolean(
+      radio &&
+        ((radio.base_url !== undefined && radio.base_url !== current.radio.base_url) ||
+          (radio.admin_user !== undefined && radio.admin_user !== current.radio.admin_user)),
+    );
+  if (radioChanged) next.radio = { ...(radio ?? {}), verify_status: "unverified" };
+  return next;
+}
+
 export function normalizeAcquisitionSettingsPatch(
   current: AppConfig["acquisition"],
   incoming: Partial<AppConfig["acquisition"]> | undefined,
@@ -339,7 +659,6 @@ export function serializeAppConfig(config: AppConfig): string {
       base_url: config.llm.base_url,
       model: config.llm.model,
       timeout_ms: config.llm.timeout_ms,
-      verify_status: config.llm.verify_status,
     },
     library: {
       provider: config.library.provider,
@@ -347,22 +666,32 @@ export function serializeAppConfig(config: AppConfig): string {
       username: config.library.username,
       client_name: config.library.client_name,
       api_version: config.library.api_version,
-      verify_status: config.library.verify_status,
     },
     radio: {
       provider: config.radio.provider,
       base_url: config.radio.base_url,
       admin_user: config.radio.admin_user,
-      verify_status: config.radio.verify_status,
     },
     acquisition: {
       enabled: config.acquisition.enabled,
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
-      verify_status: config.acquisition.verify_status,
+      selection: selectionSettings(config.acquisition.selection),
     },
   };
   return `# Written by Sub Wave AI setup/settings. Secrets stay in paths.secrets_dir.\n${stringifyYaml(doc)}`;
+}
+
+function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
+  return {
+    max_file_size_mb: selection.max_file_size_mb,
+    min_file_size_mb: selection.min_file_size_mb,
+    ...(selection.max_duration_seconds != null ? { max_duration_seconds: selection.max_duration_seconds } : {}),
+    max_sample_rate: selection.max_sample_rate,
+    max_bit_depth: selection.max_bit_depth,
+    version_penalty_terms: [...selection.version_penalty_terms],
+    instrument_part_basenames: [...selection.instrument_part_basenames],
+  };
 }
 
 export function writeAppConfig(filePath: string, config: AppConfig): void {

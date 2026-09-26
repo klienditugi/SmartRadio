@@ -3,8 +3,8 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import type { RuntimeConfig } from "@subwave-ai/shared";
-import type { Db } from "@subwave-ai/db";
+import { applyStoredVerification, type RuntimeConfig } from "@subwave-ai/shared";
+import { listIntegrationChecks, type Db } from "@subwave-ai/db";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerRequestRoutes } from "./routes/requests.js";
@@ -12,6 +12,7 @@ import { registerAdminRoutes } from "./routes/admin.js";
 import { registerOpsRoutes } from "./routes/ops.js";
 import { registerSetupRoutes } from "./routes/setup.js";
 import { registerAcquisitionRoutes } from "./routes/acquisition.js";
+import { registerIntegrationRoutes } from "./routes/integrations.js";
 import { seedAdmin, syncProviders } from "./context.js";
 import { registerWebUi } from "./web.js";
 
@@ -25,7 +26,15 @@ export type BuildAppOptions = {
 const SECRET_LOG_REDACT = [
   "req.body.slskd_api_key",
   "req.body.secrets.slskd_api_key",
+  "req.body.admin_password",
+  "req.body.secrets.admin_password",
+  "req.body.navidrome_password",
+  "req.body.secrets.navidrome_password",
+  "req.body.subwave_admin_password",
+  "req.body.secrets.subwave_admin_password",
+  "req.body.radio_password",
   'req.headers["x-api-key"]',
+  'req.headers["authorization"]',
 ];
 
 function buildLogger(logger: BuildAppOptions["logger"]): boolean | Record<string, unknown> {
@@ -35,6 +44,7 @@ function buildLogger(logger: BuildAppOptions["logger"]): boolean | Record<string
 }
 
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
+  applyStoredVerification(opts.config, listIntegrationChecks(opts.db));
   const app = Fastify({
     logger: buildLogger(opts.logger),
   });
@@ -64,6 +74,9 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         { name: "providers" },
         { name: "settings" },
         { name: "acquisition" },
+        { name: "llm" },
+        { name: "library" },
+        { name: "radio" },
         { name: "admin" },
       ],
     },
@@ -78,6 +91,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
       await registerAuthRoutes(scoped);
       await registerSetupRoutes(scoped);
       await registerAcquisitionRoutes(scoped);
+      await registerIntegrationRoutes(scoped);
       await registerRequestRoutes(scoped);
       await registerAdminRoutes(scoped);
       await registerOpsRoutes(scoped);

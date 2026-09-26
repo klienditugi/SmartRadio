@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { AcquisitionForm } from "../components/AcquisitionForm";
+import { IntegrationProbe } from "../components/IntegrationProbe";
 
 const STEPS = ["Admin", "Paths", "Ollama", "Navidrome", "Radio", "Acquisition", "Review"];
 
@@ -168,7 +169,10 @@ export function SetupPage() {
         )}
         {step === 2 && (
           <>
-            <p className="muted">External Ollama only. Enter the base URL and a model already present on that host.</p>
+            <p className="muted">
+              Optional at boot. External Ollama only — leave blank and status stays not_configured. Enter a base URL and a
+              model already present on that host. This wizard never installs Ollama or chooses a model.
+            </p>
             <label className="field">
               <span>Ollama base URL</span>
               <input value={form.ollama_url} onChange={(e) => set("ollama_url", e.target.value)} placeholder="https://…" />
@@ -177,10 +181,13 @@ export function SetupPage() {
               <span>Model name (no default)</span>
               <input value={form.ollama_model} onChange={(e) => set("ollama_model", e.target.value)} />
             </label>
+            <p className="muted">Saving this step does not mark Ollama verified. Sign in, then use Test connection.</p>
+            {user?.role === "admin" ? <IntegrationProbe kind="llm" /> : null}
           </>
         )}
         {step === 3 && (
           <>
+            <p className="muted">Optional. Leave blank to boot; Navidrome stays not_configured until URL, username, and password are set.</p>
             <label className="field">
               <span>Navidrome URL</span>
               <input value={form.navidrome_url} onChange={(e) => set("navidrome_url", e.target.value)} />
@@ -193,11 +200,16 @@ export function SetupPage() {
               <span>Navidrome password (written to secrets/)</span>
               <input type="password" value={form.navidrome_password} onChange={(e) => set("navidrome_password", e.target.value)} />
             </label>
+            <p className="muted">Saving this step does not mark Navidrome verified. Sign in, then use Test connection.</p>
+            {user?.role === "admin" ? <IntegrationProbe kind="library" /> : null}
           </>
         )}
         {step === 4 && (
           <>
-            <p className="muted">SUB/WAVE base URL is opaque (production may already include /api).</p>
+            <p className="muted">
+              Optional. Leave blank to boot; SUB/WAVE stays not_configured until the opaque base URL, admin username, and
+              password are set. A live base URL may already include /api.
+            </p>
             <label className="field">
               <span>Radio base URL</span>
               <input value={form.radio_url} onChange={(e) => set("radio_url", e.target.value)} />
@@ -210,6 +222,8 @@ export function SetupPage() {
               <span>Admin password (secrets/)</span>
               <input type="password" value={form.radio_password} onChange={(e) => set("radio_password", e.target.value)} />
             </label>
+            <p className="muted">Saving this step does not mark SUB/WAVE verified. Sign in, then use Test connection.</p>
+            {user?.role === "admin" ? <IntegrationProbe kind="radio" /> : null}
           </>
         )}
         {step === 5 &&

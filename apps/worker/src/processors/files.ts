@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import { enqueueJob, getRequest, transitionRequest } from "@subwave-ai/db";
-import { NeverPlayError } from "@subwave-ai/providers";
+import { NeverPlayError, NotConfiguredError } from "@subwave-ai/providers";
 import { assertInsideRoot, isAllowedAudioExtension, safeJoin } from "@subwave-ai/shared";
 import type { JobHandler } from "../context.js";
+import { runIntegration } from "./guard.js";
 import { trackReadyContext } from "./notify.js";
 
 /** Wait for Navidrome’s passive scanner before the next /dj/search. Not a scan trigger. */
@@ -125,8 +126,8 @@ export const handleIndexLibrary: JobHandler = async (ctx, job) => {
   }
   const current = getRequest(ctx.db, request.id)!;
   if (current.status !== "INDEXING") return { skipped: true, status: current.status };
-  await ctx.providers.library.startScan();
-  await ctx.providers.library.getScanStatus();
+  await runIntegration(ctx, request.id, () => ctx.providers.library.startScan());
+  await runIntegration(ctx, request.id, () => ctx.providers.library.getScanStatus());
   transitionRequest(ctx.db, { requestId: request.id, to: "READY", actor: ctx.workerId });
   return { indexed: true };
 };
@@ -143,12 +144,14 @@ async function queueVisibleTrack(
   event?: "TRACK_READY",
 ): Promise<{ queued: true; track: VisibleTrack } | { queued: false; never_play: true }> {
   try {
-    await ctx.providers.radio.queueTrack({
-      id: track.id,
-      title: track.title,
-      artist: track.artist,
-      album: track.album,
-    });
+    await runIntegration(ctx, requestId, () =>
+      ctx.providers.radio.queueTrack({
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+      }),
+    );
   } catch (err) {
     if (err instanceof NeverPlayError) {
       transitionRequest(ctx.db, {
@@ -177,9 +180,24 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
   if (!request) throw new Error("request not found");
   const payload = job.payload_json ? (JSON.parse(job.payload_json) as { track_ready?: boolean }) : {};
 
+  try {
+    return await queueRadio(ctx, request, payload);
+  } catch (err) {
+    if (err instanceof NotConfiguredError) {
+      fail(ctx, request.id, err.message);
+    }
+    throw err;
+  }
+};
+
+async function queueRadio(
+  ctx: Parameters<JobHandler>[0],
+  request: NonNullable<ReturnType<typeof getRequest>>,
+  payload: { track_ready?: boolean },
+) {
   if (payload.track_ready === true) {
     if (request.status !== "IMPORTING") return { skipped: true, status: request.status };
-    const search = await ctx.providers.radio.djSearch(radioQuery(request));
+    const search = await runIntegration(ctx, request.id, () => ctx.providers.radio.djSearch(radioQuery(request)));
     const track = visibleTrack(search);
     if (!track) {
       enqueueJob(ctx.db, {
@@ -190,10 +208,12 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
       });
       return { waiting: true, reason: "not_search_visible" };
     }
-    await ctx.providers.radio.say({
-      text: trackReadyContext(ctx.db, request),
-      kind: "dj-speak",
-    });
+    await runIntegration(ctx, request.id, () =>
+      ctx.providers.radio.say({
+        text: trackReadyContext(ctx.db, request),
+        kind: "dj-speak",
+      }),
+    );
     const queued = await queueVisibleTrack(ctx, request.id, track, "TRACK_READY");
     if (!queued.queued) return queued;
     return { ...queued, event: "TRACK_READY" as const };
@@ -205,7 +225,7 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
   const current = getRequest(ctx.db, request.id)!;
   if (current.status !== "QUEUED") return { skipped: true, status: current.status };
 
-  const search = await ctx.providers.radio.djSearch(radioQuery(current));
+  const search = await runIntegration(ctx, request.id, () => ctx.providers.radio.djSearch(radioQuery(current)));
   const track = visibleTrack(search);
   if (!track) {
     transitionRequest(ctx.db, {
@@ -218,4 +238,4 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
     return { queued: false };
   }
   return queueVisibleTrack(ctx, request.id, track);
-};
+}
