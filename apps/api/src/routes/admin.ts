@@ -10,7 +10,7 @@ import {
   listSettings,
   putSetting,
 } from "@subwave-ai/db";
-import { JOB_TYPES, publicSettings, type JobType } from "@subwave-ai/shared";
+import { assertNoVerifyStatusKey, JOB_TYPES, publicSettings, type JobType } from "@subwave-ai/shared";
 import { requireAdmin, requireUser } from "./auth.js";
 
 export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
@@ -22,6 +22,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     return {
       config: publicSettings(app.config),
       settings: listSettings(app.db),
+      sources: app.config.field_sources ?? {},
     };
   });
 
@@ -37,8 +38,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: requireAdmin,
     },
-    async (request) => {
+    async (request, reply) => {
       const body = request.body as Record<string, unknown>;
+      try {
+        assertNoVerifyStatusKey(body);
+      } catch (err) {
+        return reply.code(400).send({ error: (err as Error).message });
+      }
       for (const [key, value] of Object.entries(body)) {
         putSetting(app.db, key, value, request.user?.id);
       }

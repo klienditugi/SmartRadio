@@ -13,6 +13,7 @@ import {
 } from "@subwave-ai/db";
 import {
   applyStoredVerification,
+  assertEnvPinnedUnchanged,
   CONFIGURED_UNVERIFIED_MESSAGE,
   findMatchingIntegrationCheck,
   integrationConfigFingerprint,
@@ -123,6 +124,7 @@ export function matchingIntegrationCheck(config: RuntimeConfig, db: Db, integrat
 }
 
 export function commitConfigPatch(app: FastifyInstance, patch: AppConfigPatch): void {
+  assertEnvPinnedUnchanged(app.config, patch);
   commitRuntimeConfig(app, mergeAppConfigPatch(app.config, patch));
 }
 
@@ -204,6 +206,7 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
   const upgradeNotes = (["llm", "library", "radio", "acquisition"] as const)
     .filter((kind) => integrations[kind].state === "configured_unverified")
     .map((kind) => `${kind}: ${CONFIGURED_UNVERIFIED_MESSAGE}`);
+  const published = publicSettings(config);
   return {
     ok: dbOk && disk.ok,
     database: dbOk,
@@ -212,7 +215,14 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
     ollama: "external-only",
     integrations,
     acquire_unavailable,
-    config: publicSettings(config),
+    config: {
+      ...published,
+      integrations: {
+        llm: integrations.llm,
+        library: integrations.library,
+        radio: integrations.radio,
+      },
+    },
     settings: listSettings(db),
     providers,
     notes: [

@@ -960,6 +960,62 @@ describe("slskd search ranking", () => {
     ).toBe(`${stems}drums.ogg`);
   });
 
+  it("ranks a remix above an instrument part even when the drums peer has the better queue", () => {
+    const folder = "\\\\music\\\\Daft Punk - Get Lucky\\\\";
+    const remix = `${folder}01 - Get Lucky - Daft Punk Remix.ogg`;
+    const drums = `${folder}drums.ogg`;
+    const both = `${folder}drums remix.ogg`;
+    const opts = {
+      allowedExtensions: [".ogg"],
+      minFileSizeMb: null as null,
+      query: { artist: "Daft Punk", title: "Get Lucky" },
+    };
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            {
+              username: "drums-peer",
+              hasFreeUploadSlot: true,
+              queueLength: 0,
+              uploadSpeed: 100,
+              files: [{ filename: drums, size: 8 * MIB, extension: "ogg" }],
+            },
+            {
+              username: "remix-peer",
+              hasFreeUploadSlot: false,
+              queueLength: 9,
+              uploadSpeed: 1,
+              files: [{ filename: remix, size: 8 * MIB, extension: "ogg" }],
+            },
+          ],
+        },
+        opts,
+      )?.filename,
+    ).toBe(remix);
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            {
+              username: "both",
+              hasFreeUploadSlot: true,
+              queueLength: 0,
+              files: [{ filename: both, size: 8 * MIB, extension: "ogg" }],
+            },
+            {
+              username: "remix-peer",
+              hasFreeUploadSlot: false,
+              queueLength: 4,
+              files: [{ filename: remix, size: 8 * MIB, extension: "ogg" }],
+            },
+          ],
+        },
+        opts,
+      )?.filename,
+    ).toBe(remix);
+  });
+
   it("matches a title with diacritics and ignores a bracketed feat credit", () => {
     const song = "music/Cafe del Mar.flac";
     const credit = "music/Someone Else.flac";

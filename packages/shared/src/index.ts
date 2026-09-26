@@ -84,6 +84,17 @@ export type {
   IntegrationStatusMap,
 } from "./config.js";
 
+export { assertEnvPinnedUnchanged, EnvPinnedError, fieldSourcesFor } from "./field-source.js";
+export type { FieldSource, FieldSources, SettingSource } from "./field-source.js";
+
+export {
+  VERIFY_STATUS_WRITE_REJECTED,
+  VerifyStatusWriteError,
+  assertNoVerifyStatusKey,
+  containsVerifyStatusKey,
+  omitVerifyStatusKeys,
+} from "./verify-status-write.js";
+
 export {
   INTEGRATION_NAMES,
   integrationConfigFingerprint,
