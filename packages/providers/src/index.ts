@@ -35,8 +35,14 @@ export {
 export type { SlskdProbe, SlskdProbeChecks } from "./acquisition/probe.js";
 export { extractTransferProgress } from "./acquisition/progress.js";
 export type { TransferProgress } from "./acquisition/progress.js";
-export { selectSearchResult, isSearchComplete } from "./acquisition/select.js";
-export type { SelectedSearchFile, SelectSearchOptions, SelectSearchQuery } from "./acquisition/select.js";
+export { selectSearch, selectSearchResult, removalReason, isSearchComplete } from "./acquisition/select.js";
+export type {
+  SelectedSearchFile,
+  SelectSearchOptions,
+  SelectSearchQuery,
+  FilterRemovalCounts,
+  SearchSelection,
+} from "./acquisition/select.js";
 export {
   findCorrelatedTransfer,
   observedTransferId,

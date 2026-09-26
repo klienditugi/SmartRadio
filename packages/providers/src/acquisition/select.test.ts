@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSearchComplete, selectSearchResult } from "./select.js";
+import { isSearchComplete, selectSearch, selectSearchResult } from "./select.js";
 
 const SAMPLE = {
   id: "search-1",
@@ -624,6 +624,58 @@ describe("slskd search ranking", () => {
     ).toBeNull();
     expect(selectSearchResult(payload, { ...opts, maxSampleRate: 192000 })?.username).toBe("aaa-hires");
     expect(selectSearchResult(payload, { ...opts, maxSampleRate: null, maxBitDepth: null })?.username).toBe("aaa-hires");
+  });
+
+  it("returns no pick and does not relax filters when every candidate is removed", () => {
+    const album = "\\\\music\\\\Album\\\\06 Get Lucky.flac";
+    const payload = {
+      responses: [
+        {
+          username: "peer",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 5_000_000,
+          files: [
+            { filename: "\\\\music\\\\notes.txt", size: 10 * MIB, extension: "txt" },
+            { filename: "\\\\music\\\\huge.flac", size: 400 * MIB, extension: "flac", bitDepth: 16, sampleRate: 44100, length: 200 },
+            { filename: "\\\\music\\\\long.flac", size: 30 * MIB, extension: "flac", bitDepth: 16, sampleRate: 44100, length: 900 },
+            { filename: "\\\\music\\\\hires.flac", size: 40 * MIB, extension: "flac", bitDepth: 24, sampleRate: 192000, length: 200 },
+            { filename: "\\\\music\\\\deep.flac", size: 40 * MIB, extension: "flac", bitDepth: 32, sampleRate: 44100, length: 200 },
+            {
+              filename: "\\\\music\\\\locked.flac",
+              size: 40 * MIB,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+              length: 200,
+              isLocked: true,
+            },
+          ],
+          lockedFiles: [
+            { filename: album, size: 44 * MIB, extension: "flac", bitDepth: 16, sampleRate: 44100, length: 248 },
+          ],
+        },
+      ],
+    };
+    const opts = { allowedExtensions: AUDIO, maxFileSizeMb: 200, maxDurationSeconds: 400 };
+    const removed = {
+      locked: 1,
+      extensions: 1,
+      max_file_size: 1,
+      max_duration: 1,
+      max_sample_rate: 1,
+      max_bit_depth: 1,
+    };
+    expect(selectSearch(payload, opts)).toEqual({
+      outcome: "no_suitable_result",
+      removed,
+      reason: "no_suitable_result: locked=1, extensions=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1",
+    });
+    expect(selectSearchResult(payload, opts)).toBeNull();
+    expect(selectSearch({ responses: [] }, opts)).toEqual({ outcome: "no_responses" });
+    expect(selectSearchResult({ isComplete: true, responses: [] }, opts)).toBeNull();
+    // The oversize album is eligible only when the caller raises the cap. The selector does not do that itself.
+    expect(selectSearchResult(payload, { ...opts, maxFileSizeMb: 500 })?.filename).toBe("\\\\music\\\\huge.flac");
   });
 
   it("still selects a penalized file when nothing else is eligible", () => {

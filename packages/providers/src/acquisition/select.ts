@@ -15,6 +15,10 @@
  * - `bitDepth` greater than `maxBitDepth` (omit → 24; `null` → no cap)
  *   Files that do not report `sampleRate` or `bitDepth` stay eligible.
  *
+ * One pass. If every candidate is removed, the result is no pick. This module
+ * does not widen extensions, raise a cap, or read `lockedFiles` as a fallback.
+ * A payload with no response rows is `no_responses`, not `no_suitable_result`.
+ *
  * Sort order (first difference wins):
  * 1. Extension rank: .flac, .wav, .m4a, .mp3, .ogg, then any other allowed extension.
  * 2. Version: clean files before penalized ones. Penalized when the basename or
@@ -105,7 +109,24 @@ type Candidate = SelectedSearchFile & {
   queueLength?: number;
   uploadSpeed?: number;
   penalized: boolean;
+  lockedFile: boolean;
 };
+
+/** Exclusive counts. Each removed candidate increments the first filter that rejects it. */
+export type FilterRemovalCounts = {
+  locked: number;
+  extensions: number;
+  max_file_size: number;
+  max_duration: number;
+  max_sample_rate: number;
+  max_bit_depth: number;
+};
+
+export type SearchSelection =
+  | { outcome: "selected"; file: SelectedSearchFile }
+  | { outcome: "no_responses" }
+  | { outcome: "no_usable_candidate" }
+  | { outcome: "no_suitable_result"; removed: FilterRemovalCounts; reason: string };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -178,10 +199,10 @@ function collectCandidates(payload: unknown): Candidate[] {
     const hasFreeUploadSlot = slotFlag(response.hasFreeUploadSlot ?? response.HasFreeUploadSlot);
     const queueLength = num(response.queueLength ?? response.QueueLength);
     const uploadSpeed = num(response.uploadSpeed ?? response.UploadSpeed);
-    // `lockedFiles` is intentionally ignored.
+    // `lockedFiles` is intentionally ignored. It is not a fallback pool.
     for (const rawFile of filesFrom(response)) {
       const file = asRecord(rawFile);
-      if (!file || locked(file)) continue;
+      if (!file) continue;
       const filename = str(file.filename) ?? str(file.fileName) ?? str(file.name);
       // `length` is duration in seconds on slskd 0.26, not a byte size.
       const size = num(file.size) ?? num(file.bytes) ?? num(file.Size);
@@ -207,6 +228,7 @@ function collectCandidates(payload: unknown): Candidate[] {
         ...(queueLength !== undefined ? { queueLength } : {}),
         ...(uploadSpeed !== undefined ? { uploadSpeed } : {}),
         penalized: false,
+        lockedFile: locked(file),
       });
     }
   }
@@ -239,13 +261,6 @@ function resolveCap(value: number | null | undefined, fallback: number): number 
   const cap = value === undefined ? fallback : value;
   if (!Number.isFinite(cap) || cap <= 0) return null;
   return cap;
-}
-
-/** Missing measurements stay eligible. A reported value above the cap does not. */
-function withinBroadcast(row: Candidate, maxSampleRate: number | null, maxBitDepth: number | null): boolean {
-  if (maxSampleRate !== null && row.sampleRate !== undefined && row.sampleRate > maxSampleRate) return false;
-  if (maxBitDepth !== null && row.bitDepth !== undefined && row.bitDepth > maxBitDepth) return false;
-  return true;
 }
 
 function escapeRegExp(value: string): string {
@@ -371,6 +386,52 @@ function compareCandidates(
   return a.filename.localeCompare(b.filename);
 }
 
+const REMOVAL_ORDER = [
+  "locked",
+  "extensions",
+  "max_file_size",
+  "max_duration",
+  "max_sample_rate",
+  "max_bit_depth",
+] as const satisfies readonly (keyof FilterRemovalCounts)[];
+
+function emptyRemovals(): FilterRemovalCounts {
+  return {
+    locked: 0,
+    extensions: 0,
+    max_file_size: 0,
+    max_duration: 0,
+    max_sample_rate: 0,
+    max_bit_depth: 0,
+  };
+}
+
+function removalTotal(removed: FilterRemovalCounts): number {
+  return REMOVAL_ORDER.reduce((sum, key) => sum + removed[key], 0);
+}
+
+/** First matching filter wins, so the counts add up to the number of removed candidates. */
+function firstRejection(
+  row: Candidate,
+  opts: SelectSearchOptions,
+  cap: number | null,
+  maxSampleRate: number | null,
+  maxBitDepth: number | null,
+): keyof FilterRemovalCounts | null {
+  if (row.lockedFile) return "locked";
+  if (!allowed(row, opts.allowedExtensions)) return "extensions";
+  if (cap !== null && row.size > cap) return "max_file_size";
+  if (!withinDuration(row.lengthSeconds, opts.maxDurationSeconds)) return "max_duration";
+  if (maxSampleRate !== null && row.sampleRate !== undefined && row.sampleRate > maxSampleRate) return "max_sample_rate";
+  if (maxBitDepth !== null && row.bitDepth !== undefined && row.bitDepth > maxBitDepth) return "max_bit_depth";
+  return null;
+}
+
+export function removalReason(removed: FilterRemovalCounts): string {
+  const parts = REMOVAL_ORDER.map((key) => `${key}=${removed[key]}`);
+  return `no_suitable_result: ${parts.join(", ")}`;
+}
+
 function toSelected(row: Candidate): SelectedSearchFile {
   return {
     username: row.username,
@@ -384,31 +445,46 @@ function toSelected(row: Candidate): SelectedSearchFile {
 }
 
 /**
- * Pick one usable search response file. Deterministic for the same payload.
- * Returns null when nothing usable is present.
- * Ranking order is documented on this module.
+ * Pick one usable search response file, or explain why there is no pick.
+ * Deterministic for the same payload. Ranking order is documented on this module.
+ * Filters run once. An empty kept set is not retried with looser rules.
  */
-export function selectSearchResult(payload: unknown, opts: SelectSearchOptions = {}): SelectedSearchFile | null {
+export function selectSearch(payload: unknown, opts: SelectSearchOptions = {}): SearchSelection {
+  if (responsesFrom(payload).length === 0) return { outcome: "no_responses" };
   const cap = maxBytes(opts.maxFileSizeMb);
   const maxSampleRate = resolveCap(opts.maxSampleRate, DEFAULT_MAX_SAMPLE_RATE);
   const maxBitDepth = resolveCap(opts.maxBitDepth, DEFAULT_MAX_BIT_DEPTH);
+  const removed = emptyRemovals();
+  const kept: Candidate[] = [];
+  for (const row of collectCandidates(payload)) {
+    const rejection = firstRejection(row, opts, cap, maxSampleRate, maxBitDepth);
+    if (rejection) removed[rejection] += 1;
+    else kept.push(row);
+  }
+  if (kept.length === 0) {
+    if (removalTotal(removed) === 0) return { outcome: "no_usable_candidate" };
+    return { outcome: "no_suitable_result", removed, reason: removalReason(removed) };
+  }
   const terms = opts.versionPenaltyTerms ?? DEFAULT_VERSION_PENALTY_TERMS;
   const requested = requestedText(opts);
-  const candidates = collectCandidates(payload).filter((row) => {
-    if (!allowed(row, opts.allowedExtensions)) return false;
-    if (cap !== null && row.size > cap) return false;
-    if (!withinDuration(row.lengthSeconds, opts.maxDurationSeconds)) return false;
-    if (!withinBroadcast(row, maxSampleRate, maxBitDepth)) return false;
-    return true;
-  });
-  if (candidates.length === 0) return null;
-  for (const row of candidates) {
+  for (const row of kept) {
     row.penalized = versionPenalized(row.filename, terms, requested);
   }
-  const medians = mediansByExtension(candidates);
-  candidates.sort((a, b) => compareCandidates(a, b, medians, maxSampleRate, maxBitDepth));
-  const best = candidates[0];
-  return best ? toSelected(best) : null;
+  const medians = mediansByExtension(kept);
+  kept.sort((a, b) => compareCandidates(a, b, medians, maxSampleRate, maxBitDepth));
+  const best = kept[0];
+  if (!best) return { outcome: "no_usable_candidate" };
+  return { outcome: "selected", file: toSelected(best) };
+}
+
+/**
+ * Pick one usable search response file. Deterministic for the same payload.
+ * Returns null when nothing usable is present, including when filters removed
+ * every candidate. Does not relax filters.
+ */
+export function selectSearchResult(payload: unknown, opts: SelectSearchOptions = {}): SelectedSearchFile | null {
+  const decision = selectSearch(payload, opts);
+  return decision.outcome === "selected" ? decision.file : null;
 }
 
 export function isSearchComplete(payload: unknown): boolean {

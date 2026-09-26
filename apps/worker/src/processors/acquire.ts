@@ -14,7 +14,7 @@ import {
   isTransferSucceeded,
   observedTransferId,
   resolveDownloadedFile,
-  selectSearchResult,
+  selectSearch,
   type AcquisitionProvider,
   type SelectedSearchFile,
 } from "@subwave-ai/providers";
@@ -40,12 +40,17 @@ function acquisitionUnavailable(provider: AcquisitionProvider): boolean {
   return provider.kind === "unverified" || provider.verifyStatus !== "verified";
 }
 
-function fail(ctx: Parameters<JobHandler>[0], requestId: string, message: string): never {
+function fail(
+  ctx: Parameters<JobHandler>[0],
+  requestId: string,
+  message: string,
+  detail?: Record<string, unknown>,
+): never {
   transitionRequest(ctx.db, {
     requestId,
     to: "FAILED",
     actor: ctx.workerId,
-    payload: { error: message },
+    payload: { error: message, ...detail },
     patch: { error: message },
   });
   throw new Error(message);
@@ -160,7 +165,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         return { waiting: true, reason: "search_incomplete", searchId: payload.searchId };
       }
       const selection = ctx.config.acquisition.selection;
-      selected = selectSearchResult(searchPayload, {
+      const decision = selectSearch(searchPayload, {
         allowedExtensions: ctx.config.files.allowed_extensions,
         maxFileSizeMb: selection.max_file_size_mb,
         maxDurationSeconds: selection.max_duration_seconds,
@@ -172,7 +177,13 @@ export const handleDownload: JobHandler = async (ctx, job) => {
           title: request.title ?? undefined,
         },
       });
-      if (!selected) {
+      if (decision.outcome === "selected") {
+        selected = decision.file;
+      } else if (decision.outcome === "no_suitable_result") {
+        // QUEUED → FAILED. Filters already removed every candidate; do not enqueue.
+        fail(ctx, request.id, decision.reason, { outcome: "no_suitable_result", removed: decision.removed });
+      } else {
+        // No response rows, or rows with nothing the filters could consider.
         fail(ctx, request.id, "no usable search result");
       }
     }

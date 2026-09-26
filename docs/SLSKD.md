@@ -37,6 +37,8 @@ Selection does not call an LLM. Keys live under `acquisition.selection` (see `co
 
 Files in `lockedFiles`, or with `isLocked: true`, are never chosen. An empty `extension` uses the filename. Files larger than `max_file_size_mb` (default 200, in 1024×1024-byte units, same as `files.max_bytes`) are excluded. `max_duration_seconds` applies to slskd `length` when that field is present; leave it unset for no duration limit. `max_sample_rate` (default 48000 Hz) and `max_bit_depth` (default 24) are broadcast-friendly and configurable. A file that reports a sample rate or bit depth above its cap is excluded. A file that does not report that field stays eligible. Set either key to null to disable that cap.
 
+If extensions, size, duration, sample rate, bit depth, or `isLocked` remove every candidate, selection returns no file. It does not widen a filter or read `lockedFiles` as a fallback. The worker then moves the request `QUEUED` → `FAILED` with outcome `no_suitable_result` and a reason that counts how many candidates each filter removed. It does not enqueue a download. A search with zero responses is a different failure, `no usable search result`.
+
 Rank, first difference wins:
 
 1. Extension: `.flac`, `.wav`, `.m4a`, `.mp3`, `.ogg`, then any other allowed extension.

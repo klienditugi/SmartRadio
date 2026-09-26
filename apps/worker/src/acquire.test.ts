@@ -508,6 +508,75 @@ describe("A5 acquisition worker", () => {
     ]);
   });
 
+  it("fails QUEUED with no_suitable_result when filters remove every candidate and does not enqueue", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const mib = 1024 * 1024;
+    const { acquisition, radio, library, order, say, enqueued } = harness({
+      responses: [
+        {
+          username: "peer",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 1_000_000,
+          files: [
+            { filename: "\\\\music\\\\notes.txt", size: 1000, extension: "txt" },
+            { filename: "\\\\music\\\\huge.flac", size: 400 * mib, extension: "flac", bitDepth: 16, sampleRate: 44100 },
+            { filename: "\\\\music\\\\hires.flac", size: 40 * mib, extension: "flac", bitDepth: 24, sampleRate: 192000 },
+            { filename: "\\\\music\\\\deep.flac", size: 40 * mib, extension: "flac", bitDepth: 32, sampleRate: 44100 },
+            {
+              filename: "\\\\music\\\\locked.flac",
+              size: 40 * mib,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+              isLocked: true,
+            },
+          ],
+          lockedFiles: [
+            { filename: "\\\\music\\\\album.flac", size: 40 * mib, extension: "flac", bitDepth: 16, sampleRate: 44100 },
+          ],
+        },
+      ],
+    });
+    const request = createRequest(db, { rawQuery: "Daft Punk - Get Lucky" });
+    advance(db, request.id, "QUEUED", { artist: "Daft Punk", title: "Get Lucky" });
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    await expect(
+      handleDownload(
+        {
+          db,
+          config,
+          providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+          workerId: "worker-test",
+        },
+        job,
+      ),
+    ).rejects.toThrow(/no_suitable_result/);
+    const row = getRequest(db, request.id);
+    expect(row?.status).toBe("FAILED");
+    expect(row?.error).toBe(
+      "no_suitable_result: locked=1, extensions=1, max_file_size=1, max_duration=0, max_sample_rate=1, max_bit_depth=1",
+    );
+    const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
+    expect(failed?.from_status).toBe("QUEUED");
+    expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({
+      outcome: "no_suitable_result",
+      removed: {
+        locked: 1,
+        extensions: 1,
+        max_file_size: 1,
+        max_duration: 0,
+        max_sample_rate: 1,
+        max_bit_depth: 1,
+      },
+    });
+    expect(enqueued).toEqual([]);
+    expect(say).toEqual([]);
+    expect(order).toEqual(["get-search"]);
+    expect(listJobsForRequest(db, request.id).filter((item) => item.type === "download")).toHaveLength(1);
+  });
+
   it("surfaces acquire_unavailable without calling the provider", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
