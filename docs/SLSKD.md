@@ -44,13 +44,12 @@ If junk, extension, minimum size, maximum size, duration, sample rate, bit depth
 Rank, first difference wins:
 
 1. Extension: `.flac`, `.wav`, `.m4a`, `.mp3`, `.ogg`, then any other allowed extension.
-2. Version. The default terms are remix, live, edit, extended, radio edit, instrumental, karaoke, cover, acapella, a cappella, acappella, stem, stems, multitrack, demo. They match the basename or a parent folder on a word boundary, case-insensitive. When the request artist or title contains a term, files that match that term rank above files that do not. Otherwise a matching file ranks below a clean one.
-3. Instrument-part basename. Default tokens: drums, drum, bass, guitar, guitars, vocals, vocal, vox, keys, piano, synth, backing, click, rhythm, lead, song, crowd, preview. A whole basename token matches case-insensitively. The penalty applies only when the basename itself does not contain the title tokens, so a folder named after the song does not make `drums.ogg` equal to the track. It is not an exclusion: `drums.ogg` alone is still selected. If the request title is in that basename, the file is not penalized.
-4. Artist tokens present anywhere in the path, as a positive tiebreak. A path without them ranks lower. No artist text leaves this key tied.
-5. Peer: free upload slot, then `false`, then missing; then a shorter queue (missing last); then a faster upload (missing last).
-6. Quality: higher bit depth, then sample rate, then bit rate, among values at or under the caps. Missing bit depth and sample rate are neutral. A sample rate above the cap is not better than the cap. Missing bit rate sorts last.
-7. Size closer to the median of the remaining same-extension files.
-8. Username, then the full filename.
+2. Content tier, best first. A requested-version match (only when the request artist or title names a version term), then a clean file, then a version-penalized file, then an instrument-part basename. The default version terms are remix, live, edit, extended, radio edit, instrumental, karaoke, cover, acapella, a cappella, acappella, stem, stems, multitrack, demo. They match the basename or a parent folder on a word boundary, case-insensitive. When the request names a term, files that match that term rank above clean files, which rank above files that only match some other term. Default instrument-part tokens: drums, drum, bass, guitar, guitars, vocals, vocal, vox, keys, piano, synth, backing, click, rhythm, lead, song, crowd, preview. A whole basename token matches case-insensitively, and only when the basename itself does not contain the title tokens, so a folder named after the song does not make `drums.ogg` equal to the track. A file that is both version-penalized and an instrument part is the instrument-part tier, so a remix ranks above `drums.ogg` even when the drums peer has the better queue. It is not an exclusion: `drums.ogg` alone is still selected. If the request title is in that basename, the file is not an instrument part.
+3. Artist tokens present anywhere in the path, as a positive tiebreak. A path without them ranks lower. No artist text leaves this key tied.
+4. Peer: free upload slot, then `false`, then missing; then a shorter queue (missing last); then a faster upload (missing last).
+5. Quality: higher bit depth, then sample rate, then bit rate, among values at or under the caps. Missing bit depth and sample rate are neutral. A sample rate above the cap is not better than the cap. Missing bit rate sorts last.
+6. Size closer to the median of the remaining same-extension files.
+7. Username, then the full filename.
 
 The enqueue body is `[{ filename, size }]` using that filename unchanged, including Windows backslashes. slskd search rows have no id. A later transfer matches on username + that exact filename + size. A basename match is used only when exactly one of that user's rows matches the basename and the size.
 

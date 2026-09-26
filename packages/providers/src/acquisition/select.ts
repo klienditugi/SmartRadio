@@ -28,26 +28,24 @@
  *
  * Sort order (first difference wins):
  * 1. Extension rank: .flac, .wav, .m4a, .mp3, .ogg, then any other allowed extension.
- * 2. Version. A term matches the basename or any parent folder (word boundary,
- *    case-insensitive). When the request artist or title contains that term,
- *    files that match it rank above files that do not. Otherwise a matching
- *    file ranks below a clean one. Version words are not required title tokens.
- * 3. Instrument-part basename penalty. A whole basename token (case-insensitive)
- *    on the configured list ranks below a file whose basename is not on that list,
- *    when the basename itself does not contain the title tokens. Parent folders
- *    do not count. This is a penalty, not an exclusion. A request whose title
- *    tokens are in the basename (the request asks for that part) is not penalized.
- * 4. Artist tokens present in the path (positive tiebreak). Artist tokens are
+ * 2. Content tier, best first: a requested-version match (only when the request
+ *    names a version term), then a clean file, then a version-penalized file
+ *    (remix, live, edit, and the other penalty terms), then an instrument-part
+ *    basename. A file that is both version-penalized and an instrument part is
+ *    the instrument-part tier. Version words are not required title tokens.
+ *    The instrument tier is not an exclusion. A request whose title tokens are
+ *    in the basename (the request asks for that part) is not an instrument part.
+ * 3. Artist tokens present in the path (positive tiebreak). Artist tokens are
  *    not required. Missing artist text does not change the order.
- * 5. Peer availability: `hasFreeUploadSlot` true, then false, then missing;
+ * 4. Peer availability: `hasFreeUploadSlot` true, then false, then missing;
  *    then lower `queueLength` (missing last); then higher `uploadSpeed` (missing last).
- * 6. Quality, among files already inside the caps: higher bitDepth, then
+ * 5. Quality, among files already inside the caps: higher bitDepth, then
  *    sampleRate, then bitRate. Missing bitDepth/sampleRate are neutral (they do
  *    not win or lose that key). A value above its cap is not better than the cap
  *    (those files are excluded before this step). Missing bitRate sorts last.
- * 7. Size closer to the median size of the remaining same-extension candidates
+ * 6. Size closer to the median size of the remaining same-extension candidates
  *    (a typical file before an outlier).
- * 8. `username`, then the full `filename` (`localeCompare`). Equal keys keep payload order.
+ * 7. `username`, then the full `filename` (`localeCompare`). Equal keys keep payload order.
  *
  * `responseId` / `fileId` are copied when present. slskd search responses and
  * files have no id. Those fields are not rank keys and are not transfer ids.
@@ -135,10 +133,12 @@ type Candidate = SelectedSearchFile & {
   hasFreeUploadSlot?: boolean;
   queueLength?: number;
   uploadSpeed?: number;
-  /** 0 preferred (matches a requested version term), then clean, then penalized. */
+  /**
+   * Lower is better. 0 requested-version match, 1 clean, 2 version-penalized,
+   * 3 instrument-part. A penalized instrument part is 3. A requested-version
+   * match stays 0.
+   */
   versionRank: number;
-  /** 1 when the basename is an instrument part and does not contain the title tokens. */
-  instrumentRank: number;
   artistMatch: boolean;
   lockedFile: boolean;
 };
@@ -262,7 +262,6 @@ function collectCandidates(payload: unknown): Candidate[] {
         ...(queueLength !== undefined ? { queueLength } : {}),
         ...(uploadSpeed !== undefined ? { uploadSpeed } : {}),
         versionRank: 0,
-        instrumentRank: 0,
         artistMatch: false,
         lockedFile: locked(file),
       });
@@ -416,20 +415,44 @@ function instrumentPartRank(filename: string, titleTokens: readonly string[] | n
   return tokens.some((token) => wanted.has(token)) ? 1 : 0;
 }
 
+type VersionClass = "requested" | "clean" | "penalized";
+
 /**
- * Lower is better. A requested version term outranks a clean file, which
- * outranks a file that only matches some other penalty term.
+ * Requested-version match, otherwise clean, otherwise a penalty term the
+ * request did not ask for.
  */
-function versionRank(filename: string, terms: readonly string[], requested: string): number {
+function versionClass(filename: string, terms: readonly string[], requested: string): VersionClass {
   const targets = pathTargets(filename);
   const active = terms.map((term) => term.trim()).filter((term) => term.length > 0);
   const requestedTerms = requested ? active.filter((term) => termPattern(term).test(requested)) : [];
   const fileTerms = active.filter((term) => targets.some((segment) => termPattern(term).test(segment)));
   const same = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
-  if (requestedTerms.length > 0 && fileTerms.some((term) => requestedTerms.some((asked) => same(asked, term)))) return 0;
+  if (requestedTerms.length > 0 && fileTerms.some((term) => requestedTerms.some((asked) => same(asked, term)))) {
+    return "requested";
+  }
   const penalized = fileTerms.some((term) => !requestedTerms.some((asked) => same(asked, term)));
-  if (requestedTerms.length > 0) return penalized ? 2 : 1;
-  return penalized ? 1 : 0;
+  return penalized ? "penalized" : "clean";
+}
+
+/**
+ * One tier for the old version step and the instrument-part penalty.
+ * Best first: requested version, clean, version-penalized, instrument part.
+ * A file that is both version-penalized and an instrument part is the
+ * instrument-part tier. A requested-version match stays in the top tier.
+ */
+function contentTier(
+  filename: string,
+  terms: readonly string[],
+  requested: string,
+  titleTokens: readonly string[] | null,
+  instrumentTerms: readonly string[],
+): number {
+  const kind = versionClass(filename, terms, requested);
+  const instrument = instrumentPartRank(filename, titleTokens, instrumentTerms) === 1;
+  if (instrument && kind !== "requested") return 3;
+  if (kind === "requested") return 0;
+  if (kind === "clean") return 1;
+  return 2;
 }
 
 function median(values: number[]): number {
@@ -490,9 +513,6 @@ function compareCandidates(
 
   const versionDiff = a.versionRank - b.versionRank;
   if (versionDiff !== 0) return versionDiff;
-
-  const instrumentDiff = a.instrumentRank - b.instrumentRank;
-  if (instrumentDiff !== 0) return instrumentDiff;
 
   const artistDiff = Number(b.artistMatch) - Number(a.artistMatch);
   if (artistDiff !== 0) return artistDiff;
@@ -624,8 +644,7 @@ export function selectSearch(payload: unknown, opts: SelectSearchOptions = {}): 
   const requested = requestedText(opts);
   const artists = artistTokens(opts);
   for (const row of kept) {
-    row.versionRank = versionRank(row.filename, terms, requested);
-    row.instrumentRank = instrumentPartRank(row.filename, titleTokens, instrumentTerms);
+    row.versionRank = contentTier(row.filename, terms, requested, titleTokens, instrumentTerms);
     row.artistMatch = artists.length > 0 && hasEveryToken(row.filename, artists);
   }
   const medians = mediansByExtension(kept);

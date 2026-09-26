@@ -93,10 +93,28 @@ export type DiskSnapshot = {
   error?: string;
 };
 
+export type FieldSource = {
+  source: "env" | "yaml" | "default";
+  env?: string;
+};
+
+export type FieldSources = Record<string, FieldSource>;
+
 export type SetupStatus = {
   configured: boolean;
   setup_complete: boolean;
   missing: string[];
   ollama: string;
   secrets_present: Record<string, boolean>;
+  sources?: FieldSources;
 };
+
+export function pinNote(sources: FieldSources | undefined, path: string): string | null {
+  const field = sources?.[path];
+  if (field?.source !== "env" || !field.env) return null;
+  return `set by ${field.env} in .env`;
+}
+
+export function isEnvPinned(sources: FieldSources | undefined, path: string): boolean {
+  return Boolean(pinNote(sources, path));
+}

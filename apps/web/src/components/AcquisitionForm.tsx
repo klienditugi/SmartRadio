@@ -7,17 +7,20 @@ import {
   type AcquisitionDraft,
   type AcquisitionSettings,
 } from "../acquisition";
+import { isEnvPinned, pinNote, type FieldSources } from "../types";
 
 type WizardProps = {
   mode: "wizard";
   draft: AcquisitionDraft;
   onDraftChange: (draft: AcquisitionDraft) => void;
   apiKeyConfigured?: boolean;
+  sources?: FieldSources;
 };
 
 type SettingsProps = {
   mode: "settings";
   readOnly?: boolean;
+  sources?: FieldSources;
 };
 
 function statusClass(state: string): string {
@@ -37,8 +40,12 @@ function Fields(props: {
   providers: string[];
   apiKeyConfigured: boolean;
   readOnly: boolean;
+  sources?: FieldSources;
   onChange: (patch: Partial<AcquisitionDraft>) => void;
 }) {
+  const urlLocked = props.readOnly || isEnvPinned(props.sources, "acquisition.base_url");
+  const downloadsLocked = props.readOnly || isEnvPinned(props.sources, "paths.downloads");
+  const libraryLocked = props.readOnly || isEnvPinned(props.sources, "paths.library");
   return (
     <>
       <p className="muted">
@@ -72,12 +79,14 @@ function Fields(props: {
         <span>slskd URL</span>
         <input
           value={props.baseUrl}
+          readOnly={urlLocked}
           disabled={props.readOnly}
           onChange={(e) => props.onChange({ base_url: e.target.value })}
           placeholder="http://…"
           autoComplete="off"
         />
       </label>
+      <PinLine sources={props.sources} path="acquisition.base_url" />
       <label className="field">
         <span>slskd API key</span>
         <input
@@ -97,20 +106,24 @@ function Fields(props: {
         <span>Downloads directory</span>
         <input
           value={props.downloads}
+          readOnly={downloadsLocked}
           disabled={props.readOnly}
           onChange={(e) => props.onChange({ downloads: e.target.value })}
           placeholder="completed downloads path"
         />
       </label>
+      <PinLine sources={props.sources} path="paths.downloads" />
       <label className="field">
         <span>Library directory</span>
         <input
           value={props.library}
+          readOnly={libraryLocked}
           disabled={props.readOnly}
           onChange={(e) => props.onChange({ library: e.target.value })}
           placeholder="final library path"
         />
       </label>
+      <PinLine sources={props.sources} path="paths.library" />
     </>
   );
 }
@@ -174,6 +187,7 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
           providers={providerOptions(draft.provider, ["slskd"])}
           apiKeyConfigured={Boolean(props.apiKeyConfigured)}
           readOnly={false}
+          sources={props.sources}
           onChange={(patch) => props.onDraftChange({ ...draft, ...patch })}
         />
         <p className="muted">
@@ -284,6 +298,7 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
           providers={providers}
           apiKeyConfigured={apiKeyConfigured}
           readOnly={readOnly}
+          sources={props.sources}
           onChange={patchLocal}
         />
       ) : null}
@@ -312,4 +327,10 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
       )}
     </form>
   );
+}
+
+function PinLine(props: { sources?: FieldSources; path: string }) {
+  const note = pinNote(props.sources, props.path);
+  if (!note) return null;
+  return <p className="muted">{note}</p>;
 }

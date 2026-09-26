@@ -7,8 +7,11 @@ import {
 } from "@subwave-ai/db";
 import {
   SECRET_FILES,
+  assertEnvPinnedUnchanged,
+  assertNoVerifyStatusKey,
   assertSettingsDoNotVerify,
   clearIntegrationVerifyOnChange,
+  EnvPinnedError,
   normalizeAcquisitionSettingsPatch,
   publicSettings,
   writeSecretFile,
@@ -57,10 +60,13 @@ function setupGaps(app: FastifyInstance) {
     missing,
     ollama: "external-only" as const,
     secrets_present: pub.secrets_present,
+    sources: app.config.field_sources ?? {},
   };
 }
 
 async function applySetup(app: FastifyInstance, body: SetupBody, actor?: string): Promise<void> {
+  assertNoVerifyStatusKey(body);
+  assertEnvPinnedUnchanged(app.config, body.config);
   assertSettingsDoNotVerify(body.config);
   const secretsDir = app.config.paths.secrets_dir;
   const secrets = body.secrets ?? {};
@@ -144,7 +150,8 @@ export async function registerSetupRoutes(app: FastifyInstance): Promise<void> {
       try {
         await applySetup(app, body, request.user?.id);
       } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
+        const status = err instanceof EnvPinnedError ? 409 : 400;
+        return reply.code(status).send({ error: (err as Error).message });
       }
       return {
         ok: true,
