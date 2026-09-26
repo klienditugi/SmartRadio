@@ -1,10 +1,11 @@
 import {
   CLASSIFICATION_JSON_SCHEMA,
+  ollamaNotConfiguredDetail,
   parseClassificationJson,
   type Classification,
   type VerifyStatus,
 } from "@subwave-ai/shared";
-import { defaultFetch, joinUrl, readJson, type FetchLike, type ProviderHealth } from "../http.js";
+import { defaultFetch, joinUrl, NotConfiguredError, ProviderHttpError, readJson, type FetchLike, type ProviderHealth } from "../http.js";
 import type { LLMProvider } from "../types.js";
 
 export type OllamaProviderOptions = {
@@ -28,21 +29,28 @@ export class OllamaProvider implements LLMProvider {
   private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
 
+  private readonly configured: boolean;
+
   constructor(opts: OllamaProviderOptions) {
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
-    this.model = opts.model;
+    this.baseUrl = opts.baseUrl.trim().replace(/\/+$/, "");
+    this.model = opts.model.trim();
+    this.configured = Boolean(this.baseUrl && this.model);
     this.timeoutMs = opts.timeoutMs ?? 120_000;
     this.fetchImpl = opts.fetch ?? defaultFetch();
     this.verifyStatus = opts.verifyStatus ?? "verified";
   }
 
+  private assertConfigured(model: string): void {
+    if (!this.baseUrl || !model.trim()) {
+      throw new NotConfiguredError(ollamaNotConfiguredDetail({ baseUrl: this.baseUrl, model }));
+    }
+  }
+
   async classify(input: { text: string; model?: string }): Promise<Classification> {
+    const model = (input.model ?? this.model).trim();
+    this.assertConfigured(model);
     if (this.verifyStatus === "unverified") {
       throw new Error("unverified LLM adapter: live endpoints not called");
-    }
-    const model = input.model ?? this.model;
-    if (!model) {
-      throw new Error("LLM model is not configured (refusing to hard-code a model name)");
     }
     const body = {
       model,
@@ -67,6 +75,15 @@ export class OllamaProvider implements LLMProvider {
 
   async health(): Promise<ProviderHealth> {
     const checked_at = new Date().toISOString();
+    if (!this.configured) {
+      return {
+        ok: false,
+        state: "not_configured",
+        verifyStatus: this.verifyStatus,
+        detail: ollamaNotConfiguredDetail({ baseUrl: this.baseUrl, model: this.model }),
+        checked_at,
+      };
+    }
     if (this.verifyStatus === "unverified") {
       return { ok: false, verifyStatus: this.verifyStatus, detail: "unverified adapter; not calling live endpoints", checked_at };
     }
@@ -76,7 +93,7 @@ export class OllamaProvider implements LLMProvider {
         signal: AbortSignal.timeout(5_000),
       });
       if (version.ok) {
-        return { ok: true, verifyStatus: this.verifyStatus, detail: "GET /api/version", checked_at };
+        return { ok: true, state: "reachable", verifyStatus: this.verifyStatus, detail: "GET /api/version", checked_at };
       }
       const tags = await this.fetchImpl(joinUrl(this.baseUrl, "/api/tags"), {
         method: "GET",
@@ -84,12 +101,16 @@ export class OllamaProvider implements LLMProvider {
       });
       return {
         ok: tags.ok,
+        state: "reachable",
         verifyStatus: this.verifyStatus,
         detail: tags.ok ? "GET /api/tags" : `health failed HTTP ${tags.status}`,
         checked_at,
       };
     } catch (err) {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: (err as Error).message, checked_at };
+      if (err instanceof ProviderHttpError) {
+        return { ok: false, state: "reachable", verifyStatus: this.verifyStatus, detail: err.message, checked_at };
+      }
+      return { ok: false, state: "unreachable", verifyStatus: this.verifyStatus, detail: (err as Error).message, checked_at };
     }
   }
 }

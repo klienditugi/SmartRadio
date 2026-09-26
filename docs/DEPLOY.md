@@ -16,7 +16,7 @@ sudo ./install.sh
 
 `install.sh` checks OS/arch/resources, creates persistent directories, writes `.env` / `config/subwave.yaml` / `secrets/` from **your** answers (no hard-coded production IPs, credentials, or model names), installs Node dependencies, builds the web UI, and installs systemd units **or** Compose.
 
-Ollama is **external**. The installer never installs, updates, pulls, or otherwise manages Ollama or any LLM weights.
+Ollama is **external**. The installer never installs, updates, pulls, or otherwise manages Ollama or any LLM weights. Navidrome, SUB/WAVE, and Ollama URL/user/password/model values may be left empty on first boot. Empty is the same as unset. The API starts and reports those integrations as `not_configured` until the setup wizard or `.env` fills them in. `unreachable` is a later live-probe result, not a missing setting.
 
 After install it prints the web UI URL (API + UI on the same origin when `apps/web/dist` exists).
 
