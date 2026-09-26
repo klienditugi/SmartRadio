@@ -91,7 +91,8 @@ export const appConfigSchema = z.object({
     base_url: envString,
     model: z.string().min(1),
     timeout_ms: z.number().int().positive().default(120_000),
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("verified"),
+    /** Omitted means unverified. A blank config must not read as verified. */
+    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
   }),
   library: z.object({
     provider: z.literal("navidrome").default("navidrome"),
@@ -99,13 +100,15 @@ export const appConfigSchema = z.object({
     username: z.string().min(1),
     client_name: z.string().min(1).default("subwave-ai"),
     api_version: z.string().min(1).default("1.16.1"),
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("verified"),
+    /** Omitted means unverified. A blank config must not read as verified. */
+    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
   }),
   radio: z.object({
     provider: z.literal("subwave").default("subwave"),
     base_url: z.string().min(1),
     admin_user: z.string().min(1),
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("verified"),
+    /** Omitted means unverified. A blank config must not read as verified. */
+    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
   }),
   acquisition: z.object({
     /** Omitted field stays on so existing verified installs keep working. Set false to disable. */

@@ -79,6 +79,7 @@ describe("worker classify", () => {
     const llm = new OllamaProvider({
       baseUrl: "http://ollama.test",
       model: "test-model",
+      verifyStatus: "verified",
       fetch: async () =>
         new Response(JSON.stringify({ message: { content: JSON.stringify(classification) } }), {
           status: 200,
@@ -109,6 +110,7 @@ describe("worker classify", () => {
     const llm = new OllamaProvider({
       baseUrl: "http://ollama.test",
       model: "test-model",
+      verifyStatus: "verified",
       fetch: async () =>
         new Response(
           JSON.stringify({

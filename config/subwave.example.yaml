@@ -46,32 +46,35 @@ policy:
 
 # External Ollama only. Never install/update/pull models from this app.
 # Live example (not a default): http://100.119.17.28:11434 v0.34.0. Do not hard-code qwen3:8b.
+# verify_status stays unverified until an explicit successful verification. Filling in the URL does not verify.
 llm:
   provider: ollama
   base_url: "${OLLAMA_BASE_URL}"
   model: "${OLLAMA_MODEL}"
   timeout_ms: 120000
-  verify_status: verified
+  verify_status: unverified
 
+# Passive on the happy path: startScan is ops-only. ~1min scanner picks up /music/library.
+# verify_status stays unverified until an explicit successful verification. Filling in the URL does not verify.
 library:
   provider: navidrome
   base_url: "${NAVIDROME_URL}"
   username: "${NAVIDROME_USER}"
   client_name: "subwave-ai"
   api_version: "1.16.1"
-  verify_status: verified
-  # Passive on the happy path: startScan is ops-only. ~1min scanner picks up /music/library.
+  verify_status: unverified
 
 # Opaque base URL (live example already includes `/api`: http://127.0.0.1:7700/api).
 # Playback: GET /dj/search, then POST /dj/queue-track {id,title} (artist/album optional; HTTP 409 = never-play).
 # Notify: POST /dj/say {text, mode:styled, kind:dj-speak|link} with the same admin Basic auth.
 # REQUEST_ACCEPTED only after a transfer is enqueued. TRACK_READY after search shows a string id, then say, then queue.
 # Do not use public POST /request for announcements. URL and admin password come from this file and secrets/.
+# verify_status stays unverified until an explicit successful verification. Filling in the URL does not verify.
 radio:
   provider: subwave
   base_url: "${SUBWAVE_RADIO_URL}"
   admin_user: "${SUBWAVE_RADIO_ADMIN_USER}"
-  verify_status: verified
+  verify_status: unverified
 
 # Optional. enabled: false, a non-slskd provider, a missing URL/key, or verify_status other than
 # verified → doctor.acquire_unavailable. Landing dir is config-only (live example: /music/downloads).

@@ -73,7 +73,7 @@ export class SubWaveProvider implements RadioProvider {
     this.adminUser = opts.adminUser;
     this.adminPassword = opts.adminPassword;
     this.fetchImpl = opts.fetch ?? defaultFetch();
-    this.verifyStatus = opts.verifyStatus ?? "verified";
+    this.verifyStatus = opts.verifyStatus ?? "unverified";
   }
 
   private basicAuth(): string {

@@ -73,6 +73,9 @@ describe("config", () => {
     expect(cfg.library.provider).toBe("navidrome");
     expect(cfg.radio.provider).toBe("subwave");
     expect(cfg.acquisition.provider).toBe("slskd");
+    expect(cfg.llm.verify_status).toBe("verified");
+    expect(cfg.library.verify_status).toBe("verified");
+    expect(cfg.radio.verify_status).toBe("verified");
   });
 
   it("rejects a missing LLM model (never default a model name)", () => {
@@ -137,11 +140,34 @@ acquisition:
     expect(loaded.secrets.adminPassword).toBe("test-admin-secret");
     expect(loaded.secrets.slskdApiKey).toBe("super-secret-key");
     expect(loaded.llm.model).toBe("test-model");
+    expect(loaded.llm.verify_status).toBe("unverified");
+    expect(loaded.library.verify_status).toBe("unverified");
+    expect(loaded.radio.verify_status).toBe("unverified");
     expect(loaded.acquisition.enabled).toBe(true);
     expect(loaded.acquisition.verify_status).toBe("unverified");
     const pub = JSON.stringify(publicSettings(loaded));
     expect(publicSettings(loaded).secrets_present.slskd_api_key).toBe(true);
     expect(pub).not.toContain("super-secret-key");
+  });
+
+  it("defaults omitted llm, library, and radio verify_status to unverified", () => {
+    const raw = structuredClone(exampleYamlObject);
+    delete (raw.llm as { verify_status?: string }).verify_status;
+    delete (raw.library as { verify_status?: string }).verify_status;
+    delete (raw.radio as { verify_status?: string }).verify_status;
+    const cfg = parseAppConfig(raw);
+    expect(cfg.llm.verify_status).toBe("unverified");
+    expect(cfg.library.verify_status).toBe("unverified");
+    expect(cfg.radio.verify_status).toBe("unverified");
+    const roundTrip = parseAppConfig(parseYaml(serializeAppConfig(cfg)));
+    expect(roundTrip.llm.verify_status).toBe("unverified");
+    expect(roundTrip.library.verify_status).toBe("unverified");
+    expect(roundTrip.radio.verify_status).toBe("unverified");
+    const yaml = serializeAppConfig(cfg);
+    expect(yaml).toMatch(/llm:[\s\S]*?verify_status: unverified/);
+    expect(yaml).toMatch(/library:[\s\S]*?verify_status: unverified/);
+    expect(yaml).toMatch(/radio:[\s\S]*?verify_status: unverified/);
+    expect(cfg.acquisition.verify_status).toBe("verified");
   });
 
   it("defaults acquisition to enabled and unverified and allows an empty URL", () => {

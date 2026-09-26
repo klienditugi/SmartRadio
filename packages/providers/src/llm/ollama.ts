@@ -33,7 +33,7 @@ export class OllamaProvider implements LLMProvider {
     this.model = opts.model;
     this.timeoutMs = opts.timeoutMs ?? 120_000;
     this.fetchImpl = opts.fetch ?? defaultFetch();
-    this.verifyStatus = opts.verifyStatus ?? "verified";
+    this.verifyStatus = opts.verifyStatus ?? "unverified";
   }
 
   async classify(input: { text: string; model?: string }): Promise<Classification> {

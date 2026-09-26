@@ -21,6 +21,8 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
 ## Ollama (VERIFIED docs) — external only, never install/manage
 
+`llm.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Ollama until that field is `verified`. Filling in the URL does not set it.
+
 - HTTP `base_url` configurable (local-dev placeholder often `http://127.0.0.1:11434`; live example above). Not a required default.
 - Classification: `POST /api/chat` with `stream: false` + `format` JSON schema
 - Health: `GET /api/tags` or `GET /api/version`
@@ -31,6 +33,8 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
 ## Navidrome (VERIFIED docs) — MusicLibraryProvider — **passive**
 
+`library.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Navidrome until that field is `verified`. Filling in the URL does not set it.
+
 - Subsonic API 1.16.1 at `{url}/rest`, prefer `f=json`
 - Auth: `u` + `t/s` (md5 token from password + salt)
 - Happy-path methods: `search3`, `getSong`
@@ -39,6 +43,8 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 - A3: SmartRadio does **not** manage Navidrome scanning on the happy path. After a validated file is in `/music/library`, the existing ~1 minute scanner discovers it.
 
 ## SUB/WAVE (VERIFIED = perminder-klair/subwave) — RadioProvider
+
+`radio.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call SUB/WAVE until that field is `verified`. Filling in the URL does not set it.
 
 - HTTP JSON; treat `base_url` as opaque (live example already includes `/api`: `http://127.0.0.1:7700/api`)
 - Public (relative to that opaque base): `GET /health` → `{"status":"on-air"}`, `GET /now-playing`, `GET /state`; `POST /request` (202+requestId); `GET /request/:id`

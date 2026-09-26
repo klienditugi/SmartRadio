@@ -32,6 +32,7 @@ Documented so operators can fill yaml/env on an Oracle aarch64 Linux VM. **Do no
 | Ollama | `OLLAMA_BASE_URL=http://100.119.17.28:11434` (v0.34.0 over Tailscale). Set `OLLAMA_MODEL` yourself — do not hard-code `qwen3:8b` even if that tag exists. |
 | Downloads / landing | `SUBWAVE_DOWNLOADS_DIR=/music/downloads` (acquisition landing/staging) |
 | Library | `SUBWAVE_LIBRARY_DIR=/music/library` (final library; Navidrome discovers files here) |
+| LLM / library / radio | `verify_status` defaults to `unverified`. A blank config does not call Ollama, Navidrome, or SUB/WAVE. Set `verified` only after an explicit successful verification. |
 | Acquisition | **No daemon on Oracle today.** Leave slskd disabled, or URL/key unset, or `verify_status: unverified`. `verified` is set only by admin test-connection. Doctor reports `acquire_unavailable`. |
 
 Navidrome is **passive** on the happy path: once a validated track is in `/music/library`, the existing ~1 minute scanner indexes it. Do not configure SmartRadio as if it must call `startScan` for production ingest. Admin scan remains optional ops.

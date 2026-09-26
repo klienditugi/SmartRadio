@@ -51,7 +51,7 @@ export class NavidromeProvider implements MusicLibraryProvider {
     this.clientName = opts.clientName ?? "subwave-ai";
     this.apiVersion = opts.apiVersion ?? "1.16.1";
     this.fetchImpl = opts.fetch ?? defaultFetch();
-    this.verifyStatus = opts.verifyStatus ?? "verified";
+    this.verifyStatus = opts.verifyStatus ?? "unverified";
   }
 
   private authParams(): Record<string, string> {

@@ -138,6 +138,8 @@ Unverified adapters set `verifyStatus` and **do not** call live endpoints with i
 
 YAML (`config/subwave.yaml`) + env interpolation/overrides + `secrets/` files. No hard-coded production IPs, passwords, API keys, ports, model names, or library paths in source. Oracle paths `/music/downloads` and `/music/library`, Tailscale Ollama, and SUB/WAVE `:7700/api` belong in **operator config**, not required defaults.
 
+`llm`, `library`, and `radio` `verify_status` default to `unverified`. Omitting the field, or copying `config/subwave.example.yaml`, does not read as verified. `verified` is stored only when it is set explicitly after a successful verification. Acquisition already follows that rule: test-connection is the only writer of `acquisition.verify_status: verified`. The providers table has no SQL default; `syncProviders` copies these config values.
+
 ## API (`/api/v1`)
 
 - Auth: `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` (cookie or Bearer)
