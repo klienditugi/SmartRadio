@@ -4,7 +4,7 @@ import { SubWaveProvider } from "./radio/subwave.js";
 import { SoulseekProvider } from "./acquisition/slskd.js";
 import { UnverifiedAcquisitionProvider } from "./acquisition/unverified.js";
 
-export { joinUrl, ProviderHttpError, UnverifiedAdapterError } from "./http.js";
+export { joinUrl, ProviderHttpError, UnverifiedAdapterError, NotConfiguredError } from "./http.js";
 export type { FetchLike, ProviderHealth } from "./http.js";
 export type {
   LLMProvider,

@@ -8,6 +8,11 @@ export {
   PROVIDER_KINDS,
   VERIFY_STATUSES,
   ACQUISITION_CONNECTION_STATES,
+  INTEGRATION_CONNECTION_STATES,
+  NAVIDROME_NOT_CONFIGURED,
+  SUBWAVE_RADIO_NOT_CONFIGURED,
+  ollamaNotConfiguredDetail,
+  describeIntegration,
   USER_ROLES,
 } from "./status.js";
 export type {
@@ -17,6 +22,8 @@ export type {
   ProviderKind,
   VerifyStatus,
   AcquisitionConnectionState,
+  IntegrationConnectionState,
+  IntegrationReport,
   UserRole,
 } from "./status.js";
 
@@ -47,5 +54,9 @@ export {
   mergeAppConfigPatch,
   normalizeAcquisitionSettingsPatch,
   writableConfigPath,
+  isOllamaConfigured,
+  isNavidromeConfigured,
+  isSubwaveRadioConfigured,
+  integrationStatus,
 } from "./config.js";
-export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions, AppConfigPatch } from "./config.js";
+export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions, AppConfigPatch, IntegrationStatusMap } from "./config.js";

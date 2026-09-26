@@ -10,6 +10,10 @@ import {
   type Db,
 } from "@subwave-ai/db";
 import {
+  integrationStatus,
+  isNavidromeConfigured,
+  isOllamaConfigured,
+  isSubwaveRadioConfigured,
   loadConfig,
   mergeAppConfigPatch,
   publicSettings,
@@ -115,18 +119,25 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
     dbOk = false;
   }
   const disk = diskReport(config);
-  const modelConfigured = Boolean(config.llm.model);
   const acquire_unavailable = acquisitionUnavailable(config);
+  const providers = listProviders(db) as Array<{ id: string; last_health_json: string | null }>;
+  const healthOf = (id: string) => providers.find((row) => row.id === id)?.last_health_json ?? null;
+  const integrations = integrationStatus(config, {
+    llm: healthOf("llm-ollama"),
+    library: healthOf("library-navidrome"),
+    radio: healthOf("radio-subwave"),
+  });
   return {
-    ok: dbOk && modelConfigured && disk.ok,
+    ok: dbOk && disk.ok,
     database: dbOk,
     disk,
     bind: { host: config.server.host, port: config.server.port },
     ollama: "external-only",
+    integrations,
     acquire_unavailable,
     config: publicSettings(config),
     settings: listSettings(db),
-    providers: listProviders(db),
+    providers,
     notes: [
       "API is sync+enqueue only. Workers own LLM, library, acquisition, radio, and live health probes.",
       "Ollama is never installed, updated, or pulled by this process.",
@@ -137,6 +148,9 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
       ...(acquire_unavailable
         ? ["AcquisitionProvider is optional until a verified download daemon exists (acquire_unavailable)."]
         : []),
+      ...(!isOllamaConfigured(config) ? ["Ollama is not_configured. Set OLLAMA_BASE_URL and OLLAMA_MODEL on the external host. This process does not install or pull a model."] : []),
+      ...(!isNavidromeConfigured(config) ? ["Navidrome is not_configured until URL, username, and password are set."] : []),
+      ...(!isSubwaveRadioConfigured(config) ? ["SUB/WAVE radio is not_configured until URL, admin user, and password are set."] : []),
     ],
   };
 }
