@@ -143,7 +143,27 @@ export const appConfigSchema = z.object({
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
 
-export type RuntimeConfig = AppConfig & { secrets: LoadedSecrets };
+export type CoreIntegration = "llm" | "library" | "radio";
+
+/** Shown when settings are filled and verify_status was never written. Not a promotion to verified. */
+export const CONFIGURED_UNVERIFIED_MESSAGE = "configured but unverified, run test connection";
+
+export type VerifyStatusExplicit = Record<CoreIntegration, boolean>;
+
+export function readVerifyStatusExplicit(raw: unknown): VerifyStatusExplicit {
+  const root = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const present = (key: CoreIntegration) => {
+    const section = root[key];
+    return Boolean(section && typeof section === "object" && !Array.isArray(section) && "verify_status" in section);
+  };
+  return { llm: present("llm"), library: present("library"), radio: present("radio") };
+}
+
+export type RuntimeConfig = AppConfig & {
+  secrets: LoadedSecrets;
+  /** False when that section's yaml/env object omitted verify_status and the schema default applied. */
+  verify_status_explicit?: VerifyStatusExplicit;
+};
 
 const ENV_INTERPOLATION = /\$\{([A-Z0-9_]+)\}/g;
 
@@ -318,7 +338,25 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
     ...parsed,
     paths: { ...parsed.paths, secrets_dir: secretsDir },
     secrets,
+    verify_status_explicit: readVerifyStatusExplicit(overridden),
   };
+}
+
+export function integrationIsConfigured(config: RuntimeConfig, kind: CoreIntegration): boolean {
+  if (kind === "llm") return Boolean(config.llm.base_url.trim() && config.llm.model.trim());
+  if (kind === "library") {
+    return Boolean(
+      config.library.base_url.trim() && config.library.username.trim() && config.secrets.navidromePassword?.trim(),
+    );
+  }
+  return Boolean(config.radio.base_url.trim() && config.radio.admin_user.trim() && config.secrets.subwaveAdminPassword?.trim());
+}
+
+/** Filled settings whose yaml never set verify_status. Stays unverified until test-connection. */
+export function isConfiguredUnverified(config: RuntimeConfig, kind: CoreIntegration): boolean {
+  if (!integrationIsConfigured(config, kind)) return false;
+  if (config[kind].verify_status === "verified") return false;
+  return config.verify_status_explicit?.[kind] !== true;
 }
 
 export function publicSettings(config: RuntimeConfig) {
@@ -375,9 +413,9 @@ export type AppConfigPatch = {
   files?: Partial<AppConfig["files"]>;
   auth?: Partial<Pick<AppConfig["auth"], "admin_username" | "session_ttl_hours">>;
   policy?: Partial<AppConfig["policy"]>;
-  llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms">>;
-  library?: Partial<Pick<AppConfig["library"], "base_url" | "username">>;
-  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user">>;
+  llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms" | "verify_status">>;
+  library?: Partial<Pick<AppConfig["library"], "base_url" | "username" | "verify_status">>;
+  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user" | "verify_status">>;
   acquisition?: Partial<Pick<AppConfig["acquisition"], "enabled" | "provider" | "base_url" | "verify_status">>;
 };
 
@@ -385,6 +423,56 @@ export type AppConfigPatch = {
  * Settings saves may persist enabled, provider, base URL, and a non-verified status.
  * They cannot promote verify_status to verified. URL, provider, or API key changes clear it.
  */
+const SETTINGS_CANNOT_VERIFY = "verify_status cannot be set to verified by saving settings; use test-connection";
+
+/** Setup and settings saves cannot promote any integration to verified. */
+export function assertSettingsDoNotVerify(patch: AppConfigPatch | undefined): void {
+  const sections = [patch?.llm, patch?.library, patch?.radio, patch?.acquisition];
+  if (sections.some((section) => section?.verify_status === "verified")) {
+    throw new Error(SETTINGS_CANNOT_VERIFY);
+  }
+}
+
+/**
+ * URL, model, username, or password changes clear verify_status.
+ * They do not grant verified.
+ */
+export function clearIntegrationVerifyOnChange(
+  current: AppConfig,
+  patch: AppConfigPatch,
+  changed: { navidromePassword?: boolean; radioPassword?: boolean } = {},
+): AppConfigPatch {
+  const next: AppConfigPatch = { ...patch };
+  const llm = next.llm;
+  const llmChanged = Boolean(
+    llm &&
+      ((llm.base_url !== undefined && llm.base_url !== current.llm.base_url) ||
+        (llm.model !== undefined && llm.model !== current.llm.model)),
+  );
+  if (llmChanged && llm) next.llm = { ...llm, verify_status: "unverified" };
+
+  const library = next.library;
+  const libraryChanged =
+    Boolean(changed.navidromePassword) ||
+    Boolean(
+      library &&
+        ((library.base_url !== undefined && library.base_url !== current.library.base_url) ||
+          (library.username !== undefined && library.username !== current.library.username)),
+    );
+  if (libraryChanged) next.library = { ...(library ?? {}), verify_status: "unverified" };
+
+  const radio = next.radio;
+  const radioChanged =
+    Boolean(changed.radioPassword) ||
+    Boolean(
+      radio &&
+        ((radio.base_url !== undefined && radio.base_url !== current.radio.base_url) ||
+          (radio.admin_user !== undefined && radio.admin_user !== current.radio.admin_user)),
+    );
+  if (radioChanged) next.radio = { ...(radio ?? {}), verify_status: "unverified" };
+  return next;
+}
+
 export function normalizeAcquisitionSettingsPatch(
   current: AppConfig["acquisition"],
   incoming: Partial<AppConfig["acquisition"]> | undefined,

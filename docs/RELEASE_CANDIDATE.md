@@ -38,7 +38,7 @@ Canonical pipeline (semantic):
 - Playback handoff remains verified admin `GET /dj/search` + `POST /dj/queue-track` under opaque `base_url` (live example `http://127.0.0.1:7700/api`). Library hits use that handoff and do not send `TRACK_READY`.
 - AcquisitionProvider optional/disabled until a verified daemon exists. Landing dir config example: `/music/downloads`.
 - **A5:** When `acquisition.verify_status` is `verified` and slskd is reachable, the worker runs search → poll → select → enqueue → transfer poll (Completed+Succeeded) → real file under `paths.downloads`. Unverified/missing config still yields `acquire_unavailable`. No false-complete after a single empty poll.
-- `llm`, `library`, and `radio` `verify_status` default to `unverified`. Omitted fields and the example yaml are not verified. `verified` is an explicit value, not a schema default. Acquisition `verified` is still written only by test-connection.
+- `llm`, `library`, and `radio` `verify_status` default to `unverified`. Omitted fields and the example yaml are not verified. `verified` is written only by `POST /api/v1/llm|library|radio/test-connection`. Filled settings with no `verify_status` key surface `configured_unverified` (“configured but unverified, run test connection”) and are not auto-promoted. Acquisition `verified` is still written only by test-connection.
 
 Live environment **examples** (never required source defaults): Oracle aarch64 Linux; SUB/WAVE 1.16.0 at `http://127.0.0.1:7700` `/api`; `GET /api/health` → `{"status":"on-air"}`; Ollama `http://100.119.17.28:11434` v0.34.0; paths `/music/downloads` and `/music/library`; acquisition daemon still optional on Oracle.
 

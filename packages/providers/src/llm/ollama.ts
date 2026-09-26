@@ -1,5 +1,6 @@
 import {
   CLASSIFICATION_JSON_SCHEMA,
+  CONFIGURED_UNVERIFIED_MESSAGE,
   parseClassificationJson,
   type Classification,
   type VerifyStatus,
@@ -36,10 +37,18 @@ export class OllamaProvider implements LLMProvider {
     this.verifyStatus = opts.verifyStatus ?? "unverified";
   }
 
+  private configured(): boolean {
+    return Boolean(this.baseUrl.trim() && this.model.trim());
+  }
+
+  private refuseUnverified(): void {
+    if (this.verifyStatus !== "unverified") return;
+    if (this.configured()) throw new Error(CONFIGURED_UNVERIFIED_MESSAGE);
+    throw new Error("unverified LLM adapter: live endpoints not called");
+  }
+
   async classify(input: { text: string; model?: string }): Promise<Classification> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified LLM adapter: live endpoints not called");
-    }
+    this.refuseUnverified();
     const model = input.model ?? this.model;
     if (!model) {
       throw new Error("LLM model is not configured (refusing to hard-code a model name)");
@@ -68,7 +77,12 @@ export class OllamaProvider implements LLMProvider {
   async health(): Promise<ProviderHealth> {
     const checked_at = new Date().toISOString();
     if (this.verifyStatus === "unverified") {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: "unverified adapter; not calling live endpoints", checked_at };
+      return {
+        ok: false,
+        verifyStatus: this.verifyStatus,
+        detail: this.configured() ? CONFIGURED_UNVERIFIED_MESSAGE : "unverified adapter; not calling live endpoints",
+        checked_at,
+      };
     }
     try {
       const version = await this.fetchImpl(joinUrl(this.baseUrl, "/api/version"), {

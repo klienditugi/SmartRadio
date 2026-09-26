@@ -10,6 +10,9 @@ import {
   type Db,
 } from "@subwave-ai/db";
 import {
+  CONFIGURED_UNVERIFIED_MESSAGE,
+  integrationIsConfigured,
+  isConfiguredUnverified,
   loadConfig,
   mergeAppConfigPatch,
   publicSettings,
@@ -17,6 +20,7 @@ import {
   writeAppConfig,
   type AppConfig,
   type AppConfigPatch,
+  type CoreIntegration,
   type RuntimeConfig,
 } from "@subwave-ai/shared";
 import { hashPassword } from "./auth.js";
@@ -107,6 +111,16 @@ export function acquisitionUnavailable(config: RuntimeConfig): boolean {
   return config.acquisition.verify_status !== "verified";
 }
 
+function integrationDoctor(config: RuntimeConfig, kind: CoreIntegration) {
+  if (isConfiguredUnverified(config, kind)) {
+    return { state: "configured_unverified" as const, detail: CONFIGURED_UNVERIFIED_MESSAGE };
+  }
+  if (!integrationIsConfigured(config, kind)) {
+    return { state: "not_configured" as const, detail: "missing settings" };
+  }
+  return { state: config[kind].verify_status, detail: config[kind].verify_status };
+}
+
 export function doctorReport(db: Db, config: RuntimeConfig) {
   let dbOk = true;
   try {
@@ -117,6 +131,14 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
   const disk = diskReport(config);
   const modelConfigured = Boolean(config.llm.model);
   const acquire_unavailable = acquisitionUnavailable(config);
+  const integrations = {
+    llm: integrationDoctor(config, "llm"),
+    library: integrationDoctor(config, "library"),
+    radio: integrationDoctor(config, "radio"),
+  };
+  const upgradeNotes = (["llm", "library", "radio"] as const)
+    .filter((kind) => integrations[kind].state === "configured_unverified")
+    .map((kind) => `${kind}: ${CONFIGURED_UNVERIFIED_MESSAGE}`);
   return {
     ok: dbOk && modelConfigured && disk.ok,
     database: dbOk,
@@ -124,6 +146,7 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
     bind: { host: config.server.host, port: config.server.port },
     ollama: "external-only",
     acquire_unavailable,
+    integrations,
     config: publicSettings(config),
     settings: listSettings(db),
     providers: listProviders(db),
@@ -137,6 +160,7 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
       ...(acquire_unavailable
         ? ["AcquisitionProvider is optional until a verified download daemon exists (acquire_unavailable)."]
         : []),
+      ...upgradeNotes,
     ],
   };
 }

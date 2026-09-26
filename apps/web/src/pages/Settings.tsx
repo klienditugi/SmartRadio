@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { AcquisitionForm } from "../components/AcquisitionForm";
+import { IntegrationProbe } from "../components/IntegrationProbe";
 
 type SettingsResponse = {
   config: {
@@ -106,6 +107,13 @@ export function SettingsPage() {
           </div>
         </div>
       ) : null}
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h2>Connection tests</h2>
+        <p className="muted">These checks are read-only. They are the only action that can mark an integration verified.</p>
+        <IntegrationProbe kind="llm" readOnly={user?.role !== "admin"} />
+        <IntegrationProbe kind="library" readOnly={user?.role !== "admin"} />
+        <IntegrationProbe kind="radio" readOnly={user?.role !== "admin"} />
+      </div>
       <div className="card" style={{ marginTop: "1rem" }}>
         <h2>Acquisition</h2>
         <AcquisitionForm mode="settings" readOnly={user?.role !== "admin"} />

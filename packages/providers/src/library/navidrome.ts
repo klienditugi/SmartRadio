@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { VerifyStatus } from "@subwave-ai/shared";
+import { CONFIGURED_UNVERIFIED_MESSAGE, type VerifyStatus } from "@subwave-ai/shared";
 import { defaultFetch, joinUrl, readJson, type FetchLike, type ProviderHealth } from "../http.js";
 import type { LibrarySong, MusicLibraryProvider } from "../types.js";
 
@@ -67,10 +67,18 @@ export class NavidromeProvider implements MusicLibraryProvider {
     };
   }
 
+  private configured(): boolean {
+    return Boolean(this.restBase.trim() && this.username.trim() && this.password.trim());
+  }
+
+  private refuseUnverified(): void {
+    if (this.verifyStatus !== "unverified") return;
+    if (this.configured()) throw new Error(CONFIGURED_UNVERIFIED_MESSAGE);
+    throw new Error("unverified library adapter: live endpoints not called");
+  }
+
   private async rest<T>(method: string, extra: Record<string, string | number | boolean | undefined> = {}): Promise<T> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified library adapter: live endpoints not called");
-    }
+    this.refuseUnverified();
     const url = new URL(joinUrl(this.restBase, method));
     for (const [k, v] of Object.entries({ ...this.authParams(), ...extra })) {
       if (v === undefined) continue;
@@ -121,7 +129,12 @@ export class NavidromeProvider implements MusicLibraryProvider {
   async health(): Promise<ProviderHealth> {
     const checked_at = new Date().toISOString();
     if (this.verifyStatus === "unverified") {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: "unverified adapter; not calling live endpoints", checked_at };
+      return {
+        ok: false,
+        verifyStatus: this.verifyStatus,
+        detail: this.configured() ? CONFIGURED_UNVERIFIED_MESSAGE : "unverified adapter; not calling live endpoints",
+        checked_at,
+      };
     }
     try {
       await this.getScanStatus();

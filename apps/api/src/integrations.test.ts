@@ -1,0 +1,179 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { loadConfig } from "@subwave-ai/shared";
+import { buildApp } from "./app.js";
+import { testConfig, testDb } from "./test-harness.js";
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+async function adminApp(config: { config: ReturnType<typeof testConfig>["config"]; cleanup: () => void } = testConfig()) {
+  const db = testDb(config.config);
+  const app = await buildApp({ config: config.config, db, serveWeb: false, logger: false });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/login",
+    payload: { username: "admin", password: "test-admin-password" },
+  });
+  expect(login.statusCode).toBe(200);
+  const token = (login.json() as { token: string }).token;
+  return {
+    app,
+    headers: { authorization: `Bearer ${token}` },
+    cleanup: () => {
+      vi.unstubAllGlobals();
+      void app.close();
+      config.cleanup();
+    },
+  };
+}
+
+function upgradeConfig() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "subwave-upgrade-"));
+  const secrets = path.join(dir, "secrets");
+  mkdirSync(secrets);
+  writeFileSync(path.join(secrets, "admin_password"), "test-admin-password");
+  writeFileSync(path.join(secrets, "session_secret"), "test-session-secret");
+  writeFileSync(path.join(secrets, "navidrome_password"), "library-secret");
+  writeFileSync(path.join(secrets, "subwave_admin_password"), "radio-secret");
+  const cfgPath = path.join(dir, "subwave.yaml");
+  writeFileSync(
+    cfgPath,
+    `
+server:
+  host: "127.0.0.1"
+  port: 8788
+database:
+  path: ":memory:"
+paths:
+  secrets_dir: "${secrets}"
+  downloads: "${path.join(dir, "downloads")}"
+  staging: "${path.join(dir, "staging")}"
+  library: "${path.join(dir, "library")}"
+llm:
+  base_url: "http://ollama.example"
+  model: "station-model"
+library:
+  base_url: "http://navidrome.example"
+  username: "nd"
+radio:
+  base_url: "http://radio.example/api"
+  admin_user: "dj"
+acquisition:
+  provider: slskd
+  base_url: ""
+`,
+  );
+  const prev = process.env.SUBWAVE_CONFIG;
+  process.env.SUBWAVE_CONFIG = cfgPath;
+  const config = loadConfig({ configPath: cfgPath });
+  return {
+    config,
+    cleanup: () => {
+      if (prev === undefined) delete process.env.SUBWAVE_CONFIG;
+      else process.env.SUBWAVE_CONFIG = prev;
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+describe("integration test-connection", () => {
+  const fixtures: Array<() => void> = [];
+  afterEach(() => {
+    while (fixtures.length) fixtures.pop()?.();
+  });
+
+  it("requires admin and never returns secrets", async () => {
+    const ctx = await adminApp();
+    fixtures.push(ctx.cleanup);
+    const anon = await ctx.app.inject({ method: "GET", url: "/api/v1/llm/status" });
+    expect(anon.statusCode).toBe(401);
+    const status = await ctx.app.inject({ method: "GET", url: "/api/v1/llm/status", headers: ctx.headers });
+    expect(status.statusCode).toBe(200);
+    expect(JSON.stringify(status.json())).not.toMatch(/password|secret|api_key/i);
+  });
+
+  it("lets only test-connection write verified, and records probe failures as unverified", async () => {
+    const loaded = upgradeConfig();
+    const ctx = await adminApp(loaded);
+    fixtures.push(ctx.cleanup);
+    expect(ctx.app.config.llm.verify_status).toBe("unverified");
+
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string | URL, init?: RequestInit) => {
+      const href = String(url);
+      calls.push(`${init?.method ?? "GET"} ${href}`);
+      if (href.includes("/api/pull") || href.includes("/dj/say") || href.includes("/dj/queue-track")) {
+        throw new Error("probe must stay read-only");
+      }
+      if (href.endsWith("/api/tags")) return jsonResponse({ models: [{ name: "station-model" }] });
+      if (href.includes("/rest/ping")) return jsonResponse({ "subsonic-response": { status: "ok", version: "1.16.1" } });
+      if (href.endsWith("/health")) return jsonResponse({ status: "on-air" });
+      if (href.includes("/dj/search")) return jsonResponse({ results: [] });
+      return jsonResponse({ error: "unexpected" }, 500);
+    });
+
+    const saved = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/setup",
+      headers: ctx.headers,
+      payload: { config: { llm: { verify_status: "verified", model: "station-model" } } },
+    });
+    expect(saved.statusCode).toBe(400);
+    expect(ctx.app.config.llm.verify_status).toBe("unverified");
+
+    const before = await ctx.app.inject({ method: "GET", url: "/api/v1/llm/status", headers: ctx.headers });
+    expect(before.json()).toMatchObject({
+      state: "configured_unverified",
+      probed: false,
+      detail: "configured but unverified, run test connection",
+    });
+    expect(calls).toEqual([]);
+
+    const ready = await ctx.app.inject({ method: "POST", url: "/api/v1/llm/test-connection", headers: ctx.headers });
+    expect(ready.json()).toMatchObject({ ok: true, state: "ready" });
+    expect(ctx.app.config.llm.verify_status).toBe("verified");
+    expect(calls).toEqual(["GET http://ollama.example/api/tags"]);
+
+    vi.stubGlobal("fetch", async () => jsonResponse({ models: [{ name: "other" }] }));
+    const missing = await ctx.app.inject({ method: "POST", url: "/api/v1/llm/test-connection", headers: ctx.headers });
+    expect(missing.json().state).toBe("model_missing");
+    expect(ctx.app.config.llm.verify_status).toBe("unverified");
+
+    vi.stubGlobal("fetch", async () => jsonResponse({}, 401));
+    const auth = await ctx.app.inject({ method: "POST", url: "/api/v1/library/test-connection", headers: ctx.headers });
+    expect(auth.json().state).toBe("auth_failed");
+    expect(ctx.app.config.library.verify_status).toBe("unverified");
+    expect(JSON.stringify(auth.json())).not.toContain("library-secret");
+
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("offline");
+    });
+    const down = await ctx.app.inject({ method: "POST", url: "/api/v1/radio/test-connection", headers: ctx.headers });
+    expect(down.json().state).toBe("unreachable");
+    expect(ctx.app.config.radio.verify_status).toBe("unverified");
+    expect(JSON.stringify(down.json())).not.toContain("radio-secret");
+  });
+
+  it("reports configured_unverified in doctor when filled settings omit verify_status", async () => {
+    const loaded = upgradeConfig();
+    const ctx = await adminApp(loaded);
+    fixtures.push(ctx.cleanup);
+    const doctor = await ctx.app.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(doctor.json().integrations).toEqual({
+      llm: { state: "configured_unverified", detail: "configured but unverified, run test connection" },
+      library: { state: "configured_unverified", detail: "configured but unverified, run test connection" },
+      radio: { state: "configured_unverified", detail: "configured but unverified, run test connection" },
+    });
+    expect(doctor.json().notes.join("\n")).toContain("configured but unverified, run test connection");
+    expect(ctx.app.config.llm.verify_status).toBe("unverified");
+    expect(ctx.app.config.library.verify_status).toBe("unverified");
+    expect(ctx.app.config.radio.verify_status).toBe("unverified");
+  });
+});

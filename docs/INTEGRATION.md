@@ -21,7 +21,9 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
 ## Ollama (VERIFIED docs) — external only, never install/manage
 
-`llm.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Ollama until that field is `verified`. Filling in the URL does not set it.
+`llm.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Ollama until that field is `verified`. Filling in the URL does not set it. If the URL and model are filled and `verify_status` was never written, doctor, the status API, and the dashboard report `configured_unverified` with “configured but unverified, run test connection”. That is not a promotion to verified.
+
+`POST /api/v1/llm/test-connection` is the only writer of `llm.verify_status: verified`. It is a read-only `GET /api/tags` and checks that the configured model is in the list. It does not pull, install, or restart Ollama. Failure persists `unverified` and returns `not_configured`, `unreachable`, `auth_failed`, or `model_missing`. `GET /api/v1/llm/status` does not write `verified`. Saving settings cannot set `verified`.
 
 - HTTP `base_url` configurable (local-dev placeholder often `http://127.0.0.1:11434`; live example above). Not a required default.
 - Classification: `POST /api/chat` with `stream: false` + `format` JSON schema
@@ -33,7 +35,9 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
 ## Navidrome (VERIFIED docs) — MusicLibraryProvider — **passive**
 
-`library.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Navidrome until that field is `verified`. Filling in the URL does not set it.
+`library.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call Navidrome until that field is `verified`. Filling in the URL does not set it. Filled URL, username, and password with no explicit `verify_status` report `configured_unverified` (“configured but unverified, run test connection”).
+
+`POST /api/v1/library/test-connection` is the only writer of `library.verify_status: verified`. It calls Subsonic `GET /rest/ping` with the existing token auth and `f=json`. Ready requires `status: ok`. Failure persists `unverified` (`not_configured`, `unreachable`, or `auth_failed`). The password is not logged or returned. `GET /api/v1/library/status` does not write `verified`.
 
 - Subsonic API 1.16.1 at `{url}/rest`, prefer `f=json`
 - Auth: `u` + `t/s` (md5 token from password + salt)
@@ -44,7 +48,9 @@ Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
 ## SUB/WAVE (VERIFIED = perminder-klair/subwave) — RadioProvider
 
-`radio.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call SUB/WAVE until that field is `verified`. Filling in the URL does not set it.
+`radio.verify_status` defaults to `unverified` when omitted. A blank or fresh config is not verified, and the adapter does not call SUB/WAVE until that field is `verified`. Filling in the URL does not set it. Filled URL, admin user, and password with no explicit `verify_status` report `configured_unverified` (“configured but unverified, run test connection”).
+
+`POST /api/v1/radio/test-connection` is the only writer of `radio.verify_status: verified`. It calls public `GET /health` (must report `{"status":"on-air"}`) and one authenticated read-only admin call, `GET /dj/search?q=a&limit=1`. It does not call `/dj/say` or `/dj/queue-track`. Failure persists `unverified` (`not_configured`, `unreachable`, `auth_failed`, or `unhealthy`). Credentials are not logged or returned. `GET /api/v1/radio/status` does not write `verified`.
 
 - HTTP JSON; treat `base_url` as opaque (live example already includes `/api`: `http://127.0.0.1:7700/api`)
 - Public (relative to that opaque base): `GET /health` → `{"status":"on-air"}`, `GET /now-playing`, `GET /state`; `POST /request` (202+requestId); `GET /request/:id`

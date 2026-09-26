@@ -71,5 +71,20 @@ export const ACQUISITION_CONNECTION_STATES = [
 ] as const;
 export type AcquisitionConnectionState = (typeof ACQUISITION_CONNECTION_STATES)[number];
 
+/**
+ * Live or config-derived states for Ollama, Navidrome, and SUB/WAVE.
+ * `verified` is not a state here. Only test-connection persists `verify_status: verified`.
+ */
+export const INTEGRATION_CONNECTION_STATES = [
+  "not_configured",
+  "configured_unverified",
+  "unreachable",
+  "auth_failed",
+  "model_missing",
+  "unhealthy",
+  "ready",
+] as const;
+export type IntegrationConnectionState = (typeof INTEGRATION_CONNECTION_STATES)[number];
+
 export const USER_ROLES = ["admin", "operator", "viewer"] as const;
 export type UserRole = (typeof USER_ROLES)[number];

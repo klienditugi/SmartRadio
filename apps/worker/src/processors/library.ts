@@ -1,5 +1,6 @@
 import { enqueueJob, getRequest, insertLibraryMatch, transitionRequest } from "@subwave-ai/db";
 import type { JobHandler } from "../context.js";
+import { runIntegration } from "./guard.js";
 
 export const handleCheckLibrary: JobHandler = async (ctx, job) => {
   if (!job.request_id) throw new Error("check_library job missing request_id");
@@ -12,7 +13,7 @@ export const handleCheckLibrary: JobHandler = async (ctx, job) => {
   if (current.status !== "CHECKING_LIBRARY") return { skipped: true, status: current.status };
 
   const query = [current.artist, current.title].filter(Boolean).join(" ") || current.raw_query;
-  const songs = await ctx.providers.library.search3(query, { songCount: 10 });
+  const songs = await runIntegration(ctx, request.id, () => ctx.providers.library.search3(query, { songCount: 10 }));
   const match = songs[0];
   if (match) {
     insertLibraryMatch(ctx.db, {

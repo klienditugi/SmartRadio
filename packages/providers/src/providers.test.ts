@@ -79,7 +79,7 @@ describe("OllamaProvider", () => {
       },
     });
     expect(llm.verifyStatus).toBe("unverified");
-    await expect(llm.classify({ text: "play something" })).rejects.toThrow(/unverified LLM adapter/);
+    await expect(llm.classify({ text: "play something" })).rejects.toThrow(/configured but unverified, run test connection/);
     const health = await llm.health();
     expect(health.ok).toBe(false);
     expect(health.verifyStatus).toBe("unverified");
@@ -148,7 +148,7 @@ describe("NavidromeProvider", () => {
       },
     });
     expect(nd.verifyStatus).toBe("unverified");
-    await expect(nd.search3("q")).rejects.toThrow(/unverified library adapter/);
+    await expect(nd.search3("q")).rejects.toThrow(/configured but unverified, run test connection/);
     const health = await nd.health();
     expect(health.ok).toBe(false);
     expect(health.verifyStatus).toBe("unverified");
@@ -289,7 +289,7 @@ describe("SubWaveProvider", () => {
         throw new Error("live fetch");
       },
     });
-    await expect(unverified.say({ text: "context" })).rejects.toThrow(/unverified radio adapter/);
+    await expect(unverified.say({ text: "context" })).rejects.toThrow(/configured but unverified, run test connection/);
 
     const omitted = new SubWaveProvider({
       baseUrl: "http://station.example/api",
@@ -301,7 +301,7 @@ describe("SubWaveProvider", () => {
     });
     expect(omitted.verifyStatus).toBe("unverified");
     await expect(omitted.health()).resolves.toMatchObject({ ok: false, verifyStatus: "unverified" });
-    await expect(omitted.say({ text: "context" })).rejects.toThrow(/unverified radio adapter/);
+    await expect(omitted.say({ text: "context" })).rejects.toThrow(/configured but unverified, run test connection/);
   });
 
   it("sends optional album on queue-track and treats HTTP 409 as never-play", async () => {
@@ -497,7 +497,7 @@ describe("createProviders acquisition gate", () => {
     expect(providers.llm.verifyStatus).toBe("unverified");
     expect(providers.library.verifyStatus).toBe("unverified");
     expect(providers.radio.verifyStatus).toBe("unverified");
-    await expect(providers.llm.classify({ text: "track" })).rejects.toThrow(/unverified LLM adapter/);
+    await expect(providers.llm.classify({ text: "track" })).rejects.toThrow(/configured but unverified, run test connection/);
     await expect(providers.library.search3("track")).rejects.toThrow(/unverified library adapter/);
     await expect(providers.radio.say({ text: "track" })).rejects.toThrow(/unverified radio adapter/);
     expect(called).toBe(false);

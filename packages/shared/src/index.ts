@@ -8,6 +8,7 @@ export {
   PROVIDER_KINDS,
   VERIFY_STATUSES,
   ACQUISITION_CONNECTION_STATES,
+  INTEGRATION_CONNECTION_STATES,
   USER_ROLES,
 } from "./status.js";
 export type {
@@ -17,6 +18,7 @@ export type {
   ProviderKind,
   VerifyStatus,
   AcquisitionConnectionState,
+  IntegrationConnectionState,
   UserRole,
 } from "./status.js";
 
@@ -41,6 +43,12 @@ export {
   DEFAULT_MAX_SAMPLE_RATE,
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_VERSION_PENALTY_TERMS,
+  CONFIGURED_UNVERIFIED_MESSAGE,
+  readVerifyStatusExplicit,
+  integrationIsConfigured,
+  isConfiguredUnverified,
+  assertSettingsDoNotVerify,
+  clearIntegrationVerifyOnChange,
   interpolateEnv,
   applyEnvOverrides,
   parseAppConfig,
@@ -52,4 +60,12 @@ export {
   normalizeAcquisitionSettingsPatch,
   writableConfigPath,
 } from "./config.js";
-export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions, AppConfigPatch } from "./config.js";
+export type {
+  StationPolicy,
+  AppConfig,
+  RuntimeConfig,
+  LoadConfigOptions,
+  AppConfigPatch,
+  CoreIntegration,
+  VerifyStatusExplicit,
+} from "./config.js";

@@ -12,7 +12,13 @@ type Overview = {
   recent_jobs: JobRow[];
   providers: ProviderRow[];
   disk: { volumes: DiskSnapshot[]; ok: boolean };
-  doctor: { ok: boolean; ollama: string; acquire_unavailable?: boolean; notes: string[] };
+  doctor: {
+    ok: boolean;
+    ollama: string;
+    acquire_unavailable?: boolean;
+    notes: string[];
+    integrations?: Record<string, { state: string; detail: string }>;
+  };
 };
 
 export function DashboardPage() {
@@ -88,6 +94,13 @@ export function DashboardPage() {
           <div className="muted">Doctor</div>
           <div className="stat">{data?.doctor.ok ? "ok" : "check"}</div>
           {data?.doctor.acquire_unavailable ? <div className="muted">acquire_unavailable</div> : null}
+          {Object.entries(data?.doctor.integrations ?? {})
+            .filter(([, row]) => row.state === "configured_unverified")
+            .map(([kind, row]) => (
+              <div className="muted" key={kind}>
+                {kind}: {row.detail}
+              </div>
+            ))}
         </div>
       </div>
       <div className="grid two" style={{ marginTop: "1rem" }}>
