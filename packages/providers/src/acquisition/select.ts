@@ -11,6 +11,9 @@
  *   (option omitted → config default 200; `null` → no cap)
  * - `length` greater than `maxDurationSeconds` when that limit is set and the
  *   file reports `length` (omitted or null → no duration limit)
+ * - `sampleRate` greater than `maxSampleRate` (omit → 48000 Hz; `null` → no cap)
+ * - `bitDepth` greater than `maxBitDepth` (omit → 24; `null` → no cap)
+ *   Files that do not report `sampleRate` or `bitDepth` stay eligible.
  *
  * Sort order (first difference wins):
  * 1. Extension rank: .flac, .wav, .m4a, .mp3, .ogg, then any other allowed extension.
@@ -19,8 +22,10 @@
  *    A term is not a penalty when the request artist/title contains that same term.
  * 3. Peer availability: `hasFreeUploadSlot` true, then false, then missing;
  *    then lower `queueLength` (missing last); then higher `uploadSpeed` (missing last).
- * 4. Quality, among files already inside the size cap: higher bitDepth, then
- *    sampleRate, then bitRate (missing last).
+ * 4. Quality, among files already inside the caps: higher bitDepth, then
+ *    sampleRate, then bitRate. Missing bitDepth/sampleRate are neutral (they do
+ *    not win or lose that key). A value above its cap is not better than the cap
+ *    (those files are excluded before this step). Missing bitRate sorts last.
  * 5. Size closer to the median size of the remaining same-extension candidates
  *    (a typical file before an outlier).
  * 6. `username`, then the full `filename` (`localeCompare`). Equal keys keep payload order.
@@ -29,7 +34,12 @@
  * files have no id. Those fields are not rank keys and are not transfer ids.
  */
 
-import { DEFAULT_MAX_FILE_SIZE_MB, DEFAULT_VERSION_PENALTY_TERMS } from "@subwave-ai/shared";
+import {
+  DEFAULT_MAX_BIT_DEPTH,
+  DEFAULT_MAX_FILE_SIZE_MB,
+  DEFAULT_MAX_SAMPLE_RATE,
+  DEFAULT_VERSION_PENALTY_TERMS,
+} from "@subwave-ai/shared";
 
 export type SelectedSearchFile = {
   username: string;
@@ -61,6 +71,16 @@ export type SelectSearchOptions = {
   maxFileSizeMb?: number | null;
   /** Seconds. Omit or null: no duration limit. Uses slskd `length` when present. */
   maxDurationSeconds?: number | null;
+  /**
+   * Hz. Omit for the broadcast-friendly default (48000). `null` disables the cap.
+   * A reported `sampleRate` above this is excluded. A missing `sampleRate` stays eligible.
+   */
+  maxSampleRate?: number | null;
+  /**
+   * Omit for the broadcast-friendly default (24). `null` disables the cap.
+   * A reported `bitDepth` above this is excluded. A missing `bitDepth` stays eligible.
+   */
+  maxBitDepth?: number | null;
   /** Word-boundary terms. Omit to use the config default list. Empty array: no penalty. */
   versionPenaltyTerms?: readonly string[];
   /** Request artist/title. `context` is the same option. */
@@ -213,6 +233,21 @@ function withinDuration(lengthSeconds: number | undefined, maxDurationSeconds: n
   return lengthSeconds <= maxDurationSeconds;
 }
 
+/** `undefined` uses the default. `null` or a non-positive number disables the cap. */
+function resolveCap(value: number | null | undefined, fallback: number): number | null {
+  if (value === null) return null;
+  const cap = value === undefined ? fallback : value;
+  if (!Number.isFinite(cap) || cap <= 0) return null;
+  return cap;
+}
+
+/** Missing measurements stay eligible. A reported value above the cap does not. */
+function withinBroadcast(row: Candidate, maxSampleRate: number | null, maxBitDepth: number | null): boolean {
+  if (maxSampleRate !== null && row.sampleRate !== undefined && row.sampleRate > maxSampleRate) return false;
+  if (maxBitDepth !== null && row.bitDepth !== undefined && row.bitDepth > maxBitDepth) return false;
+  return true;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -279,7 +314,25 @@ function cmpHigher(a: number | undefined, b: number | undefined): number {
   return b - a;
 }
 
-function compareCandidates(a: Candidate, b: Candidate, medians: Map<string, number>): number {
+/**
+ * Higher wins when both sides report a value. A missing value is neutral.
+ * Values above `cap` compare as the cap, so they are not better than the cap.
+ */
+function cmpWithinCap(a: number | undefined, b: number | undefined, cap: number | null): number {
+  const left = a === undefined ? undefined : cap === null ? a : Math.min(a, cap);
+  const right = b === undefined ? undefined : cap === null ? b : Math.min(b, cap);
+  if (left === undefined || right === undefined) return 0;
+  if (left === right) return 0;
+  return right - left;
+}
+
+function compareCandidates(
+  a: Candidate,
+  b: Candidate,
+  medians: Map<string, number>,
+  maxSampleRate: number | null,
+  maxBitDepth: number | null,
+): number {
   const aExt = (a.extension ?? extensionOf(a.filename)).toLowerCase();
   const bExt = (b.extension ?? extensionOf(b.filename)).toLowerCase();
   const extDiff = (EXT_RANK[bExt] ?? 0) - (EXT_RANK[aExt] ?? 0);
@@ -300,9 +353,9 @@ function compareCandidates(a: Candidate, b: Candidate, medians: Map<string, numb
   const speedB = b.uploadSpeed ?? Number.NEGATIVE_INFINITY;
   if (speedA !== speedB) return speedB - speedA;
 
-  const depthDiff = cmpHigher(a.bitDepth, b.bitDepth);
+  const depthDiff = cmpWithinCap(a.bitDepth, b.bitDepth, maxBitDepth);
   if (depthDiff !== 0) return depthDiff;
-  const rateDiff = cmpHigher(a.sampleRate, b.sampleRate);
+  const rateDiff = cmpWithinCap(a.sampleRate, b.sampleRate, maxSampleRate);
   if (rateDiff !== 0) return rateDiff;
   const bitDiff = cmpHigher(a.bitRate, b.bitRate);
   if (bitDiff !== 0) return bitDiff;
@@ -337,12 +390,15 @@ function toSelected(row: Candidate): SelectedSearchFile {
  */
 export function selectSearchResult(payload: unknown, opts: SelectSearchOptions = {}): SelectedSearchFile | null {
   const cap = maxBytes(opts.maxFileSizeMb);
+  const maxSampleRate = resolveCap(opts.maxSampleRate, DEFAULT_MAX_SAMPLE_RATE);
+  const maxBitDepth = resolveCap(opts.maxBitDepth, DEFAULT_MAX_BIT_DEPTH);
   const terms = opts.versionPenaltyTerms ?? DEFAULT_VERSION_PENALTY_TERMS;
   const requested = requestedText(opts);
   const candidates = collectCandidates(payload).filter((row) => {
     if (!allowed(row, opts.allowedExtensions)) return false;
     if (cap !== null && row.size > cap) return false;
     if (!withinDuration(row.lengthSeconds, opts.maxDurationSeconds)) return false;
+    if (!withinBroadcast(row, maxSampleRate, maxBitDepth)) return false;
     return true;
   });
   if (candidates.length === 0) return null;
@@ -350,7 +406,7 @@ export function selectSearchResult(payload: unknown, opts: SelectSearchOptions =
     row.penalized = versionPenalized(row.filename, terms, requested);
   }
   const medians = mediansByExtension(candidates);
-  candidates.sort((a, b) => compareCandidates(a, b, medians));
+  candidates.sort((a, b) => compareCandidates(a, b, medians, maxSampleRate, maxBitDepth));
   const best = candidates[0];
   return best ? toSelected(best) : null;
 }

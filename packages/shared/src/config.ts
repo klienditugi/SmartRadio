@@ -9,6 +9,12 @@ const envString = z.string().min(1);
 /** Mebibytes (1024×1024 bytes). Default search-hit size cap. */
 export const DEFAULT_MAX_FILE_SIZE_MB = 200;
 
+/** Broadcast-friendly sample-rate cap (Hz). Files that report a higher rate are not selected. */
+export const DEFAULT_MAX_SAMPLE_RATE = 48_000;
+
+/** Broadcast-friendly bit-depth cap. Files that report a higher depth are not selected. */
+export const DEFAULT_MAX_BIT_DEPTH = 24;
+
 /**
  * Basename / parent-folder words that rank below a clean match.
  * Word-boundary and case-insensitive. Waived when the request artist/title contains the same term.
@@ -35,6 +41,18 @@ const acquisitionSelectionSchema = z
      * Omit or null: no duration limit. Files that do not report `length` stay eligible.
      */
     max_duration_seconds: z.number().positive().nullable().optional(),
+    /**
+     * Hz. Files that report `sampleRate` above this are not selected.
+     * Omit for the broadcast-friendly default (48000). Null disables the cap.
+     * Files that do not report `sampleRate` stay eligible.
+     */
+    max_sample_rate: z.number().int().positive().nullable().default(DEFAULT_MAX_SAMPLE_RATE),
+    /**
+     * Files that report `bitDepth` above this are not selected.
+     * Omit for the broadcast-friendly default (24). Null disables the cap.
+     * Files that do not report `bitDepth` stay eligible.
+     */
+    max_bit_depth: z.number().int().positive().nullable().default(DEFAULT_MAX_BIT_DEPTH),
     version_penalty_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_VERSION_PENALTY_TERMS]),
   })
   .default({});
@@ -205,6 +223,22 @@ export function applyEnvOverrides(raw: Record<string, unknown>, env: NodeJS.Proc
     const seconds = Number(durationRaw);
     if (Number.isFinite(seconds) && seconds > 0) {
       selection.max_duration_seconds = seconds;
+      selectionTouched = true;
+    }
+  }
+  const sampleRateRaw = env.SLSKD_MAX_SAMPLE_RATE?.trim();
+  if (sampleRateRaw) {
+    const sampleRate = Number(sampleRateRaw);
+    if (Number.isFinite(sampleRate) && sampleRate > 0) {
+      selection.max_sample_rate = sampleRate;
+      selectionTouched = true;
+    }
+  }
+  const bitDepthRaw = env.SLSKD_MAX_BIT_DEPTH?.trim();
+  if (bitDepthRaw) {
+    const bitDepth = Number(bitDepthRaw);
+    if (Number.isFinite(bitDepth) && bitDepth > 0) {
+      selection.max_bit_depth = bitDepth;
       selectionTouched = true;
     }
   }
@@ -428,6 +462,8 @@ function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
   return {
     max_file_size_mb: selection.max_file_size_mb,
     ...(selection.max_duration_seconds != null ? { max_duration_seconds: selection.max_duration_seconds } : {}),
+    max_sample_rate: selection.max_sample_rate,
+    max_bit_depth: selection.max_bit_depth,
     version_penalty_terms: [...selection.version_penalty_terms],
   };
 }

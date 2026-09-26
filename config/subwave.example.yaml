@@ -94,11 +94,19 @@ acquisition:
   # version_penalty_terms match the basename or a parent folder (word boundary,
   # case-insensitive) and rank below a clean file unless the request artist/title
   # contains that term.
+  # max_sample_rate (Hz) and max_bit_depth are broadcast-friendly caps (48000 and 24).
+  # A file that reports a higher sample rate or bit depth is not chosen.
+  # A file that omits those fields stays eligible and ranks neutral on that key.
+  # Optional env: SLSKD_MAX_SAMPLE_RATE, SLSKD_MAX_BIT_DEPTH. Null disables a cap.
   # Order: extension (.flac .wav .m4a .mp3 .ogg), clean version, free upload slot
-  # then shorter queue then faster upload (missing peer fields last), bit depth /
-  # sample rate / bit rate, size closest to the same-extension median, username, filename.
+  # then shorter queue then faster upload (missing peer fields last), then quality
+  # (higher bit depth, sample rate, and bit rate at or under the caps; missing
+  # bit depth and sample rate are neutral; a rate above the cap is not better),
+  # size closest to the same-extension median, username, filename.
   selection:
     max_file_size_mb: 200
+    max_sample_rate: 48000
+    max_bit_depth: 24
     version_penalty_terms:
       - remix
       - live

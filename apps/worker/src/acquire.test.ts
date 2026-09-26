@@ -459,8 +459,9 @@ describe("A5 acquisition worker", () => {
             filename: remix,
             size: 30_000_000,
             extension: "flac",
+            // 48 kHz stays eligible. This case is the version penalty, not the sample-rate cap.
             bitDepth: 24,
-            sampleRate: 96000,
+            sampleRate: 48000,
             length: 400,
           },
         ],

@@ -164,6 +164,8 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         allowedExtensions: ctx.config.files.allowed_extensions,
         maxFileSizeMb: selection.max_file_size_mb,
         maxDurationSeconds: selection.max_duration_seconds,
+        maxSampleRate: selection.max_sample_rate,
+        maxBitDepth: selection.max_bit_depth,
         versionPenaltyTerms: selection.version_penalty_terms,
         query: {
           artist: request.artist ?? undefined,

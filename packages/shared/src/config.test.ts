@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
   applyEnvOverrides,
+  DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_MAX_FILE_SIZE_MB,
+  DEFAULT_MAX_SAMPLE_RATE,
   DEFAULT_VERSION_PENALTY_TERMS,
   interpolateEnv,
   loadConfig,
@@ -213,25 +215,41 @@ acquisition:
     expect(serializeAppConfig(saved)).not.toContain("api_key");
   });
 
-  it("defaults search selection to 200 MB, no duration limit, and the version-term list", () => {
+  it("defaults search selection to 200 MB, 48 kHz, 24-bit, no duration limit, and the version-term list", () => {
     const cfg = parseAppConfig(exampleYamlObject);
     expect(cfg.acquisition.selection.max_file_size_mb).toBe(DEFAULT_MAX_FILE_SIZE_MB);
     expect(cfg.acquisition.selection.max_duration_seconds).toBeUndefined();
+    expect(cfg.acquisition.selection.max_sample_rate).toBe(DEFAULT_MAX_SAMPLE_RATE);
+    expect(cfg.acquisition.selection.max_bit_depth).toBe(DEFAULT_MAX_BIT_DEPTH);
     expect(cfg.acquisition.selection.version_penalty_terms).toEqual([...DEFAULT_VERSION_PENALTY_TERMS]);
-    expect(publicSettings({ ...cfg, secrets: {} }).acquisition.selection.max_file_size_mb).toBe(200);
+    const settings = publicSettings({ ...cfg, secrets: {} }).acquisition.selection;
+    expect(settings.max_file_size_mb).toBe(200);
+    expect(settings.max_sample_rate).toBe(48000);
+    expect(settings.max_bit_depth).toBe(24);
+    const raw = structuredClone(exampleYamlObject);
+    delete (raw.acquisition as { selection?: unknown }).selection;
+    const omitted = parseAppConfig(raw);
+    expect(omitted.acquisition.selection.max_sample_rate).toBe(48000);
+    expect(omitted.acquisition.selection.max_bit_depth).toBe(24);
   });
 
   it("applies optional slskd selection env overrides and round-trips custom selection", () => {
     const overridden = applyEnvOverrides(structuredClone(exampleYamlObject), {
       SLSKD_MAX_FILE_SIZE_MB: "150",
       SLSKD_MAX_DURATION_SECONDS: "420",
+      SLSKD_MAX_SAMPLE_RATE: "96000",
+      SLSKD_MAX_BIT_DEPTH: "32",
     });
     const parsed = parseAppConfig(overridden);
     expect(parsed.acquisition.selection.max_file_size_mb).toBe(150);
     expect(parsed.acquisition.selection.max_duration_seconds).toBe(420);
+    expect(parsed.acquisition.selection.max_sample_rate).toBe(96000);
+    expect(parsed.acquisition.selection.max_bit_depth).toBe(32);
     const ignored = applyEnvOverrides(structuredClone(exampleYamlObject), {
       SLSKD_MAX_FILE_SIZE_MB: "0",
       SLSKD_MAX_DURATION_SECONDS: "",
+      SLSKD_MAX_SAMPLE_RATE: "0",
+      SLSKD_MAX_BIT_DEPTH: "",
     });
     expect((ignored.acquisition as { selection?: unknown }).selection).toBeUndefined();
     const custom = parseAppConfig({
@@ -241,6 +259,8 @@ acquisition:
         selection: {
           max_file_size_mb: 150,
           max_duration_seconds: 480,
+          max_sample_rate: 96000,
+          max_bit_depth: null,
           version_penalty_terms: ["remix", "live"],
         },
       },
@@ -249,6 +269,8 @@ acquisition:
     expect(roundTrip.acquisition.selection).toEqual({
       max_file_size_mb: 150,
       max_duration_seconds: 480,
+      max_sample_rate: 96000,
+      max_bit_depth: null,
       version_penalty_terms: ["remix", "live"],
     });
   });

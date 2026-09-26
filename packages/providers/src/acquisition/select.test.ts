@@ -146,13 +146,14 @@ const PHASE_C = {
       uploadSpeed: 15_000_000,
       files: [
         {
+          // 48 kHz stays inside the default sample-rate cap. This file is the version-penalty case, not a hi-res exclusion.
           filename: REMIX,
           size: 40 * MIB,
           length: 420,
           extension: "flac",
           bitDepth: 24,
-          sampleRate: 96000,
-          bitRate: 4608,
+          sampleRate: 48000,
+          bitRate: 2304,
           isLocked: false,
         },
         {
@@ -235,10 +236,12 @@ describe("slskd search ranking", () => {
         },
       ],
     };
-    expect(selectSearchResult(onlyHuge, { allowedExtensions: AUDIO, maxFileSizeMb: 200 })).toBeNull();
-    expect(selectSearchResult(onlyHuge, { allowedExtensions: AUDIO })).toBeNull();
-    expect(selectSearchResult(onlyHuge, { allowedExtensions: AUDIO, maxFileSizeMb: 500 })?.filename).toBe(HUGE);
-    expect(selectSearchResult(onlyHuge, { allowedExtensions: AUDIO, maxFileSizeMb: null })?.size).toBe(464 * MIB);
+    // This file is 24/192. Turn the broadcast caps off so the assertion is the size cap alone.
+    const sizeOnly = { allowedExtensions: AUDIO, maxSampleRate: null, maxBitDepth: null };
+    expect(selectSearchResult(onlyHuge, { ...sizeOnly, maxFileSizeMb: 200 })).toBeNull();
+    expect(selectSearchResult(onlyHuge, sizeOnly)).toBeNull();
+    expect(selectSearchResult(onlyHuge, { ...sizeOnly, maxFileSizeMb: 500 })?.filename).toBe(HUGE);
+    expect(selectSearchResult(onlyHuge, { ...sizeOnly, maxFileSizeMb: null })?.size).toBe(464 * MIB);
   });
 
   it("never selects lockedFiles or files with isLocked true", () => {
@@ -299,7 +302,8 @@ describe("slskd search ranking", () => {
           queueLength: 0,
           uploadSpeed: 1,
           files: [
-            { filename: longName, size: 30 * MIB, length: 630, extension: "flac", bitDepth: 24, sampleRate: 96000 },
+            // 48 kHz is the default cap, so this file is excluded by duration only, not by sample rate.
+            { filename: longName, size: 30 * MIB, length: 630, extension: "flac", bitDepth: 24, sampleRate: 48000 },
             { filename: shortName, size: 20 * MIB, length: 200, extension: "flac", bitDepth: 16, sampleRate: 44100 },
             { filename: unknownName, size: 25 * MIB, extension: "flac", bitDepth: 16, sampleRate: 44100 },
           ],
@@ -428,7 +432,8 @@ describe("slskd search ranking", () => {
         responses: [
           {
             username: "aaa-unknown",
-            files: [{ filename: "\\\\music\\\\unknown.flac", size: 20 * MIB, extension: "flac", bitDepth: 24, sampleRate: 192000 }],
+            // 24/48 is inside the broadcast cap and still loses: missing peer fields sort last. 192 kHz would be dropped before this rank.
+            files: [{ filename: "\\\\music\\\\unknown.flac", size: 20 * MIB, extension: "flac", bitDepth: 24, sampleRate: 48000 }],
           },
           {
             username: "zzz-known-busy",
@@ -505,8 +510,9 @@ describe("slskd search ranking", () => {
           filename: "\\\\music\\\\Get Lucky (Remix)\\\\Song (Club Remix).flac",
           size: 28 * MIB,
           extension: "flac",
+          // Inside the default caps, so a waived penalty can still select this file.
           bitDepth: 24,
-          sampleRate: 96000,
+          sampleRate: 48000,
         },
       ],
     };
@@ -560,6 +566,64 @@ describe("slskd search ranking", () => {
         { ...base, query: { title: "Song" } },
       )?.username,
     ).toBe("remixes-folder");
+  });
+
+  it("excludes 24/192 by default, selects 16/44.1, and still counts files that omit sample rate and bit depth", () => {
+    const cd = "\\\\music\\\\Album\\\\06 Get Lucky.flac";
+    const hires = "\\\\music\\\\Album\\\\06 Get Lucky (24-192).flac";
+    const bare = "\\\\music\\\\Album\\\\06 Get Lucky (untagged).flac";
+    const peer = (username: string, filename: string, extra: Record<string, unknown>) => ({
+      username,
+      hasFreeUploadSlot: true,
+      queueLength: 0,
+      uploadSpeed: 1000,
+      files: [{ filename, size: 40 * MIB, extension: "flac", length: 248, ...extra }],
+    });
+    const hiresFile = { bitDepth: 24, sampleRate: 192000, bitRate: 9216 };
+    const cdFile = { bitDepth: 16, sampleRate: 44100, bitRate: 1411 };
+    const payload = {
+      responses: [
+        peer("aaa-hires", hires, hiresFile),
+        peer("zzz-bare", bare, {}),
+        peer("mmm-cd", cd, cdFile),
+      ],
+    };
+    const opts = { allowedExtensions: AUDIO };
+    expect(selectSearchResult(payload, opts)).toMatchObject({ username: "mmm-cd", filename: cd, size: 40 * MIB });
+    expect(selectSearchResult({ responses: [payload.responses[0]!] }, opts)).toBeNull();
+    expect(selectSearchResult({ responses: [payload.responses[0]!, payload.responses[1]!] }, opts)).toMatchObject({
+      username: "zzz-bare",
+      filename: bare,
+    });
+    // Missing measurements are neutral, so the untagged file is not ranked below 16/44.1 on quality.
+    expect(
+      selectSearchResult(
+        {
+          responses: [peer("zzz-cd", cd, cdFile), peer("aaa-bare", bare, { bitRate: 1411 })],
+        },
+        opts,
+      )?.username,
+    ).toBe("aaa-bare");
+    // 24/48 is at the cap and still beats 16/44.1. 192 kHz does not, unless the cap is raised.
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            peer("cd", cd, cdFile),
+            peer("broadcast", "\\\\music\\\\Album\\\\broadcast.flac", { bitDepth: 24, sampleRate: 48000, bitRate: 2304 }),
+          ],
+        },
+        opts,
+      )?.username,
+    ).toBe("broadcast");
+    expect(
+      selectSearchResult(
+        { responses: [peer("deep", "\\\\music\\\\Album\\\\32bit.flac", { bitDepth: 32, sampleRate: 44100 })] },
+        opts,
+      ),
+    ).toBeNull();
+    expect(selectSearchResult(payload, { ...opts, maxSampleRate: 192000 })?.username).toBe("aaa-hires");
+    expect(selectSearchResult(payload, { ...opts, maxSampleRate: null, maxBitDepth: null })?.username).toBe("aaa-hires");
   });
 
   it("still selects a penalized file when nothing else is eligible", () => {

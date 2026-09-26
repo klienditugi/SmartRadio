@@ -33,16 +33,16 @@ Restart the SmartRadio worker after a successful test. It reads acquisition conf
 
 ## Which search file is downloaded
 
-Selection does not call an LLM. Keys live under `acquisition.selection` (see `config/subwave.example.yaml`). Optional env overrides: `SLSKD_MAX_FILE_SIZE_MB`, `SLSKD_MAX_DURATION_SECONDS`. The settings screen does not edit these.
+Selection does not call an LLM. Keys live under `acquisition.selection` (see `config/subwave.example.yaml`). Optional env overrides: `SLSKD_MAX_FILE_SIZE_MB`, `SLSKD_MAX_DURATION_SECONDS`, `SLSKD_MAX_SAMPLE_RATE`, `SLSKD_MAX_BIT_DEPTH`. The settings screen does not edit these.
 
-Files in `lockedFiles`, or with `isLocked: true`, are never chosen. An empty `extension` uses the filename. Files larger than `max_file_size_mb` (default 200, in 1024×1024-byte units, same as `files.max_bytes`) are excluded. `max_duration_seconds` applies to slskd `length` when that field is present; leave it unset for no duration limit.
+Files in `lockedFiles`, or with `isLocked: true`, are never chosen. An empty `extension` uses the filename. Files larger than `max_file_size_mb` (default 200, in 1024×1024-byte units, same as `files.max_bytes`) are excluded. `max_duration_seconds` applies to slskd `length` when that field is present; leave it unset for no duration limit. `max_sample_rate` (default 48000 Hz) and `max_bit_depth` (default 24) are broadcast-friendly and configurable. A file that reports a sample rate or bit depth above its cap is excluded. A file that does not report that field stays eligible. Set either key to null to disable that cap.
 
 Rank, first difference wins:
 
 1. Extension: `.flac`, `.wav`, `.m4a`, `.mp3`, `.ogg`, then any other allowed extension.
 2. Clean version, then a penalized one. The default terms are remix, live, edit, extended, radio edit, instrumental, karaoke, cover, acapella, demo. They match the basename or a parent folder on a word boundary, case-insensitive, unless the request artist or title contains that term.
 3. Peer: free upload slot, then `false`, then missing; then a shorter queue (missing last); then a faster upload (missing last).
-4. Higher bit depth, then sample rate, then bit rate (missing last).
+4. Quality: higher bit depth, then sample rate, then bit rate, among values at or under the caps. Missing bit depth and sample rate are neutral. A sample rate above the cap is not better than the cap. Missing bit rate sorts last.
 5. Size closer to the median of the remaining same-extension files.
 6. Username, then the full filename.
 

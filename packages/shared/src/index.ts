@@ -38,6 +38,8 @@ export {
   stationPolicySchema,
   appConfigSchema,
   DEFAULT_MAX_FILE_SIZE_MB,
+  DEFAULT_MAX_SAMPLE_RATE,
+  DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_VERSION_PENALTY_TERMS,
   interpolateEnv,
   applyEnvOverrides,
