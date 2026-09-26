@@ -75,6 +75,7 @@ Playback handoff continues to use the verified admin APIs under the opaque `/api
 ## Amendment A5 (locked)
 
 - Optional `SoulseekProvider` (slskd `/api/v0`, `X-API-Key`): `POST /searches`, poll `GET /searches/{id}?includeResponses=true` (fallback `…/responses`), select via isolated module, `POST /transfers/downloads/{username}` with `[{filename,size}]`, poll `GET /transfers/downloads` until correlated transfer is **Completed** and **Succeeded** (not Errored), then hand off the real basename under `paths.downloads`.
+- Search selection is deterministic (`acquisition.selection`): size cap (default 200 MB), optional duration cap, version penalty, then extension, peer availability, quality, and typical size. Correlation is exact username + original filename + size, with a basename fallback only when that match is unique and the size agrees. Search responses have no id.
 - Health prefers `GET /application` + `GET /server`. `verify_status` gates live calls.
 - False-complete removed: one empty poll (or an unrelated transfer) must not advance to `DOWNLOAD_COMPLETE`.
 - Portable: no hard-coded Oracle paths; acquisition stays optional with `acquire_unavailable`.

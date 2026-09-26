@@ -6,6 +6,39 @@ import { loadSecrets, type LoadedSecrets } from "./secrets.js";
 
 const envString = z.string().min(1);
 
+/** Mebibytes (1024×1024 bytes). Default search-hit size cap. */
+export const DEFAULT_MAX_FILE_SIZE_MB = 200;
+
+/**
+ * Basename / parent-folder words that rank below a clean match.
+ * Word-boundary and case-insensitive. Waived when the request artist/title contains the same term.
+ */
+export const DEFAULT_VERSION_PENALTY_TERMS = [
+  "remix",
+  "live",
+  "edit",
+  "extended",
+  "radio edit",
+  "instrumental",
+  "karaoke",
+  "cover",
+  "acapella",
+  "demo",
+] as const;
+
+const acquisitionSelectionSchema = z
+  .object({
+    /** Files larger than this (mebibytes, 1024×1024) are not selected. */
+    max_file_size_mb: z.number().positive().default(DEFAULT_MAX_FILE_SIZE_MB),
+    /**
+     * When set, files whose slskd `length` (seconds) is greater than this are not selected.
+     * Omit or null: no duration limit. Files that do not report `length` stay eligible.
+     */
+    max_duration_seconds: z.number().positive().nullable().optional(),
+    version_penalty_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_VERSION_PENALTY_TERMS]),
+  })
+  .default({});
+
 export const stationPolicySchema = z.object({
   require_electronic: z.boolean().default(true),
   require_station_match: z.boolean().default(true),
@@ -82,6 +115,8 @@ export const appConfigSchema = z.object({
     base_url: z.string().trim().default(""),
     /** Omitted means unverified. `verified` is written only after a live test connection. */
     verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    /** Deterministic search-hit ranking. Yaml/env; the settings UI does not edit this. */
+    selection: acquisitionSelectionSchema,
   }),
 });
 
@@ -152,6 +187,25 @@ export function applyEnvOverrides(raw: Record<string, unknown>, env: NodeJS.Proc
 
   const acquisition = (next.acquisition ?? {}) as Record<string, unknown>;
   if (env.SLSKD_URL) set(acquisition, "base_url", env.SLSKD_URL);
+  const selection = { ...((acquisition.selection ?? {}) as Record<string, unknown>) };
+  let selectionTouched = false;
+  const sizeMb = env.SLSKD_MAX_FILE_SIZE_MB?.trim();
+  if (sizeMb) {
+    const mb = Number(sizeMb);
+    if (Number.isFinite(mb) && mb > 0) {
+      selection.max_file_size_mb = mb;
+      selectionTouched = true;
+    }
+  }
+  const durationRaw = env.SLSKD_MAX_DURATION_SECONDS?.trim();
+  if (durationRaw) {
+    const seconds = Number(durationRaw);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      selection.max_duration_seconds = seconds;
+      selectionTouched = true;
+    }
+  }
+  if (selectionTouched) acquisition.selection = selection;
   next.acquisition = acquisition;
 
   return next;
@@ -258,6 +312,7 @@ export function publicSettings(config: RuntimeConfig) {
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
       verify_status: config.acquisition.verify_status,
+      selection: selectionSettings(config.acquisition.selection),
     },
     secrets_present: {
       admin_password: Boolean(config.secrets.adminPassword),
@@ -360,9 +415,18 @@ export function serializeAppConfig(config: AppConfig): string {
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
       verify_status: config.acquisition.verify_status,
+      selection: selectionSettings(config.acquisition.selection),
     },
   };
   return `# Written by Sub Wave AI setup/settings. Secrets stay in paths.secrets_dir.\n${stringifyYaml(doc)}`;
+}
+
+function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
+  return {
+    max_file_size_mb: selection.max_file_size_mb,
+    ...(selection.max_duration_seconds != null ? { max_duration_seconds: selection.max_duration_seconds } : {}),
+    version_penalty_terms: [...selection.version_penalty_terms],
+  };
 }
 
 export function writeAppConfig(filePath: string, config: AppConfig): void {

@@ -37,6 +37,8 @@ export type { LoadedSecrets } from "./secrets.js";
 export {
   stationPolicySchema,
   appConfigSchema,
+  DEFAULT_MAX_FILE_SIZE_MB,
+  DEFAULT_VERSION_PENALTY_TERMS,
   interpolateEnv,
   applyEnvOverrides,
   parseAppConfig,

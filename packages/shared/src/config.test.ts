@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
   applyEnvOverrides,
+  DEFAULT_MAX_FILE_SIZE_MB,
+  DEFAULT_VERSION_PENALTY_TERMS,
   interpolateEnv,
   loadConfig,
   normalizeAcquisitionSettingsPatch,
@@ -183,6 +185,46 @@ acquisition:
     expect(roundTrip.acquisition.enabled).toBe(false);
     expect(roundTrip.acquisition.verify_status).toBe("unverified");
     expect(serializeAppConfig(saved)).not.toContain("api_key");
+  });
+
+  it("defaults search selection to 200 MB, no duration limit, and the version-term list", () => {
+    const cfg = parseAppConfig(exampleYamlObject);
+    expect(cfg.acquisition.selection.max_file_size_mb).toBe(DEFAULT_MAX_FILE_SIZE_MB);
+    expect(cfg.acquisition.selection.max_duration_seconds).toBeUndefined();
+    expect(cfg.acquisition.selection.version_penalty_terms).toEqual([...DEFAULT_VERSION_PENALTY_TERMS]);
+    expect(publicSettings({ ...cfg, secrets: {} }).acquisition.selection.max_file_size_mb).toBe(200);
+  });
+
+  it("applies optional slskd selection env overrides and round-trips custom selection", () => {
+    const overridden = applyEnvOverrides(structuredClone(exampleYamlObject), {
+      SLSKD_MAX_FILE_SIZE_MB: "150",
+      SLSKD_MAX_DURATION_SECONDS: "420",
+    });
+    const parsed = parseAppConfig(overridden);
+    expect(parsed.acquisition.selection.max_file_size_mb).toBe(150);
+    expect(parsed.acquisition.selection.max_duration_seconds).toBe(420);
+    const ignored = applyEnvOverrides(structuredClone(exampleYamlObject), {
+      SLSKD_MAX_FILE_SIZE_MB: "0",
+      SLSKD_MAX_DURATION_SECONDS: "",
+    });
+    expect((ignored.acquisition as { selection?: unknown }).selection).toBeUndefined();
+    const custom = parseAppConfig({
+      ...parsed,
+      acquisition: {
+        ...parsed.acquisition,
+        selection: {
+          max_file_size_mb: 150,
+          max_duration_seconds: 480,
+          version_penalty_terms: ["remix", "live"],
+        },
+      },
+    });
+    const roundTrip = parseAppConfig(parseYaml(serializeAppConfig(custom)));
+    expect(roundTrip.acquisition.selection).toEqual({
+      max_file_size_mb: 150,
+      max_duration_seconds: 480,
+      version_penalty_terms: ["remix", "live"],
+    });
   });
 });
 

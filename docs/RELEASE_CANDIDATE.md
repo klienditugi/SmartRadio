@@ -56,8 +56,8 @@ Live environment **examples** (never required source defaults): Oracle aarch64 L
 | Item | Why |
 | --- | --- |
 | **SUB/WAVE `REQUEST_ACCEPTED` / `TRACK_READY` notify** | **Bound in A4** to admin `POST /dj/say` (`mode: "styled"`). No further notify URL is invented. Webhook payload schema is still not implemented. |
-| slskd transfer JSON field names | `GET /api/v0/transfers/downloads` is verified. A5 correlates on username/filename/size/(id) and treats state tokens **Completed + Succeeded** (not Errored) as done. Per-file progress keys are still best-effort when present. |
-| slskd search result → enqueue payload | **Bound in A5**: poll search responses, isolated selection → `{username,filename,size}` for `POST /transfers/downloads/{user}`. Heuristics may improve later without new endpoints. |
+| slskd transfer JSON field names | `GET /api/v0/transfers/downloads` is verified. Correlation prefers a transfer id from the enqueue body, otherwise exact username + full filename + size (basename only when unique for that user and the size matches). State tokens **Completed + Succeeded** (not Errored) mean done. Per-file progress keys are still best-effort when present. |
+| slskd search result → enqueue payload | Poll search responses, then rank in the isolated selector (`acquisition.selection`: size cap, optional duration, version penalty, extension, peer, quality, typical size) → `{username,filename,size}` for `POST /transfers/downloads/{user}`. The filename is the original string. Search responses have no id. |
 | SUB/WAVE webhook payload | Documented as existing; schema not implemented (unchanged). |
 | SUB/WAVE `GET /api/connect/openapi.json` | Admin-gated on the radio; not imported. |
 | Live OpenAPI of a running SUB/WAVE | Not fetched. Automation uses verified `/dj/search`, `/dj/queue-track`, `/dj/say`, and `/dj/refresh-playlist`. |

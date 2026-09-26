@@ -83,3 +83,27 @@ acquisition:
   provider: slskd
   base_url: "${SLSKD_URL}"
   verify_status: unverified
+  # Search-hit ranking (worker, deterministic, no LLM). Not edited by the settings UI.
+  # max_file_size_mb is mebibytes (1024×1024), the same 200 as files.max_bytes.
+  # Files larger than that are not chosen. Optional env: SLSKD_MAX_FILE_SIZE_MB.
+  # max_duration_seconds uses slskd `length` (seconds) when the file has it.
+  # Omit it for no duration limit. Optional env: SLSKD_MAX_DURATION_SECONDS.
+  # version_penalty_terms match the basename or a parent folder (word boundary,
+  # case-insensitive) and rank below a clean file unless the request artist/title
+  # contains that term.
+  # Order: extension (.flac .wav .m4a .mp3 .ogg), clean version, free upload slot
+  # then shorter queue then faster upload (missing peer fields last), bit depth /
+  # sample rate / bit rate, size closest to the same-extension median, username, filename.
+  selection:
+    max_file_size_mb: 200
+    version_penalty_terms:
+      - remix
+      - live
+      - edit
+      - extended
+      - radio edit
+      - instrumental
+      - karaoke
+      - cover
+      - acapella
+      - demo

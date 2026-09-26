@@ -299,6 +299,31 @@ describe("SoulseekProvider (slskd)", () => {
     expect(calls[4]?.url).toBe("http://slskd.example/api/v0/transfers/downloads");
   });
 
+  it("enqueues the original filename verbatim and the size", async () => {
+    const filename = "C:\\Users\\share\\Album\\01 Get Lucky.flac";
+    let body = "";
+    let method: string | undefined;
+    let url = "";
+    const fetchMock: FetchLike = async (input, init) => {
+      url = String(input);
+      method = init?.method;
+      body = String(init?.body ?? "");
+      return new Response(null, { status: 201 });
+    };
+    const slskd = new SoulseekProvider({
+      baseUrl: "http://slskd.example",
+      apiKey: "key-from-secrets",
+      fetch: fetchMock,
+    });
+    await slskd.enqueueDownload("peer", [{ filename, size: 44_000_000 }]);
+    expect(method).toBe("POST");
+    expect(url).toBe("http://slskd.example/api/v0/transfers/downloads/peer");
+    expect(JSON.parse(body)).toEqual([{ filename, size: 44_000_000 }]);
+    expect(body).toContain("C:\\\\Users\\\\share\\\\Album\\\\01 Get Lucky.flac");
+    expect(body).not.toContain("C:/Users");
+    expect(JSON.parse(body)[0].filename).not.toBe("01 Get Lucky.flac");
+  });
+
   it("health prefers GET /application and GET /server and requires Soulseek login", async () => {
     const calls: string[] = [];
     const fetchMock: FetchLike = async (url) => {

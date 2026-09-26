@@ -445,6 +445,68 @@ describe("A5 acquisition worker", () => {
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
   });
 
+  it("enqueues the clean file unless the request title asks for the remix", async () => {
+    const album = "\\\\music\\\\Album\\\\Get Lucky.flac";
+    const remix = "\\\\music\\\\Remix\\\\Get Lucky (Remix).flac";
+    const responses = [
+      {
+        username: "remix-peer",
+        hasFreeUploadSlot: true,
+        queueLength: 0,
+        uploadSpeed: 9_000_000,
+        files: [
+          {
+            filename: remix,
+            size: 30_000_000,
+            extension: "flac",
+            bitDepth: 24,
+            sampleRate: 96000,
+            length: 400,
+          },
+        ],
+      },
+      {
+        username: "album-peer",
+        hasFreeUploadSlot: true,
+        queueLength: 2,
+        uploadSpeed: 100_000,
+        files: [
+          {
+            filename: album,
+            size: 40_000_000,
+            extension: "flac",
+            bitDepth: 16,
+            sampleRate: 44100,
+            length: 248,
+          },
+        ],
+      },
+    ];
+
+    async function chosen(title: string) {
+      const { config, db, cleanup } = fixture();
+      cleanups.push(cleanup);
+      const { acquisition, radio, library, enqueued } = harness({ responses });
+      const request = createRequest(db, { rawQuery: `Daft Punk - ${title}` });
+      advance(db, request.id, "QUEUED", { artist: "Daft Punk", title });
+      await handleDownload(
+        {
+          db,
+          config,
+          providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+          workerId: "worker-test",
+        },
+        enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
+      );
+      return enqueued;
+    }
+
+    expect(await chosen("Get Lucky")).toEqual([{ user: "album-peer", files: [{ filename: album, size: 40_000_000 }] }]);
+    expect(await chosen("Get Lucky Remix")).toEqual([
+      { user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] },
+    ]);
+  });
+
   it("surfaces acquire_unavailable without calling the provider", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
