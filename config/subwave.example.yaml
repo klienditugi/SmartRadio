@@ -44,7 +44,8 @@ policy:
   blocked_artists: []
   blocked_terms: []
 
-# External Ollama only. Never install/update/pull models from this app.
+# Optional at boot. Empty ${OLLAMA_BASE_URL} or ${OLLAMA_MODEL} is unset (`not_configured`).
+# External Ollama only. Never install/update/pull models from this app. No default model name.
 # Live example (not a default): http://100.119.17.28:11434 v0.34.0. Do not hard-code qwen3:8b.
 # verify_status stays unverified until an explicit successful verification. Filling in the URL does not verify.
 llm:
@@ -54,8 +55,10 @@ llm:
   timeout_ms: 120000
   verify_status: unverified
 
+# Optional at boot. Empty ${NAVIDROME_URL} / ${NAVIDROME_USER} (or a missing
+# secrets/navidrome_password) is `not_configured`. Do not invent a host.
 # Passive on the happy path: startScan is ops-only. ~1min scanner picks up /music/library.
-# verify_status stays unverified until an explicit successful verification. Filling in the URL does not verify.
+# verify_status in this file is ignored. Test connection is the only verification.
 library:
   provider: navidrome
   base_url: "${NAVIDROME_URL}"
@@ -64,6 +67,8 @@ library:
   api_version: "1.16.1"
   verify_status: unverified
 
+# Optional at boot. Empty ${SUBWAVE_RADIO_URL} / ${SUBWAVE_RADIO_ADMIN_USER}
+# (or a missing secrets/subwave_admin_password) is `not_configured`.
 # Opaque base URL (live example already includes `/api`: http://127.0.0.1:7700/api).
 # Playback: GET /dj/search, then POST /dj/queue-track {id,title} (artist/album optional; HTTP 409 = never-play).
 # Notify: POST /dj/say {text, mode:styled, kind:dj-speak|link} with the same admin Basic auth.

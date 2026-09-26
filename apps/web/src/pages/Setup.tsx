@@ -169,7 +169,10 @@ export function SetupPage() {
         )}
         {step === 2 && (
           <>
-            <p className="muted">External Ollama only. Enter the base URL and a model already present on that host.</p>
+            <p className="muted">
+              Optional at boot. External Ollama only — leave blank and status stays not_configured. Enter a base URL and a
+              model already present on that host. This wizard never installs Ollama or chooses a model.
+            </p>
             <label className="field">
               <span>Ollama base URL</span>
               <input value={form.ollama_url} onChange={(e) => set("ollama_url", e.target.value)} placeholder="https://…" />
@@ -184,6 +187,7 @@ export function SetupPage() {
         )}
         {step === 3 && (
           <>
+            <p className="muted">Optional. Leave blank to boot; Navidrome stays not_configured until URL, username, and password are set.</p>
             <label className="field">
               <span>Navidrome URL</span>
               <input value={form.navidrome_url} onChange={(e) => set("navidrome_url", e.target.value)} />
@@ -202,7 +206,10 @@ export function SetupPage() {
         )}
         {step === 4 && (
           <>
-            <p className="muted">SUB/WAVE base URL is opaque (production may already include /api).</p>
+            <p className="muted">
+              Optional. Leave blank to boot; SUB/WAVE stays not_configured until the opaque base URL, admin username, and
+              password are set. A live base URL may already include /api.
+            </p>
             <label className="field">
               <span>Radio base URL</span>
               <input value={form.radio_url} onChange={(e) => set("radio_url", e.target.value)} />

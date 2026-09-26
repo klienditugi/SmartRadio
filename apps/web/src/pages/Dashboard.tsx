@@ -17,7 +17,11 @@ type Overview = {
     ollama: string;
     acquire_unavailable?: boolean;
     notes: string[];
-    integrations?: Record<string, { state: string; detail: string }>;
+    integrations?: {
+      llm?: { state: string | null; detail?: string };
+      library?: { state: string | null; detail?: string };
+      radio?: { state: string | null; detail?: string };
+    };
   };
 };
 
@@ -107,12 +111,18 @@ export function DashboardPage() {
         <div className="card">
           <h2>Providers</h2>
           {providers.map((p) => {
-            let health: { ok?: boolean; detail?: string } = {};
+            let health: { ok?: boolean; detail?: string; state?: string } = {};
             try {
               health = p.last_health_json ? JSON.parse(p.last_health_json) : {};
             } catch {
               health = {};
             }
+            const integration = data?.doctor.integrations?.[p.kind as "llm" | "library" | "radio"];
+            const reported = health.state ?? integration?.state ?? undefined;
+            const connection =
+              reported === "not_configured" || reported === "configured_unverified" || reported === "unreachable"
+                ? reported
+                : undefined;
             return (
               <div key={p.id} className="row" style={{ justifyContent: "space-between", marginBottom: "0.6rem" }}>
                 <div>
@@ -121,7 +131,11 @@ export function DashboardPage() {
                     {p.kind} · <StatusBadge value={p.verify_status} />
                   </div>
                 </div>
-                <span className={`health-dot ${health.ok ? "ok" : "bad"}`} title={health.detail ?? "no probe yet"} />
+                {connection ? (
+                  <StatusBadge value={connection} />
+                ) : (
+                  <span className={`health-dot ${health.ok ? "ok" : "bad"}`} title={health.detail ?? integration?.detail ?? "no probe yet"} />
+                )}
               </div>
             );
           })}

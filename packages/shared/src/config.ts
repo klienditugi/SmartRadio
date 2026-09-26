@@ -3,8 +3,25 @@ import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { loadSecrets, type LoadedSecrets } from "./secrets.js";
+import {
+  describeIntegration,
+  NAVIDROME_NOT_CONFIGURED,
+  ollamaNotConfiguredDetail,
+  SUBWAVE_RADIO_NOT_CONFIGURED,
+  type IntegrationReport,
+} from "./status.js";
 
-const envString = z.string().min(1);
+/** Blank, whitespace, null, and missing are the same unset value. No invented default. */
+const optionalSetting = z.preprocess((value) => {
+  if (value === undefined || value === null) return "";
+  return value;
+}, z.string().trim());
+
+function nonemptyEnv(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
 
 /** Mebibytes (1024×1024 bytes). Default search-hit size cap. */
 export const DEFAULT_MAX_FILE_SIZE_MB = 200;
@@ -118,30 +135,39 @@ export const appConfigSchema = z.object({
     })
     .default({}),
   policy: stationPolicySchema.default({}),
-  llm: z.object({
-    provider: z.literal("ollama").default("ollama"),
-    base_url: envString,
-    model: z.string().min(1),
-    timeout_ms: z.number().int().positive().default(120_000),
-    /** Omitted means unverified. A blank config must not read as verified. */
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
-  }),
-  library: z.object({
-    provider: z.literal("navidrome").default("navidrome"),
-    base_url: z.string().min(1),
-    username: z.string().min(1),
-    client_name: z.string().min(1).default("subwave-ai"),
-    api_version: z.string().min(1).default("1.16.1"),
-    /** Omitted means unverified. A blank config must not read as verified. */
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
-  }),
-  radio: z.object({
-    provider: z.literal("subwave").default("subwave"),
-    base_url: z.string().min(1),
-    admin_user: z.string().min(1),
-    /** Omitted means unverified. A blank config must not read as verified. */
-    verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
-  }),
+  llm: z
+    .object({
+      provider: z.literal("ollama").default("ollama"),
+      /** Optional. Empty is unset. Never default a model name or host. */
+      base_url: optionalSetting,
+      model: optionalSetting,
+      timeout_ms: z.number().int().positive().default(120_000),
+      /** Parsed for old configs. Ignored as a source of verified. */
+      verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    })
+    .default({}),
+  library: z
+    .object({
+      provider: z.literal("navidrome").default("navidrome"),
+      /** Optional. Empty URL, username, or password is `not_configured`. */
+      base_url: optionalSetting,
+      username: optionalSetting,
+      client_name: z.string().min(1).default("subwave-ai"),
+      api_version: z.string().min(1).default("1.16.1"),
+      /** Parsed for old configs. Ignored as a source of verified. */
+      verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    })
+    .default({}),
+  radio: z
+    .object({
+      provider: z.literal("subwave").default("subwave"),
+      /** Optional. Empty URL, admin user, or password is `not_configured`. */
+      base_url: optionalSetting,
+      admin_user: optionalSetting,
+      /** Parsed for old configs. Ignored as a source of verified. */
+      verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    })
+    .default({}),
   acquisition: z.object({
     /** Omitted field stays on so existing verified installs keep working. Set false to disable. */
     enabled: z.boolean().default(true),
@@ -226,18 +252,24 @@ export function applyEnvOverrides(raw: Record<string, unknown>, env: NodeJS.Proc
   next.auth = auth;
 
   const llm = (next.llm ?? {}) as Record<string, unknown>;
-  if (env.OLLAMA_BASE_URL) set(llm, "base_url", env.OLLAMA_BASE_URL);
-  if (env.OLLAMA_MODEL) set(llm, "model", env.OLLAMA_MODEL);
+  const ollamaUrl = nonemptyEnv(env.OLLAMA_BASE_URL);
+  const ollamaModel = nonemptyEnv(env.OLLAMA_MODEL);
+  if (ollamaUrl) set(llm, "base_url", ollamaUrl);
+  if (ollamaModel) set(llm, "model", ollamaModel);
   next.llm = llm;
 
   const library = (next.library ?? {}) as Record<string, unknown>;
-  if (env.NAVIDROME_URL) set(library, "base_url", env.NAVIDROME_URL);
-  if (env.NAVIDROME_USER) set(library, "username", env.NAVIDROME_USER);
+  const navidromeUrl = nonemptyEnv(env.NAVIDROME_URL);
+  const navidromeUser = nonemptyEnv(env.NAVIDROME_USER);
+  if (navidromeUrl) set(library, "base_url", navidromeUrl);
+  if (navidromeUser) set(library, "username", navidromeUser);
   next.library = library;
 
   const radio = (next.radio ?? {}) as Record<string, unknown>;
-  if (env.SUBWAVE_RADIO_URL) set(radio, "base_url", env.SUBWAVE_RADIO_URL);
-  if (env.SUBWAVE_RADIO_ADMIN_USER) set(radio, "admin_user", env.SUBWAVE_RADIO_ADMIN_USER);
+  const radioUrl = nonemptyEnv(env.SUBWAVE_RADIO_URL);
+  const radioUser = nonemptyEnv(env.SUBWAVE_RADIO_ADMIN_USER);
+  if (radioUrl) set(radio, "base_url", radioUrl);
+  if (radioUser) set(radio, "admin_user", radioUser);
   next.radio = radio;
 
   const acquisition = (next.acquisition ?? {}) as Record<string, unknown>;
@@ -340,18 +372,7 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
   const rawYaml = parseYaml(readFileSync(configPath, "utf8"));
   const interpolated = interpolateEnv(rawYaml, env) as Record<string, unknown>;
   const overridden = applyEnvOverrides(interpolated, env);
-  let parsed: AppConfig;
-  try {
-    parsed = parseAppConfig(overridden);
-  } catch (err) {
-    const llm = (overridden.llm ?? {}) as { model?: string };
-    if (!llm.model) {
-      throw new Error(
-        "LLM model is not configured. Set OLLAMA_MODEL (or llm.model in yaml) to a model already present on the external Ollama host. This app never defaults or pulls a model name.",
-      );
-    }
-    throw err;
-  }
+  const parsed = parseAppConfig(overridden);
   const secretsDir = options.secretsDir
     ? path.resolve(options.secretsDir)
     : path.resolve(parsed.paths.secrets_dir);
@@ -364,14 +385,47 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
   };
 }
 
+export function isOllamaConfigured(config: RuntimeConfig): boolean {
+  return Boolean(config.llm.base_url.trim() && config.llm.model.trim());
+}
+
+export function isNavidromeConfigured(config: RuntimeConfig): boolean {
+  return Boolean(
+    config.library.base_url.trim() && config.library.username.trim() && config.secrets.navidromePassword?.trim(),
+  );
+}
+
+export function isSubwaveRadioConfigured(config: RuntimeConfig): boolean {
+  return Boolean(
+    config.radio.base_url.trim() && config.radio.admin_user.trim() && config.secrets.subwaveAdminPassword?.trim(),
+  );
+}
+
+export type IntegrationStatusMap = {
+  llm: IntegrationReport;
+  library: IntegrationReport;
+  radio: IntegrationReport;
+};
+
+export function integrationStatus(
+  config: RuntimeConfig,
+  health: { llm?: string | null; library?: string | null; radio?: string | null } = {},
+): IntegrationStatusMap {
+  return {
+    llm: describeIntegration(
+      isOllamaConfigured(config),
+      ollamaNotConfiguredDetail({ baseUrl: config.llm.base_url, model: config.llm.model }),
+      health.llm,
+    ),
+    library: describeIntegration(isNavidromeConfigured(config), NAVIDROME_NOT_CONFIGURED, health.library),
+    radio: describeIntegration(isSubwaveRadioConfigured(config), SUBWAVE_RADIO_NOT_CONFIGURED, health.radio),
+  };
+}
+
 export function integrationIsConfigured(config: RuntimeConfig, kind: CoreIntegration): boolean {
-  if (kind === "llm") return Boolean(config.llm.base_url.trim() && config.llm.model.trim());
-  if (kind === "library") {
-    return Boolean(
-      config.library.base_url.trim() && config.library.username.trim() && config.secrets.navidromePassword?.trim(),
-    );
-  }
-  return Boolean(config.radio.base_url.trim() && config.radio.admin_user.trim() && config.secrets.subwaveAdminPassword?.trim());
+  if (kind === "llm") return isOllamaConfigured(config);
+  if (kind === "library") return isNavidromeConfigured(config);
+  return isSubwaveRadioConfigured(config);
 }
 
 /** Filled settings whose yaml never set verify_status. Stays unverified until test-connection. */
@@ -411,6 +465,7 @@ export function publicSettings(config: RuntimeConfig) {
       verify_status: config.acquisition.verify_status,
       selection: selectionSettings(config.acquisition.selection),
     },
+    integrations: integrationStatus(config),
     secrets_present: {
       admin_password: Boolean(config.secrets.adminPassword),
       session_secret: Boolean(config.secrets.sessionSecret),

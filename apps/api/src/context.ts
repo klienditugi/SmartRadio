@@ -12,7 +12,11 @@ import {
 import {
   CONFIGURED_UNVERIFIED_MESSAGE,
   integrationIsConfigured,
+  integrationStatus,
   isConfiguredUnverified,
+  isNavidromeConfigured,
+  isOllamaConfigured,
+  isSubwaveRadioConfigured,
   loadConfig,
   mergeAppConfigPatch,
   publicSettings,
@@ -21,6 +25,7 @@ import {
   type AppConfig,
   type AppConfigPatch,
   type CoreIntegration,
+  type IntegrationReport,
   type RuntimeConfig,
 } from "@subwave-ai/shared";
 import { hashPassword } from "./auth.js";
@@ -111,14 +116,15 @@ export function acquisitionUnavailable(config: RuntimeConfig): boolean {
   return config.acquisition.verify_status !== "verified";
 }
 
-function integrationDoctor(config: RuntimeConfig, kind: CoreIntegration) {
+function integrationDoctor(config: RuntimeConfig, kind: CoreIntegration, probed: IntegrationReport) {
+  if (!integrationIsConfigured(config, kind)) {
+    return { state: "not_configured" as const, detail: probed.detail };
+  }
   if (isConfiguredUnverified(config, kind)) {
     return { state: "configured_unverified" as const, detail: CONFIGURED_UNVERIFIED_MESSAGE };
   }
-  if (!integrationIsConfigured(config, kind)) {
-    return { state: "not_configured" as const, detail: "missing settings" };
-  }
-  return { state: config[kind].verify_status, detail: config[kind].verify_status };
+  if (probed.state) return { state: probed.state, detail: probed.detail };
+  return { state: config[kind].verify_status, detail: probed.detail || config[kind].verify_status };
 }
 
 export function doctorReport(db: Db, config: RuntimeConfig) {
@@ -129,27 +135,33 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
     dbOk = false;
   }
   const disk = diskReport(config);
-  const modelConfigured = Boolean(config.llm.model);
   const acquire_unavailable = acquisitionUnavailable(config);
+  const providers = listProviders(db) as Array<{ id: string; last_health_json: string | null }>;
+  const healthOf = (id: string) => providers.find((row) => row.id === id)?.last_health_json ?? null;
+  const probed = integrationStatus(config, {
+    llm: healthOf("llm-ollama"),
+    library: healthOf("library-navidrome"),
+    radio: healthOf("radio-subwave"),
+  });
   const integrations = {
-    llm: integrationDoctor(config, "llm"),
-    library: integrationDoctor(config, "library"),
-    radio: integrationDoctor(config, "radio"),
+    llm: integrationDoctor(config, "llm", probed.llm),
+    library: integrationDoctor(config, "library", probed.library),
+    radio: integrationDoctor(config, "radio", probed.radio),
   };
   const upgradeNotes = (["llm", "library", "radio"] as const)
     .filter((kind) => integrations[kind].state === "configured_unverified")
     .map((kind) => `${kind}: ${CONFIGURED_UNVERIFIED_MESSAGE}`);
   return {
-    ok: dbOk && modelConfigured && disk.ok,
+    ok: dbOk && disk.ok,
     database: dbOk,
     disk,
     bind: { host: config.server.host, port: config.server.port },
     ollama: "external-only",
-    acquire_unavailable,
     integrations,
+    acquire_unavailable,
     config: publicSettings(config),
     settings: listSettings(db),
-    providers: listProviders(db),
+    providers,
     notes: [
       "API is sync+enqueue only. Workers own LLM, library, acquisition, radio, and live health probes.",
       "Ollama is never installed, updated, or pulled by this process.",
@@ -161,6 +173,9 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
         ? ["AcquisitionProvider is optional until a verified download daemon exists (acquire_unavailable)."]
         : []),
       ...upgradeNotes,
+      ...(!isOllamaConfigured(config) ? ["Ollama is not_configured. Set OLLAMA_BASE_URL and OLLAMA_MODEL on the external host. This process does not install or pull a model."] : []),
+      ...(!isNavidromeConfigured(config) ? ["Navidrome is not_configured until URL, username, and password are set."] : []),
+      ...(!isSubwaveRadioConfigured(config) ? ["SUB/WAVE radio is not_configured until URL, admin user, and password are set."] : []),
     ],
   };
 }
