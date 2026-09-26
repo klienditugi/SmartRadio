@@ -167,6 +167,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       const selection = ctx.config.acquisition.selection;
       const decision = selectSearch(searchPayload, {
         allowedExtensions: ctx.config.files.allowed_extensions,
+        minFileSizeMb: selection.min_file_size_mb,
         maxFileSizeMb: selection.max_file_size_mb,
         maxDurationSeconds: selection.max_duration_seconds,
         maxSampleRate: selection.max_sample_rate,

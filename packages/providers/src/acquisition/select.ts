@@ -2,11 +2,15 @@
  * Isolated selection of one usable slskd search hit.
  * Deterministic: same payload and options always return the same file.
  *
- * Exclusions (dropped before ranking):
+ * Exclusions (dropped before ranking, first match wins):
  * - missing username, filename, or size <= 0 (`length` is seconds, never bytes)
  * - `lockedFiles` (never read) and any file with `isLocked: true`
+ * - junk: basename starting with `._`, or a `__MACOSX` path segment
+ *   (case-insensitive, `\` and `/`)
  * - extension outside `allowedExtensions` when that list is set
  *   (an empty `extension` falls back to the filename)
+ * - size smaller than `minFileSizeMb` × 1024 × 1024
+ *   (option omitted → config default 1; `null` → no floor)
  * - size greater than `maxFileSizeMb` × 1024 × 1024
  *   (option omitted → config default 200; `null` → no cap)
  * - `length` greater than `maxDurationSeconds` when that limit is set and the
@@ -14,6 +18,9 @@
  * - `sampleRate` greater than `maxSampleRate` (omit → 48000 Hz; `null` → no cap)
  * - `bitDepth` greater than `maxBitDepth` (omit → 24; `null` → no cap)
  *   Files that do not report `sampleRate` or `bitDepth` stay eligible.
+ * - title mismatch, only when `query.title` or `context.title` is set.
+ *   Calls that omit a title (the old signature) skip this filter.
+ *   The worker always passes the request artist and title.
  *
  * One pass. If every candidate is removed, the result is no pick. This module
  * does not widen extensions, raise a cap, or read `lockedFiles` as a fallback.
@@ -21,18 +28,21 @@
  *
  * Sort order (first difference wins):
  * 1. Extension rank: .flac, .wav, .m4a, .mp3, .ogg, then any other allowed extension.
- * 2. Version: clean files before penalized ones. Penalized when the basename or
- *    any parent folder matches a configured term (word boundary, case-insensitive).
- *    A term is not a penalty when the request artist/title contains that same term.
- * 3. Peer availability: `hasFreeUploadSlot` true, then false, then missing;
+ * 2. Version. A term matches the basename or any parent folder (word boundary,
+ *    case-insensitive). When the request artist or title contains that term,
+ *    files that match it rank above files that do not. Otherwise a matching
+ *    file ranks below a clean one. Version words are not required title tokens.
+ * 3. Artist tokens present in the path (positive tiebreak). Artist tokens are
+ *    not required. Missing artist text does not change the order.
+ * 4. Peer availability: `hasFreeUploadSlot` true, then false, then missing;
  *    then lower `queueLength` (missing last); then higher `uploadSpeed` (missing last).
- * 4. Quality, among files already inside the caps: higher bitDepth, then
+ * 5. Quality, among files already inside the caps: higher bitDepth, then
  *    sampleRate, then bitRate. Missing bitDepth/sampleRate are neutral (they do
  *    not win or lose that key). A value above its cap is not better than the cap
  *    (those files are excluded before this step). Missing bitRate sorts last.
- * 5. Size closer to the median size of the remaining same-extension candidates
+ * 6. Size closer to the median size of the remaining same-extension candidates
  *    (a typical file before an outlier).
- * 6. `username`, then the full `filename` (`localeCompare`). Equal keys keep payload order.
+ * 7. `username`, then the full `filename` (`localeCompare`). Equal keys keep payload order.
  *
  * `responseId` / `fileId` are copied when present. slskd search responses and
  * files have no id. Those fields are not rank keys and are not transfer ids.
@@ -42,6 +52,7 @@ import {
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_MAX_FILE_SIZE_MB,
   DEFAULT_MAX_SAMPLE_RATE,
+  DEFAULT_MIN_FILE_SIZE_MB,
   DEFAULT_VERSION_PENALTY_TERMS,
 } from "@subwave-ai/shared";
 
@@ -68,6 +79,11 @@ export type SelectSearchQuery = {
 export type SelectSearchOptions = {
   /** Extensions with leading dots, e.g. `.flac`. Empty = any non-empty filename. */
   allowedExtensions?: readonly string[];
+  /**
+   * Mebibytes (1024×1024). Omit to use the config default (1).
+   * `null` disables the floor.
+   */
+  minFileSizeMb?: number | null;
   /**
    * Mebibytes (1024×1024). Omit to use the config default (200).
    * `null` disables the cap.
@@ -108,18 +124,23 @@ type Candidate = SelectedSearchFile & {
   hasFreeUploadSlot?: boolean;
   queueLength?: number;
   uploadSpeed?: number;
-  penalized: boolean;
+  /** 0 preferred (matches a requested version term), then clean, then penalized. */
+  versionRank: number;
+  artistMatch: boolean;
   lockedFile: boolean;
 };
 
 /** Exclusive counts. Each removed candidate increments the first filter that rejects it. */
 export type FilterRemovalCounts = {
   locked: number;
+  junk: number;
   extensions: number;
+  min_file_size: number;
   max_file_size: number;
   max_duration: number;
   max_sample_rate: number;
   max_bit_depth: number;
+  title_mismatch: number;
 };
 
 export type SearchSelection =
@@ -227,7 +248,8 @@ function collectCandidates(payload: unknown): Candidate[] {
         ...(hasFreeUploadSlot !== undefined ? { hasFreeUploadSlot } : {}),
         ...(queueLength !== undefined ? { queueLength } : {}),
         ...(uploadSpeed !== undefined ? { uploadSpeed } : {}),
-        penalized: false,
+        versionRank: 0,
+        artistMatch: false,
         lockedFile: locked(file),
       });
     }
@@ -241,11 +263,11 @@ function allowed(candidate: Candidate, allowedExtensions?: readonly string[]): b
   return allowedExtensions.some((item) => item.toLowerCase() === ext);
 }
 
-function maxBytes(maxFileSizeMb: number | null | undefined): number | null {
-  if (maxFileSizeMb === null) return null;
-  const mb = maxFileSizeMb === undefined ? DEFAULT_MAX_FILE_SIZE_MB : maxFileSizeMb;
-  if (!Number.isFinite(mb) || mb <= 0) return null;
-  return mb * 1024 * 1024;
+function sizeBytes(mb: number | null | undefined, fallback: number): number | null {
+  if (mb === null) return null;
+  const value = mb === undefined ? fallback : mb;
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value * 1024 * 1024;
 }
 
 function withinDuration(lengthSeconds: number | undefined, maxDurationSeconds: number | null | undefined): boolean {
@@ -278,23 +300,104 @@ function pathTargets(filename: string): string[] {
 }
 
 function requestedText(opts: SelectSearchOptions): string {
-  const query = { ...opts.context, ...opts.query };
-  return [query.artist, query.title, query.text]
+  const query = requestFields(opts);
+  const title = typeof query.title === "string" ? dropBracketedCredits(query.title) : "";
+  return [query.artist, title, query.text]
     .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
     .join(" ");
 }
 
-function versionPenalized(filename: string, terms: readonly string[], requested: string): boolean {
-  const targets = pathTargets(filename);
-  for (const term of terms) {
-    const trimmed = term.trim();
-    if (!trimmed) continue;
-    const pattern = termPattern(trimmed);
-    if (!targets.some((segment) => pattern.test(segment))) continue;
-    if (requested && pattern.test(requested)) continue;
-    return true;
+const TITLE_STOPWORDS = new Set(["a", "an", "the", "and", "of", "feat", "ft"]);
+
+/** AppleDouble basename, or a `__MACOSX` path segment. Case-insensitive. */
+function isJunkPath(filename: string): boolean {
+  const parts = filename.split(/[/\\]/).filter((part) => part.length > 0);
+  const base = parts[parts.length - 1] ?? filename;
+  if (base.toLowerCase().startsWith("._")) return true;
+  return parts.some((part) => part.toLowerCase() === "__macosx");
+}
+
+function dropBracketedCredits(title: string): string {
+  return title.replace(/[\[({][^\]\)}]*\b(?:feat|ft)\.?\b[^\]\)}]*[\]\)}]/gi, " ");
+}
+
+function normalizeMatchText(value: string, dropCredits: boolean): string {
+  const source = dropCredits ? dropBracketedCredits(value) : value;
+  const folded = source.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  const withoutApostrophes = folded.replace(/[''`´]/g, "");
+  return withoutApostrophes.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function significantTokens(normalized: string): string[] {
+  const tokens = normalized ? normalized.split(" ") : [];
+  if (tokens.length === 0) return [];
+  const withoutStops = tokens.filter((token) => !TITLE_STOPWORDS.has(token));
+  const base = withoutStops.length > 0 ? withoutStops : tokens;
+  if (base.some((token) => token.length > 1)) return base.filter((token) => token.length > 1);
+  return base;
+}
+
+function stripVersionTerms(normalized: string, terms: readonly string[]): string {
+  const phrases = terms
+    .map((term) => normalizeMatchText(term, false))
+    .filter((term) => term.length > 0)
+    .sort((a, b) => b.length - a.length);
+  let text = normalized;
+  for (const phrase of phrases) {
+    text = text.replace(new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "gi"), " ");
   }
-  return false;
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function requestFields(opts: SelectSearchOptions): SelectSearchQuery {
+  return { ...opts.context, ...opts.query };
+}
+
+/**
+ * Title tokens the candidate must contain. Null means the filter is off:
+ * no title was passed (old call signature), or nothing significant remains.
+ * Version-penalty terms are removed first so "Remix" changes rank, not eligibility.
+ */
+function requiredTitleTokens(opts: SelectSearchOptions, terms: readonly string[]): string[] | null {
+  const title = requestFields(opts).title;
+  if (typeof title !== "string" || !title.trim()) return null;
+  const tokens = significantTokens(stripVersionTerms(normalizeMatchText(title, true), terms));
+  return tokens.length > 0 ? tokens : null;
+}
+
+function artistTokens(opts: SelectSearchOptions): string[] {
+  const artist = requestFields(opts).artist;
+  if (typeof artist !== "string" || !artist.trim()) return [];
+  return significantTokens(normalizeMatchText(artist, false));
+}
+
+function candidateText(filename: string): string {
+  return normalizeMatchText(pathTargets(filename).join(" "), false);
+}
+
+function textHasToken(haystack: string, token: string): boolean {
+  return new RegExp(`\\b${escapeRegExp(token)}\\b`, "i").test(haystack);
+}
+
+function hasEveryToken(filename: string, tokens: readonly string[]): boolean {
+  const text = candidateText(filename);
+  return tokens.every((token) => textHasToken(text, token));
+}
+
+/**
+ * Lower is better. A requested version term outranks a clean file, which
+ * outranks a file that only matches some other penalty term.
+ */
+function versionRank(filename: string, terms: readonly string[], requested: string): number {
+  const targets = pathTargets(filename);
+  const active = terms.map((term) => term.trim()).filter((term) => term.length > 0);
+  const requestedTerms = requested ? active.filter((term) => termPattern(term).test(requested)) : [];
+  const fileTerms = active.filter((term) => targets.some((segment) => termPattern(term).test(segment)));
+  const same = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
+  if (requestedTerms.length > 0 && fileTerms.some((term) => requestedTerms.some((asked) => same(asked, term)))) return 0;
+  const penalized = fileTerms.some((term) => !requestedTerms.some((asked) => same(asked, term)));
+  if (requestedTerms.length > 0) return penalized ? 2 : 1;
+  return penalized ? 1 : 0;
 }
 
 function median(values: number[]): number {
@@ -353,8 +456,11 @@ function compareCandidates(
   const extDiff = (EXT_RANK[bExt] ?? 0) - (EXT_RANK[aExt] ?? 0);
   if (extDiff !== 0) return extDiff;
 
-  const penaltyDiff = Number(a.penalized) - Number(b.penalized);
-  if (penaltyDiff !== 0) return penaltyDiff;
+  const versionDiff = a.versionRank - b.versionRank;
+  if (versionDiff !== 0) return versionDiff;
+
+  const artistDiff = Number(b.artistMatch) - Number(a.artistMatch);
+  if (artistDiff !== 0) return artistDiff;
 
   const slotRank = (value: boolean | undefined) => (value === true ? 0 : value === false ? 1 : 2);
   const slotDiff = slotRank(a.hasFreeUploadSlot) - slotRank(b.hasFreeUploadSlot);
@@ -388,21 +494,27 @@ function compareCandidates(
 
 const REMOVAL_ORDER = [
   "locked",
+  "junk",
   "extensions",
+  "min_file_size",
   "max_file_size",
   "max_duration",
   "max_sample_rate",
   "max_bit_depth",
+  "title_mismatch",
 ] as const satisfies readonly (keyof FilterRemovalCounts)[];
 
 function emptyRemovals(): FilterRemovalCounts {
   return {
     locked: 0,
+    junk: 0,
     extensions: 0,
+    min_file_size: 0,
     max_file_size: 0,
     max_duration: 0,
     max_sample_rate: 0,
     max_bit_depth: 0,
+    title_mismatch: 0,
   };
 }
 
@@ -414,16 +526,21 @@ function removalTotal(removed: FilterRemovalCounts): number {
 function firstRejection(
   row: Candidate,
   opts: SelectSearchOptions,
+  floor: number | null,
   cap: number | null,
   maxSampleRate: number | null,
   maxBitDepth: number | null,
+  titleTokens: readonly string[] | null,
 ): keyof FilterRemovalCounts | null {
   if (row.lockedFile) return "locked";
+  if (isJunkPath(row.filename)) return "junk";
   if (!allowed(row, opts.allowedExtensions)) return "extensions";
+  if (floor !== null && row.size < floor) return "min_file_size";
   if (cap !== null && row.size > cap) return "max_file_size";
   if (!withinDuration(row.lengthSeconds, opts.maxDurationSeconds)) return "max_duration";
   if (maxSampleRate !== null && row.sampleRate !== undefined && row.sampleRate > maxSampleRate) return "max_sample_rate";
   if (maxBitDepth !== null && row.bitDepth !== undefined && row.bitDepth > maxBitDepth) return "max_bit_depth";
+  if (titleTokens && !hasEveryToken(row.filename, titleTokens)) return "title_mismatch";
   return null;
 }
 
@@ -451,13 +568,16 @@ function toSelected(row: Candidate): SelectedSearchFile {
  */
 export function selectSearch(payload: unknown, opts: SelectSearchOptions = {}): SearchSelection {
   if (responsesFrom(payload).length === 0) return { outcome: "no_responses" };
-  const cap = maxBytes(opts.maxFileSizeMb);
+  const terms = opts.versionPenaltyTerms ?? DEFAULT_VERSION_PENALTY_TERMS;
+  const floor = sizeBytes(opts.minFileSizeMb, DEFAULT_MIN_FILE_SIZE_MB);
+  const cap = sizeBytes(opts.maxFileSizeMb, DEFAULT_MAX_FILE_SIZE_MB);
   const maxSampleRate = resolveCap(opts.maxSampleRate, DEFAULT_MAX_SAMPLE_RATE);
   const maxBitDepth = resolveCap(opts.maxBitDepth, DEFAULT_MAX_BIT_DEPTH);
+  const titleTokens = requiredTitleTokens(opts, terms);
   const removed = emptyRemovals();
   const kept: Candidate[] = [];
   for (const row of collectCandidates(payload)) {
-    const rejection = firstRejection(row, opts, cap, maxSampleRate, maxBitDepth);
+    const rejection = firstRejection(row, opts, floor, cap, maxSampleRate, maxBitDepth, titleTokens);
     if (rejection) removed[rejection] += 1;
     else kept.push(row);
   }
@@ -465,10 +585,11 @@ export function selectSearch(payload: unknown, opts: SelectSearchOptions = {}): 
     if (removalTotal(removed) === 0) return { outcome: "no_usable_candidate" };
     return { outcome: "no_suitable_result", removed, reason: removalReason(removed) };
   }
-  const terms = opts.versionPenaltyTerms ?? DEFAULT_VERSION_PENALTY_TERMS;
   const requested = requestedText(opts);
+  const artists = artistTokens(opts);
   for (const row of kept) {
-    row.penalized = versionPenalized(row.filename, terms, requested);
+    row.versionRank = versionRank(row.filename, terms, requested);
+    row.artistMatch = artists.length > 0 && hasEveryToken(row.filename, artists);
   }
   const medians = mediansByExtension(kept);
   kept.sort((a, b) => compareCandidates(a, b, medians, maxSampleRate, maxBitDepth));

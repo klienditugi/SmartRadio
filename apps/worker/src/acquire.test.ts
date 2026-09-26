@@ -181,10 +181,11 @@ function harness(state: AcqState = {}) {
   };
 }
 
+const TRACK_SIZE = 8 * 1024 * 1024;
 const HIT = {
   username: "peer-a",
   id: "resp-a",
-  files: [{ filename: "\\\\music\\\\track.flac", size: 100, extension: "flac", id: 7 }],
+  files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE, extension: "flac", id: 7 }],
 };
 
 describe("A5 acquisition worker", () => {
@@ -227,7 +228,7 @@ describe("A5 acquisition worker", () => {
       {
         username: "peer-a",
         filename: "\\\\music\\\\track.flac",
-        size: 100,
+        size: TRACK_SIZE,
         state: "InProgress",
         percentComplete: 10,
       },
@@ -238,7 +239,7 @@ describe("A5 acquisition worker", () => {
       enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
     );
     expect(enq).toMatchObject({ enqueued: true });
-    expect(enqueued).toEqual([{ user: "peer-a", files: [{ filename: "\\\\music\\\\track.flac", size: 100 }] }]);
+    expect(enqueued).toEqual([{ user: "peer-a", files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE }] }]);
     expect(order).toContain("enqueue");
     expect(order).toContain("say");
     expect(say[0]?.text).toContain("REQUEST_ACCEPTED");
@@ -556,7 +557,7 @@ describe("A5 acquisition worker", () => {
     const row = getRequest(db, request.id);
     expect(row?.status).toBe("FAILED");
     expect(row?.error).toBe(
-      "no_suitable_result: locked=1, extensions=1, max_file_size=1, max_duration=0, max_sample_rate=1, max_bit_depth=1",
+      "no_suitable_result: locked=1, junk=0, extensions=1, min_file_size=0, max_file_size=1, max_duration=0, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
     );
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
     expect(failed?.from_status).toBe("QUEUED");
@@ -564,11 +565,14 @@ describe("A5 acquisition worker", () => {
       outcome: "no_suitable_result",
       removed: {
         locked: 1,
+        junk: 0,
         extensions: 1,
+        min_file_size: 0,
         max_file_size: 1,
         max_duration: 0,
         max_sample_rate: 1,
         max_bit_depth: 1,
+        title_mismatch: 0,
       },
     });
     expect(enqueued).toEqual([]);

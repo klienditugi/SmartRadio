@@ -9,6 +9,9 @@ const envString = z.string().min(1);
 /** Mebibytes (1024×1024 bytes). Default search-hit size cap. */
 export const DEFAULT_MAX_FILE_SIZE_MB = 200;
 
+/** Mebibytes (1024×1024 bytes). Default search-hit size floor. */
+export const DEFAULT_MIN_FILE_SIZE_MB = 1;
+
 /** Broadcast-friendly sample-rate cap (Hz). Files that report a higher rate are not selected. */
 export const DEFAULT_MAX_SAMPLE_RATE = 48_000;
 
@@ -17,7 +20,8 @@ export const DEFAULT_MAX_BIT_DEPTH = 24;
 
 /**
  * Basename / parent-folder words that rank below a clean match.
- * Word-boundary and case-insensitive. Waived when the request artist/title contains the same term.
+ * Word-boundary and case-insensitive. When the request artist or title contains
+ * a term, files that match that term rank above files that do not.
  */
 export const DEFAULT_VERSION_PENALTY_TERMS = [
   "remix",
@@ -29,6 +33,11 @@ export const DEFAULT_VERSION_PENALTY_TERMS = [
   "karaoke",
   "cover",
   "acapella",
+  "a cappella",
+  "acappella",
+  "stem",
+  "stems",
+  "multitrack",
   "demo",
 ] as const;
 
@@ -36,6 +45,11 @@ const acquisitionSelectionSchema = z
   .object({
     /** Files larger than this (mebibytes, 1024×1024) are not selected. */
     max_file_size_mb: z.number().positive().default(DEFAULT_MAX_FILE_SIZE_MB),
+    /**
+     * Files smaller than this (mebibytes, 1024×1024) are not selected.
+     * Omit for 1. Null disables the floor.
+     */
+    min_file_size_mb: z.number().positive().nullable().default(DEFAULT_MIN_FILE_SIZE_MB),
     /**
      * When set, files whose slskd `length` (seconds) is greater than this are not selected.
      * Omit or null: no duration limit. Files that do not report `length` stay eligible.
@@ -235,6 +249,14 @@ export function applyEnvOverrides(raw: Record<string, unknown>, env: NodeJS.Proc
     const mb = Number(sizeMb);
     if (Number.isFinite(mb) && mb > 0) {
       selection.max_file_size_mb = mb;
+      selectionTouched = true;
+    }
+  }
+  const minSizeMb = env.SLSKD_MIN_FILE_SIZE_MB?.trim();
+  if (minSizeMb) {
+    const mb = Number(minSizeMb);
+    if (Number.isFinite(mb) && mb > 0) {
+      selection.min_file_size_mb = mb;
       selectionTouched = true;
     }
   }
@@ -549,6 +571,7 @@ export function serializeAppConfig(config: AppConfig): string {
 function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
   return {
     max_file_size_mb: selection.max_file_size_mb,
+    min_file_size_mb: selection.min_file_size_mb,
     ...(selection.max_duration_seconds != null ? { max_duration_seconds: selection.max_duration_seconds } : {}),
     max_sample_rate: selection.max_sample_rate,
     max_bit_depth: selection.max_bit_depth,

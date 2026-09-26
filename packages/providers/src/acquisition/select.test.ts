@@ -521,7 +521,26 @@ describe("slskd search ranking", () => {
       "clean-peer",
     );
     expect(
-      selectSearchResult({ responses: [remix, clean] }, { ...base, query: { title: "Song Remixed" } })?.username,
+      selectSearchResult(
+        {
+          responses: [
+            {
+              ...remix,
+              files: [
+                {
+                  ...remix.files[0]!,
+                  filename: "\\\\music\\\\Get Lucky (Remix)\\\\Song Remixed (Club Remix).flac",
+                },
+              ],
+            },
+            {
+              ...clean,
+              files: [{ ...clean.files[0]!, filename: "\\\\music\\\\Album\\\\Song Remixed.flac" }],
+            },
+          ],
+        },
+        { ...base, query: { title: "Song Remixed" } },
+      )?.username,
     ).toBe("clean-peer");
     expect(
       selectSearchResult({ responses: [remix, clean] }, { ...base, context: { artist: "A", title: "Song Remix" } })?.username,
@@ -660,16 +679,20 @@ describe("slskd search ranking", () => {
     const opts = { allowedExtensions: AUDIO, maxFileSizeMb: 200, maxDurationSeconds: 400 };
     const removed = {
       locked: 1,
+      junk: 0,
       extensions: 1,
+      min_file_size: 0,
       max_file_size: 1,
       max_duration: 1,
       max_sample_rate: 1,
       max_bit_depth: 1,
+      title_mismatch: 0,
     };
     expect(selectSearch(payload, opts)).toEqual({
       outcome: "no_suitable_result",
       removed,
-      reason: "no_suitable_result: locked=1, extensions=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1",
+      reason:
+        "no_suitable_result: locked=1, junk=0, extensions=1, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
     });
     expect(selectSearchResult(payload, opts)).toBeNull();
     expect(selectSearch({ responses: [] }, opts)).toEqual({ outcome: "no_responses" });
@@ -694,5 +717,352 @@ describe("slskd search ranking", () => {
       phaseOpts,
     );
     expect(only?.filename).toBe(REMIX);
+  });
+
+  it("ranks a requested remix above the album cut even when the album peer is better", () => {
+    const album = {
+      username: "album-peer",
+      hasFreeUploadSlot: true,
+      queueLength: 0,
+      uploadSpeed: 9_000_000,
+      files: [
+        {
+          filename: "\\\\music\\\\Album\\\\Get Lucky.flac",
+          size: 40 * MIB,
+          extension: "flac",
+          bitDepth: 16,
+          sampleRate: 44100,
+        },
+      ],
+    };
+    const remix = {
+      username: "remix-peer",
+      hasFreeUploadSlot: false,
+      queueLength: 8,
+      uploadSpeed: 1,
+      files: [
+        {
+          filename: "\\\\music\\\\Remix\\\\Get Lucky (Remix).flac",
+          size: 28 * MIB,
+          extension: "flac",
+          bitDepth: 16,
+          sampleRate: 44100,
+        },
+      ],
+    };
+    const pick = selectSearchResult(
+      { responses: [album, remix] },
+      { allowedExtensions: AUDIO, query: { artist: "Daft Punk", title: "Get Lucky Remix" } },
+    );
+    expect(pick?.username).toBe("remix-peer");
+  });
+
+  it("prefers a path that contains the artist above a better peer", () => {
+    const named = {
+      username: "queued",
+      hasFreeUploadSlot: false,
+      queueLength: 6,
+      uploadSpeed: 1,
+      files: [
+        {
+          filename: "\\\\music\\\\Daft Punk\\\\Album\\\\Get Lucky.flac",
+          size: 40 * MIB,
+          extension: "flac",
+          bitDepth: 16,
+          sampleRate: 44100,
+        },
+      ],
+    };
+    const anon = {
+      username: "free",
+      hasFreeUploadSlot: true,
+      queueLength: 0,
+      uploadSpeed: 9_000_000,
+      files: [
+        {
+          filename: "\\\\music\\\\Album\\\\Get Lucky.flac",
+          size: 40 * MIB,
+          extension: "flac",
+          bitDepth: 16,
+          sampleRate: 44100,
+        },
+      ],
+    };
+    expect(
+      selectSearchResult(
+        { responses: [anon, named] },
+        { allowedExtensions: AUDIO, query: { artist: "Daft Punk", title: "Get Lucky" } },
+      )?.username,
+    ).toBe("queued");
+  });
+
+  it("excludes __MACOSX and ._ files and files under the minimum size", () => {
+    const real = "music/Album/Get Lucky.mp3";
+    const payload = {
+      responses: [
+        {
+          username: "peer",
+          files: [
+            { filename: "music/__MACOSX/._Get Lucky.mp3", size: 300, extension: "mp3" },
+            { filename: "music\\__macosx\\Get Lucky.mp3", size: 8 * MIB, extension: "mp3" },
+            { filename: "music/Album/._Get Lucky.mp3", size: 8 * MIB, extension: "mp3" },
+            { filename: "music/Album/Get Lucky.mp3", size: 300, extension: "mp3" },
+            { filename: real, size: 8 * MIB, extension: "mp3" },
+          ],
+        },
+      ],
+    };
+    const opts = { allowedExtensions: [".mp3"], query: { title: "Get Lucky" } };
+    expect(selectSearchResult(payload, opts)?.filename).toBe(real);
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            {
+              username: "not-a-segment",
+              files: [{ filename: "music/Album/my__macosx Get Lucky.mp3", size: 8 * MIB, extension: "mp3" }],
+            },
+          ],
+        },
+        opts,
+      )?.username,
+    ).toBe("not-a-segment");
+    const blocked = selectSearch(
+      {
+        responses: [
+          {
+            username: "peer",
+            files: [
+              { filename: "music/__MACOSX/._Get Lucky.mp3", size: 300, extension: "mp3" },
+              { filename: "music\\__MACOSX\\._Get Lucky.mp3", size: 180, extension: "mp3" },
+              { filename: "music/Album/._Hidden.mp3", size: 8 * MIB, extension: "mp3" },
+              { filename: "music/Album/Get Lucky.mp3", size: 300, extension: "mp3" },
+            ],
+          },
+        ],
+      },
+      opts,
+    );
+    expect(blocked).toMatchObject({
+      outcome: "no_suitable_result",
+      removed: { junk: 3, min_file_size: 1, title_mismatch: 0 },
+    });
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            {
+              username: "tiny",
+              files: [{ filename: "music/Get Lucky.mp3", size: 300, extension: "mp3" }],
+            },
+          ],
+        },
+        { ...opts, minFileSizeMb: null },
+      )?.size,
+    ).toBe(300);
+  });
+
+  it("rejects a game stem under an ogg-only config when the title does not match", () => {
+    const drums = "\\\\games\\\\Rock Band 4 DLC\\\\drums.ogg";
+    const song = "\\\\music\\\\Daft Punk\\\\Get Lucky.ogg";
+    const drumsOnly = {
+      responses: [
+        {
+          username: "game",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 9_000_000,
+          files: [{ filename: drums, size: 4 * MIB, extension: "ogg" }],
+        },
+      ],
+    };
+    const opts = { allowedExtensions: [".ogg"], query: { artist: "Daft Punk", title: "Get Lucky" } };
+    expect(selectSearch(drumsOnly, opts)).toEqual({
+      outcome: "no_suitable_result",
+      removed: {
+        locked: 0,
+        junk: 0,
+        extensions: 0,
+        min_file_size: 0,
+        max_file_size: 0,
+        max_duration: 0,
+        max_sample_rate: 0,
+        max_bit_depth: 0,
+        title_mismatch: 1,
+      },
+      reason:
+        "no_suitable_result: locked=0, junk=0, extensions=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=1",
+    });
+    expect(selectSearchResult(drumsOnly, { allowedExtensions: [".ogg"] })?.filename).toBe(drums);
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            drumsOnly.responses[0]!,
+            {
+              username: "album",
+              hasFreeUploadSlot: false,
+              queueLength: 4,
+              uploadSpeed: 1,
+              files: [{ filename: song, size: 6 * MIB, extension: "ogg" }],
+            },
+          ],
+        },
+        opts,
+      ),
+    ).toMatchObject({ username: "album", filename: song });
+  });
+
+  it("matches a title with diacritics and ignores a bracketed feat credit", () => {
+    const song = "music/Cafe del Mar.flac";
+    const credit = "music/Someone Else.flac";
+    const pick = selectSearchResult(
+      {
+        responses: [
+          {
+            username: "credit",
+            hasFreeUploadSlot: true,
+            queueLength: 0,
+            uploadSpeed: 9,
+            files: [{ filename: credit, size: 12 * MIB, extension: "flac" }],
+          },
+          {
+            username: "song",
+            hasFreeUploadSlot: false,
+            queueLength: 3,
+            uploadSpeed: 1,
+            files: [{ filename: song, size: 10 * MIB, extension: "flac" }],
+          },
+        ],
+      },
+      { allowedExtensions: AUDIO, query: { artist: "Energy 52", title: "Café del Mar (feat. Someone Else)" } },
+    );
+    expect(pick).toMatchObject({ username: "song", filename: song });
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            {
+              username: "accent",
+              files: [{ filename: "music/Café del Mar.flac", size: 10 * MIB, extension: "flac" }],
+            },
+          ],
+        },
+        { allowedExtensions: AUDIO, query: { title: "Cafe del Mar" } },
+      )?.username,
+    ).toBe("accent");
+  });
+
+  it("counts junk, min size, and title mismatch in no_suitable_result", () => {
+    const payload = {
+      responses: [
+        {
+          username: "peer",
+          files: [
+            {
+              filename: "\\\\music\\\\Get Lucky.flac",
+              size: 40 * MIB,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+              length: 200,
+              isLocked: true,
+            },
+            { filename: "music/__MACOSX/._Get Lucky.mp3", size: 8 * MIB, extension: "mp3" },
+            { filename: "\\\\music\\\\notes.txt", size: 10 * MIB, extension: "txt" },
+            { filename: "\\\\music\\\\Get Lucky.flac", size: 300, extension: "flac", bitDepth: 16, sampleRate: 44100 },
+            {
+              filename: "\\\\music\\\\Get Lucky.flac",
+              size: 400 * MIB,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+              length: 200,
+            },
+            {
+              filename: "\\\\music\\\\Get Lucky.flac",
+              size: 30 * MIB,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+              length: 900,
+            },
+            {
+              filename: "\\\\music\\\\Get Lucky.flac",
+              size: 40 * MIB,
+              extension: "flac",
+              bitDepth: 24,
+              sampleRate: 192000,
+              length: 200,
+            },
+            {
+              filename: "\\\\music\\\\Get Lucky.flac",
+              size: 40 * MIB,
+              extension: "flac",
+              bitDepth: 32,
+              sampleRate: 44100,
+              length: 200,
+            },
+            { filename: "\\\\games\\\\Rock Band 4 DLC\\\\drums.ogg", size: 5 * MIB, extension: "ogg" },
+          ],
+        },
+      ],
+    };
+    const removed = {
+      locked: 1,
+      junk: 1,
+      extensions: 1,
+      min_file_size: 1,
+      max_file_size: 1,
+      max_duration: 1,
+      max_sample_rate: 1,
+      max_bit_depth: 1,
+      title_mismatch: 1,
+    };
+    expect(
+      selectSearch(payload, {
+        allowedExtensions: AUDIO,
+        maxFileSizeMb: 200,
+        maxDurationSeconds: 400,
+        query: { artist: "Daft Punk", title: "Get Lucky" },
+      }),
+    ).toEqual({
+      outcome: "no_suitable_result",
+      removed,
+      reason: `no_suitable_result: locked=1, junk=1, extensions=1, min_file_size=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=1`,
+    });
+  });
+
+  it("penalizes stem, stems, multitrack, and cappella spellings by default", () => {
+    const clean = {
+      username: "album",
+      hasFreeUploadSlot: false,
+      queueLength: 4,
+      uploadSpeed: 1,
+      files: [{ filename: "\\\\music\\\\Album\\\\Song.flac", size: 20 * MIB, extension: "flac" }],
+    };
+    function against(filename: string) {
+      return selectSearchResult(
+        {
+          responses: [
+            {
+              username: "other",
+              hasFreeUploadSlot: true,
+              queueLength: 0,
+              uploadSpeed: 9_000_000,
+              files: [{ filename, size: 20 * MIB, extension: "flac" }],
+            },
+            clean,
+          ],
+        },
+        { allowedExtensions: AUDIO, query: { title: "Song" } },
+      )?.username;
+    }
+    expect(against("\\\\music\\\\Stems\\\\Song.flac")).toBe("album");
+    expect(against("\\\\music\\\\Stem\\\\Song.flac")).toBe("album");
+    expect(against("\\\\music\\\\Multitrack\\\\Song.flac")).toBe("album");
+    expect(against("\\\\music\\\\A Cappella\\\\Song.flac")).toBe("album");
+    expect(against("\\\\music\\\\Album\\\\Song (Acappella).flac")).toBe("album");
+    expect(against("\\\\music\\\\System\\\\Song.flac")).toBe("other");
   });
 });

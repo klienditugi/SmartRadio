@@ -7,6 +7,7 @@ import {
   applyEnvOverrides,
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_MAX_FILE_SIZE_MB,
+  DEFAULT_MIN_FILE_SIZE_MB,
   DEFAULT_MAX_SAMPLE_RATE,
   DEFAULT_VERSION_PENALTY_TERMS,
   interpolateEnv,
@@ -218,17 +219,20 @@ acquisition:
   it("defaults search selection to 200 MB, 48 kHz, 24-bit, no duration limit, and the version-term list", () => {
     const cfg = parseAppConfig(exampleYamlObject);
     expect(cfg.acquisition.selection.max_file_size_mb).toBe(DEFAULT_MAX_FILE_SIZE_MB);
+    expect(cfg.acquisition.selection.min_file_size_mb).toBe(DEFAULT_MIN_FILE_SIZE_MB);
     expect(cfg.acquisition.selection.max_duration_seconds).toBeUndefined();
     expect(cfg.acquisition.selection.max_sample_rate).toBe(DEFAULT_MAX_SAMPLE_RATE);
     expect(cfg.acquisition.selection.max_bit_depth).toBe(DEFAULT_MAX_BIT_DEPTH);
     expect(cfg.acquisition.selection.version_penalty_terms).toEqual([...DEFAULT_VERSION_PENALTY_TERMS]);
     const settings = publicSettings({ ...cfg, secrets: {} }).acquisition.selection;
     expect(settings.max_file_size_mb).toBe(200);
+    expect(settings.min_file_size_mb).toBe(1);
     expect(settings.max_sample_rate).toBe(48000);
     expect(settings.max_bit_depth).toBe(24);
     const raw = structuredClone(exampleYamlObject);
     delete (raw.acquisition as { selection?: unknown }).selection;
     const omitted = parseAppConfig(raw);
+    expect(omitted.acquisition.selection.min_file_size_mb).toBe(1);
     expect(omitted.acquisition.selection.max_sample_rate).toBe(48000);
     expect(omitted.acquisition.selection.max_bit_depth).toBe(24);
   });
@@ -236,17 +240,20 @@ acquisition:
   it("applies optional slskd selection env overrides and round-trips custom selection", () => {
     const overridden = applyEnvOverrides(structuredClone(exampleYamlObject), {
       SLSKD_MAX_FILE_SIZE_MB: "150",
+      SLSKD_MIN_FILE_SIZE_MB: "2",
       SLSKD_MAX_DURATION_SECONDS: "420",
       SLSKD_MAX_SAMPLE_RATE: "96000",
       SLSKD_MAX_BIT_DEPTH: "32",
     });
     const parsed = parseAppConfig(overridden);
     expect(parsed.acquisition.selection.max_file_size_mb).toBe(150);
+    expect(parsed.acquisition.selection.min_file_size_mb).toBe(2);
     expect(parsed.acquisition.selection.max_duration_seconds).toBe(420);
     expect(parsed.acquisition.selection.max_sample_rate).toBe(96000);
     expect(parsed.acquisition.selection.max_bit_depth).toBe(32);
     const ignored = applyEnvOverrides(structuredClone(exampleYamlObject), {
       SLSKD_MAX_FILE_SIZE_MB: "0",
+      SLSKD_MIN_FILE_SIZE_MB: "0",
       SLSKD_MAX_DURATION_SECONDS: "",
       SLSKD_MAX_SAMPLE_RATE: "0",
       SLSKD_MAX_BIT_DEPTH: "",
@@ -268,6 +275,7 @@ acquisition:
     const roundTrip = parseAppConfig(parseYaml(serializeAppConfig(custom)));
     expect(roundTrip.acquisition.selection).toEqual({
       max_file_size_mb: 150,
+      min_file_size_mb: 1,
       max_duration_seconds: 480,
       max_sample_rate: 96000,
       max_bit_depth: null,
