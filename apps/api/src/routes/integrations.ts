@@ -8,11 +8,10 @@ import {
 import {
   CONFIGURED_UNVERIFIED_MESSAGE,
   integrationIsConfigured,
-  isConfiguredUnverified,
   type CoreIntegration,
   type RuntimeConfig,
 } from "@subwave-ai/shared";
-import { commitConfigPatch } from "../context.js";
+import { matchingIntegrationCheck, recordIntegrationProbe } from "../context.js";
 import { requireAdmin } from "./auth.js";
 
 type ConnectionReport = {
@@ -82,7 +81,6 @@ async function probe(config: RuntimeConfig, kind: CoreIntegration): Promise<Inte
 async function reportConnection(app: FastifyInstance, kind: CoreIntegration, mode: "status" | "test"): Promise<ConnectionReport> {
   const configured = integrationIsConfigured(app.config, kind);
   if (!configured) {
-    if (mode === "test") commitConfigPatch(app, { [kind]: { verify_status: "unverified" } });
     return {
       ok: false,
       state: "not_configured",
@@ -91,12 +89,22 @@ async function reportConnection(app: FastifyInstance, kind: CoreIntegration, mod
       settings: integrationSettingsView(app.config, kind),
     };
   }
-  if (mode === "status" && isConfiguredUnverified(app.config, kind)) {
+  const stored = matchingIntegrationCheck(app.config, app.db, kind);
+  if (mode === "status") {
+    if (!stored) {
+      return {
+        ok: false,
+        state: "configured_unverified",
+        probed: false,
+        detail: CONFIGURED_UNVERIFIED_MESSAGE,
+        settings: integrationSettingsView(app.config, kind),
+      };
+    }
     return {
-      ok: false,
-      state: "configured_unverified",
-      probed: false,
-      detail: CONFIGURED_UNVERIFIED_MESSAGE,
+      ok: stored.state === "ready",
+      state: stored.state,
+      probed: true,
+      detail: stored.state === "ready" ? "ready" : stored.state,
       settings: integrationSettingsView(app.config, kind),
     };
   }
@@ -107,9 +115,7 @@ async function reportConnection(app: FastifyInstance, kind: CoreIntegration, mod
   } catch {
     result = { state: "unreachable", detail: notConfiguredDetail(kind) };
   }
-  if (mode === "test") {
-    commitConfigPatch(app, { [kind]: { verify_status: result.state === "ready" ? "verified" : "unverified" } });
-  }
+  recordIntegrationProbe(app, kind, result.state);
   return {
     ok: result.state === "ready",
     state: result.state,

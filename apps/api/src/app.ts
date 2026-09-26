@@ -3,8 +3,8 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import type { RuntimeConfig } from "@subwave-ai/shared";
-import type { Db } from "@subwave-ai/db";
+import { applyStoredVerification, type RuntimeConfig } from "@subwave-ai/shared";
+import { listIntegrationChecks, type Db } from "@subwave-ai/db";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerRequestRoutes } from "./routes/requests.js";
@@ -44,6 +44,7 @@ function buildLogger(logger: BuildAppOptions["logger"]): boolean | Record<string
 }
 
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
+  applyStoredVerification(opts.config, listIntegrationChecks(opts.db));
   const app = Fastify({
     logger: buildLogger(opts.logger),
   });

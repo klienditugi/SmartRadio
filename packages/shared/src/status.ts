@@ -62,6 +62,7 @@ export type VerifyStatus = (typeof VERIFY_STATUSES)[number];
 export const ACQUISITION_CONNECTION_STATES = [
   "disabled",
   "not_configured",
+  "configured_unverified",
   "unreachable",
   "auth_failed",
   "reachable",

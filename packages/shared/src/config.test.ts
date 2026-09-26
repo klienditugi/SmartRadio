@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
   applyEnvOverrides,
@@ -9,8 +9,10 @@ import {
   DEFAULT_MAX_FILE_SIZE_MB,
   DEFAULT_MIN_FILE_SIZE_MB,
   DEFAULT_MAX_SAMPLE_RATE,
+  DEFAULT_INSTRUMENT_PART_BASENAMES,
   DEFAULT_VERSION_PENALTY_TERMS,
   integrationStatus,
+  resetDeprecatedVerifyStatusWarning,
   interpolateEnv,
   loadConfig,
   normalizeAcquisitionSettingsPatch,
@@ -213,9 +215,7 @@ acquisition:
     expect(roundTrip.library.verify_status).toBe("unverified");
     expect(roundTrip.radio.verify_status).toBe("unverified");
     const yaml = serializeAppConfig(cfg);
-    expect(yaml).toMatch(/llm:[\s\S]*?verify_status: unverified/);
-    expect(yaml).toMatch(/library:[\s\S]*?verify_status: unverified/);
-    expect(yaml).toMatch(/radio:[\s\S]*?verify_status: unverified/);
+    expect(yaml).not.toMatch(/verify_status/);
     expect(cfg.acquisition.verify_status).toBe("verified");
   });
 
@@ -270,6 +270,7 @@ acquisition:
     expect(cfg.acquisition.selection.max_sample_rate).toBe(DEFAULT_MAX_SAMPLE_RATE);
     expect(cfg.acquisition.selection.max_bit_depth).toBe(DEFAULT_MAX_BIT_DEPTH);
     expect(cfg.acquisition.selection.version_penalty_terms).toEqual([...DEFAULT_VERSION_PENALTY_TERMS]);
+    expect(cfg.acquisition.selection.instrument_part_basenames).toEqual([...DEFAULT_INSTRUMENT_PART_BASENAMES]);
     const settings = publicSettings({ ...cfg, secrets: {} }).acquisition.selection;
     expect(settings.max_file_size_mb).toBe(200);
     expect(settings.min_file_size_mb).toBe(1);
@@ -326,6 +327,7 @@ acquisition:
       max_sample_rate: 96000,
       max_bit_depth: null,
       version_penalty_terms: ["remix", "live"],
+      instrument_part_basenames: [...DEFAULT_INSTRUMENT_PART_BASENAMES],
     });
   });
 

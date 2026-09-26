@@ -58,6 +58,32 @@ export const DEFAULT_VERSION_PENALTY_TERMS = [
   "demo",
 ] as const;
 
+/**
+ * Basename tokens that rank below a full track when the basename itself does
+ * not contain the request title. Penalty only — the file can still be selected.
+ * Whole tokens, case-insensitive. `song` covers Rock Band `song.ogg`.
+ */
+export const DEFAULT_INSTRUMENT_PART_BASENAMES = [
+  "drums",
+  "drum",
+  "bass",
+  "guitar",
+  "guitars",
+  "vocals",
+  "vocal",
+  "vox",
+  "keys",
+  "piano",
+  "synth",
+  "backing",
+  "click",
+  "rhythm",
+  "lead",
+  "song",
+  "crowd",
+  "preview",
+] as const;
+
 const acquisitionSelectionSchema = z
   .object({
     /** Files larger than this (mebibytes, 1024×1024) are not selected. */
@@ -85,6 +111,11 @@ const acquisitionSelectionSchema = z
      */
     max_bit_depth: z.number().int().positive().nullable().default(DEFAULT_MAX_BIT_DEPTH),
     version_penalty_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_VERSION_PENALTY_TERMS]),
+    /**
+     * Basename tokens that rank below a track file when the basename does not
+     * contain the request title. Empty array disables the penalty.
+     */
+    instrument_part_basenames: z.array(z.string().min(1)).default(() => [...DEFAULT_INSTRUMENT_PART_BASENAMES]),
   })
   .default({});
 
@@ -185,8 +216,37 @@ export type AppConfig = z.infer<typeof appConfigSchema>;
 
 export type CoreIntegration = "llm" | "library" | "radio";
 
-/** Shown when settings are filled and verify_status was never written. Not a promotion to verified. */
+/** Shown when settings are filled and no stored test-connection result matches. Not a promotion to verified. */
 export const CONFIGURED_UNVERIFIED_MESSAGE = "configured but unverified, run test connection";
+
+const VERIFY_STATUS_SECTIONS = ["llm", "library", "radio", "acquisition"] as const;
+
+let verifyStatusDeprecationLogged = false;
+
+/** Test helper. Production logs at most once per process. */
+export function resetDeprecatedVerifyStatusWarning(): void {
+  verifyStatusDeprecationLogged = false;
+}
+
+/**
+ * One non-secret warning when yaml or env still carries verify_status.
+ * The value is ignored. Section and env key names only.
+ */
+export function warnDeprecatedVerifyStatus(raw: unknown, env: NodeJS.ProcessEnv): void {
+  if (verifyStatusDeprecationLogged) return;
+  const root = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const sections = VERIFY_STATUS_SECTIONS.filter((key) => {
+    const section = root[key];
+    return Boolean(section && typeof section === "object" && !Array.isArray(section) && "verify_status" in section);
+  });
+  const envKeys = Object.keys(env).filter((key) => /verify_status/i.test(key));
+  if (sections.length === 0 && envKeys.length === 0) return;
+  verifyStatusDeprecationLogged = true;
+  const where = [...sections, ...envKeys].join(", ");
+  console.warn(
+    `verify_status in yaml or env is deprecated and ignored (${where}). Verified comes only from a stored test-connection result.`,
+  );
+}
 
 export type VerifyStatusExplicit = Record<CoreIntegration, boolean>;
 
@@ -373,6 +433,10 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
   const interpolated = interpolateEnv(rawYaml, env) as Record<string, unknown>;
   const overridden = applyEnvOverrides(interpolated, env);
   const parsed = parseAppConfig(overridden);
+  warnDeprecatedVerifyStatus(overridden, env);
+  for (const section of VERIFY_STATUS_SECTIONS) {
+    parsed[section].verify_status = "unverified";
+  }
   const secretsDir = options.secretsDir
     ? path.resolve(options.secretsDir)
     : path.resolve(parsed.paths.secrets_dir);
@@ -428,11 +492,10 @@ export function integrationIsConfigured(config: RuntimeConfig, kind: CoreIntegra
   return isSubwaveRadioConfigured(config);
 }
 
-/** Filled settings whose yaml never set verify_status. Stays unverified until test-connection. */
+/** Filled settings that are not verified by a stored test-connection result. */
 export function isConfiguredUnverified(config: RuntimeConfig, kind: CoreIntegration): boolean {
   if (!integrationIsConfigured(config, kind)) return false;
-  if (config[kind].verify_status === "verified") return false;
-  return config.verify_status_explicit?.[kind] !== true;
+  return config[kind].verify_status !== "verified";
 }
 
 export function publicSettings(config: RuntimeConfig) {
@@ -596,7 +659,6 @@ export function serializeAppConfig(config: AppConfig): string {
       base_url: config.llm.base_url,
       model: config.llm.model,
       timeout_ms: config.llm.timeout_ms,
-      verify_status: config.llm.verify_status,
     },
     library: {
       provider: config.library.provider,
@@ -604,19 +666,16 @@ export function serializeAppConfig(config: AppConfig): string {
       username: config.library.username,
       client_name: config.library.client_name,
       api_version: config.library.api_version,
-      verify_status: config.library.verify_status,
     },
     radio: {
       provider: config.radio.provider,
       base_url: config.radio.base_url,
       admin_user: config.radio.admin_user,
-      verify_status: config.radio.verify_status,
     },
     acquisition: {
       enabled: config.acquisition.enabled,
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
-      verify_status: config.acquisition.verify_status,
       selection: selectionSettings(config.acquisition.selection),
     },
   };
@@ -631,6 +690,7 @@ function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
     max_sample_rate: selection.max_sample_rate,
     max_bit_depth: selection.max_bit_depth,
     version_penalty_terms: [...selection.version_penalty_terms],
+    instrument_part_basenames: [...selection.instrument_part_basenames],
   };
 }
 

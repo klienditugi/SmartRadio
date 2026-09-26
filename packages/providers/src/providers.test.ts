@@ -487,10 +487,13 @@ describe("createProviders acquisition gate", () => {
       radio: { base_url: "http://radio.example/api", admin_user: "dj" },
       acquisition: { provider: "slskd", base_url: "", verify_status: "unverified" },
     });
-    const providers = createProviders({ ...parsed, secrets: {} }, async () => {
-      called = true;
-      throw new Error("fetch should not be called");
-    });
+    const providers = createProviders(
+      { ...parsed, secrets: { navidromePassword: "pw", subwaveAdminPassword: "pw" } },
+      async () => {
+        called = true;
+        throw new Error("fetch should not be called");
+      },
+    );
     expect(parsed.llm.verify_status).toBe("unverified");
     expect(parsed.library.verify_status).toBe("unverified");
     expect(parsed.radio.verify_status).toBe("unverified");
@@ -498,8 +501,8 @@ describe("createProviders acquisition gate", () => {
     expect(providers.library.verifyStatus).toBe("unverified");
     expect(providers.radio.verifyStatus).toBe("unverified");
     await expect(providers.llm.classify({ text: "track" })).rejects.toThrow(/configured but unverified, run test connection/);
-    await expect(providers.library.search3("track")).rejects.toThrow(/unverified library adapter/);
-    await expect(providers.radio.say({ text: "track" })).rejects.toThrow(/unverified radio adapter/);
+    await expect(providers.library.search3("track")).rejects.toThrow(/configured but unverified, run test connection/);
+    await expect(providers.radio.say({ text: "track" })).rejects.toThrow(/configured but unverified, run test connection/);
     expect(called).toBe(false);
   });
 
@@ -544,6 +547,7 @@ describe("integrations that are not configured", () => {
       baseUrl: "http://navidrome.example",
       username: "nd",
       password: "secret",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     const unreachable = await down.health();
@@ -574,6 +578,7 @@ describe("integrations that are not configured", () => {
       baseUrl: "http://radio.example/api",
       adminUser: "dj",
       adminPassword: "secret",
+      verifyStatus: "verified",
       fetch: fetchMock,
     });
     expect((await down.health()).state).toBe("unreachable");
@@ -593,7 +598,12 @@ describe("integrations that are not configured", () => {
     await expect(llm.classify({ text: "play techno" })).rejects.toBeInstanceOf(NotConfiguredError);
     expect(calls).toBe(0);
 
-    const down = new OllamaProvider({ baseUrl: "http://ollama.example", model: "configured-model", fetch: fetchMock });
+    const down = new OllamaProvider({
+      baseUrl: "http://ollama.example",
+      model: "configured-model",
+      verifyStatus: "verified",
+      fetch: fetchMock,
+    });
     expect((await down.health()).state).toBe("unreachable");
     expect(calls).toBe(1);
   });

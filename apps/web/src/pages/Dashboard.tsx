@@ -21,6 +21,7 @@ type Overview = {
       llm?: { state: string | null; detail?: string };
       library?: { state: string | null; detail?: string };
       radio?: { state: string | null; detail?: string };
+      acquisition?: { state: string | null; detail?: string };
     };
   };
 };
@@ -117,7 +118,7 @@ export function DashboardPage() {
             } catch {
               health = {};
             }
-            const integration = data?.doctor.integrations?.[p.kind as "llm" | "library" | "radio"];
+            const integration = data?.doctor.integrations?.[p.kind as "llm" | "library" | "radio" | "acquisition"];
             const reported = health.state ?? integration?.state ?? undefined;
             const connection =
               reported === "not_configured" || reported === "configured_unverified" || reported === "unreachable"

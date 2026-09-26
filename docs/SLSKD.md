@@ -25,7 +25,7 @@ From the host that runs SmartRadio, the base URL saved in Settings must answer:
 
 with the same `X-API-Key` stored in `secrets/slskd_api_key`. **Test connection** does that and shows one of: Acquisition disabled, Not configured, Unreachable, Auth failed, Reachable, Soulseek not connected, Soulseek not logged in, Ready.
 
-`Ready` is the only result that saves `acquisition.verify_status: verified`. Filling in the URL and key does not.
+`Ready` is the only result that stores a verified test-connection. The row lives in the database (`integration_checks`: integration, state, tested_at, and a fingerprint of the URL, provider, and a hash of the API key). Yaml or env `verify_status` is ignored. Filling in the URL and key does not verify. An install that was verified by writing `verify_status: verified` into yaml shows `configured_unverified` until test-connection is run again.
 
 slskd's own HTTP port and Soulseek listen port are whatever you set in slskd. Upstream examples are HTTP `5030` and listen `50300`. Confirm the ports you actually configured, including that peers can reach the listen port if you want inbound Soulseek connections. Those ports are not SmartRadio requirements.
 
@@ -45,11 +45,12 @@ Rank, first difference wins:
 
 1. Extension: `.flac`, `.wav`, `.m4a`, `.mp3`, `.ogg`, then any other allowed extension.
 2. Version. The default terms are remix, live, edit, extended, radio edit, instrumental, karaoke, cover, acapella, a cappella, acappella, stem, stems, multitrack, demo. They match the basename or a parent folder on a word boundary, case-insensitive. When the request artist or title contains a term, files that match that term rank above files that do not. Otherwise a matching file ranks below a clean one.
-3. Artist tokens present anywhere in the path, as a positive tiebreak. A path without them ranks lower. No artist text leaves this key tied.
-4. Peer: free upload slot, then `false`, then missing; then a shorter queue (missing last); then a faster upload (missing last).
-5. Quality: higher bit depth, then sample rate, then bit rate, among values at or under the caps. Missing bit depth and sample rate are neutral. A sample rate above the cap is not better than the cap. Missing bit rate sorts last.
-6. Size closer to the median of the remaining same-extension files.
-7. Username, then the full filename.
+3. Instrument-part basename. Default tokens: drums, drum, bass, guitar, guitars, vocals, vocal, vox, keys, piano, synth, backing, click, rhythm, lead, song, crowd, preview. A whole basename token matches case-insensitively. The penalty applies only when the basename itself does not contain the title tokens, so a folder named after the song does not make `drums.ogg` equal to the track. It is not an exclusion: `drums.ogg` alone is still selected. If the request title is in that basename, the file is not penalized.
+4. Artist tokens present anywhere in the path, as a positive tiebreak. A path without them ranks lower. No artist text leaves this key tied.
+5. Peer: free upload slot, then `false`, then missing; then a shorter queue (missing last); then a faster upload (missing last).
+6. Quality: higher bit depth, then sample rate, then bit rate, among values at or under the caps. Missing bit depth and sample rate are neutral. A sample rate above the cap is not better than the cap. Missing bit rate sorts last.
+7. Size closer to the median of the remaining same-extension files.
+8. Username, then the full filename.
 
 The enqueue body is `[{ filename, size }]` using that filename unchanged, including Windows backslashes. slskd search rows have no id. A later transfer matches on username + that exact filename + size. A basename match is used only when exactly one of that user's rows matches the basename and the size.
 

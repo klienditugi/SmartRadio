@@ -32,23 +32,29 @@
  *    case-insensitive). When the request artist or title contains that term,
  *    files that match it rank above files that do not. Otherwise a matching
  *    file ranks below a clean one. Version words are not required title tokens.
- * 3. Artist tokens present in the path (positive tiebreak). Artist tokens are
+ * 3. Instrument-part basename penalty. A whole basename token (case-insensitive)
+ *    on the configured list ranks below a file whose basename is not on that list,
+ *    when the basename itself does not contain the title tokens. Parent folders
+ *    do not count. This is a penalty, not an exclusion. A request whose title
+ *    tokens are in the basename (the request asks for that part) is not penalized.
+ * 4. Artist tokens present in the path (positive tiebreak). Artist tokens are
  *    not required. Missing artist text does not change the order.
- * 4. Peer availability: `hasFreeUploadSlot` true, then false, then missing;
+ * 5. Peer availability: `hasFreeUploadSlot` true, then false, then missing;
  *    then lower `queueLength` (missing last); then higher `uploadSpeed` (missing last).
- * 5. Quality, among files already inside the caps: higher bitDepth, then
+ * 6. Quality, among files already inside the caps: higher bitDepth, then
  *    sampleRate, then bitRate. Missing bitDepth/sampleRate are neutral (they do
  *    not win or lose that key). A value above its cap is not better than the cap
  *    (those files are excluded before this step). Missing bitRate sorts last.
- * 6. Size closer to the median size of the remaining same-extension candidates
+ * 7. Size closer to the median size of the remaining same-extension candidates
  *    (a typical file before an outlier).
- * 7. `username`, then the full `filename` (`localeCompare`). Equal keys keep payload order.
+ * 8. `username`, then the full `filename` (`localeCompare`). Equal keys keep payload order.
  *
  * `responseId` / `fileId` are copied when present. slskd search responses and
  * files have no id. Those fields are not rank keys and are not transfer ids.
  */
 
 import {
+  DEFAULT_INSTRUMENT_PART_BASENAMES,
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_MAX_FILE_SIZE_MB,
   DEFAULT_MAX_SAMPLE_RATE,
@@ -103,6 +109,11 @@ export type SelectSearchOptions = {
   maxBitDepth?: number | null;
   /** Word-boundary terms. Omit to use the config default list. Empty array: no penalty. */
   versionPenaltyTerms?: readonly string[];
+  /**
+   * Basename tokens that rank below a full track when the basename does not
+   * contain the title tokens. Omit for the config default. Empty array: no penalty.
+   */
+  instrumentPartBasenames?: readonly string[];
   /** Request artist/title. `context` is the same option. */
   query?: SelectSearchQuery;
   context?: SelectSearchQuery;
@@ -126,6 +137,8 @@ type Candidate = SelectedSearchFile & {
   uploadSpeed?: number;
   /** 0 preferred (matches a requested version term), then clean, then penalized. */
   versionRank: number;
+  /** 1 when the basename is an instrument part and does not contain the title tokens. */
+  instrumentRank: number;
   artistMatch: boolean;
   lockedFile: boolean;
 };
@@ -249,6 +262,7 @@ function collectCandidates(payload: unknown): Candidate[] {
         ...(queueLength !== undefined ? { queueLength } : {}),
         ...(uploadSpeed !== undefined ? { uploadSpeed } : {}),
         versionRank: 0,
+        instrumentRank: 0,
         artistMatch: false,
         lockedFile: locked(file),
       });
@@ -384,6 +398,24 @@ function hasEveryToken(filename: string, tokens: readonly string[]): boolean {
   return tokens.every((token) => textHasToken(text, token));
 }
 
+function basenameStem(filename: string): string {
+  const parts = filename.split(/[/\\]/).filter((part) => part.length > 0);
+  const base = parts[parts.length - 1] ?? filename;
+  return base.replace(/\.[^.]+$/, "");
+}
+
+/**
+ * Penalty, not an exclusion. Applies when a whole basename token is on the list
+ * and the basename itself does not contain the title tokens.
+ */
+function instrumentPartRank(filename: string, titleTokens: readonly string[] | null, terms: readonly string[]): number {
+  const stem = basenameStem(filename);
+  if (titleTokens && titleTokens.length > 0 && hasEveryToken(stem, titleTokens)) return 0;
+  const tokens = normalizeMatchText(stem, false).split(" ").filter((token) => token.length > 0);
+  const wanted = new Set(terms.map((term) => term.trim().toLowerCase()).filter((term) => term.length > 0));
+  return tokens.some((token) => wanted.has(token)) ? 1 : 0;
+}
+
 /**
  * Lower is better. A requested version term outranks a clean file, which
  * outranks a file that only matches some other penalty term.
@@ -458,6 +490,9 @@ function compareCandidates(
 
   const versionDiff = a.versionRank - b.versionRank;
   if (versionDiff !== 0) return versionDiff;
+
+  const instrumentDiff = a.instrumentRank - b.instrumentRank;
+  if (instrumentDiff !== 0) return instrumentDiff;
 
   const artistDiff = Number(b.artistMatch) - Number(a.artistMatch);
   if (artistDiff !== 0) return artistDiff;
@@ -569,6 +604,7 @@ function toSelected(row: Candidate): SelectedSearchFile {
 export function selectSearch(payload: unknown, opts: SelectSearchOptions = {}): SearchSelection {
   if (responsesFrom(payload).length === 0) return { outcome: "no_responses" };
   const terms = opts.versionPenaltyTerms ?? DEFAULT_VERSION_PENALTY_TERMS;
+  const instrumentTerms = opts.instrumentPartBasenames ?? DEFAULT_INSTRUMENT_PART_BASENAMES;
   const floor = sizeBytes(opts.minFileSizeMb, DEFAULT_MIN_FILE_SIZE_MB);
   const cap = sizeBytes(opts.maxFileSizeMb, DEFAULT_MAX_FILE_SIZE_MB);
   const maxSampleRate = resolveCap(opts.maxSampleRate, DEFAULT_MAX_SAMPLE_RATE);
@@ -589,6 +625,7 @@ export function selectSearch(payload: unknown, opts: SelectSearchOptions = {}): 
   const artists = artistTokens(opts);
   for (const row of kept) {
     row.versionRank = versionRank(row.filename, terms, requested);
+    row.instrumentRank = instrumentPartRank(row.filename, titleTokens, instrumentTerms);
     row.artistMatch = artists.length > 0 && hasEveryToken(row.filename, artists);
   }
   const medians = mediansByExtension(kept);

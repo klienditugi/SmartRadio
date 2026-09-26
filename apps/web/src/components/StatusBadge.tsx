@@ -26,8 +26,11 @@ const TONE: Record<string, string> = {
   unverified: "warn",
   needs_server_inspection: "warn",
   not_configured: "warn",
+  configured_unverified: "warn",
   unreachable: "bad",
   reachable: "ok",
+  ready: "ok",
+  auth_failed: "bad",
 };
 
 export function StatusBadge({ value }: { value: string }) {

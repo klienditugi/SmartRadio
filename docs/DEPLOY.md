@@ -32,8 +32,8 @@ Documented so operators can fill yaml/env on an Oracle aarch64 Linux VM. **Do no
 | Ollama | `OLLAMA_BASE_URL=http://100.119.17.28:11434` (v0.34.0 over Tailscale). Set `OLLAMA_MODEL` yourself — do not hard-code `qwen3:8b` even if that tag exists. |
 | Downloads / landing | `SUBWAVE_DOWNLOADS_DIR=/music/downloads` (acquisition landing/staging) |
 | Library | `SUBWAVE_LIBRARY_DIR=/music/library` (final library; Navidrome discovers files here) |
-| LLM / library / radio | `verify_status` defaults to `unverified`. A blank config does not call Ollama, Navidrome, or SUB/WAVE. `verified` is set only by admin test-connection. A filled config that never set `verify_status` is `configured_unverified`: “configured but unverified, run test connection” in `GET /api/v1/doctor` (printed by `./doctor.sh`). |
-| Acquisition | **No daemon on Oracle today.** Leave slskd disabled, or URL/key unset, or `verify_status: unverified`. `verified` is set only by admin test-connection. Doctor reports `acquire_unavailable`. |
+| LLM / library / radio | A blank config does not call Ollama, Navidrome, or SUB/WAVE (`not_configured`). `verified` is a stored test-connection result, never a yaml or env `verify_status`. A filled config without a matching `ready` row is `configured_unverified`: “configured but unverified, run test connection” in `GET /api/v1/doctor` (printed by `./doctor.sh`). |
+| Acquisition | **No daemon on Oracle today.** Leave slskd disabled or the URL/key unset. `verified` is a stored test-connection result. An install whose yaml said `verified` shows `configured_unverified` until test-connection is run again. Doctor reports `acquire_unavailable` until then. |
 
 Navidrome is **passive** on the happy path: once a validated track is in `/music/library`, the existing ~1 minute scanner indexes it. Do not configure SmartRadio as if it must call `startScan` for production ingest. Admin scan remains optional ops.
 

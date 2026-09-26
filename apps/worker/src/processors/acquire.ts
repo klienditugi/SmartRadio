@@ -173,6 +173,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         maxSampleRate: selection.max_sample_rate,
         maxBitDepth: selection.max_bit_depth,
         versionPenaltyTerms: selection.version_penalty_terms,
+        instrumentPartBasenames: selection.instrument_part_basenames,
         query: {
           artist: request.artist ?? undefined,
           title: request.title ?? undefined,

@@ -913,6 +913,53 @@ describe("slskd search ranking", () => {
     ).toMatchObject({ username: "album", filename: song });
   });
 
+  it("penalizes an instrument-part basename without excluding it", () => {
+    const folder = "\\\\music\\\\Daft Punk ft. Pharrell Williams - Get Lucky\\\\";
+    const drums = `${folder}drums.ogg`;
+    const track = `${folder}get lucky.ogg`;
+    const opts = {
+      allowedExtensions: [".ogg"],
+      minFileSizeMb: null as null,
+      query: { artist: "Daft Punk", title: "Get Lucky" },
+    };
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            {
+              username: "peer",
+              files: [
+                { filename: drums, size: 8 * MIB, extension: "ogg" },
+                { filename: track, size: 8 * MIB, extension: "ogg" },
+              ],
+            },
+          ],
+        },
+        opts,
+      )?.filename,
+    ).toBe(track);
+    expect(selectSearchResult({ responses: [{ username: "peer", files: [{ filename: drums, size: 8 * MIB, extension: "ogg" }] }] }, opts)?.filename).toBe(
+      drums,
+    );
+    const stems = "\\\\stems\\\\drums\\\\";
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            {
+              username: "peer",
+              files: [
+                { filename: `${stems}bass.ogg`, size: 8 * MIB, extension: "ogg" },
+                { filename: `${stems}drums.ogg`, size: 8 * MIB, extension: "ogg" },
+              ],
+            },
+          ],
+        },
+        { allowedExtensions: [".ogg"], minFileSizeMb: null, query: { title: "drums" } },
+      )?.filename,
+    ).toBe(`${stems}drums.ogg`);
+  });
+
   it("matches a title with diacritics and ignores a bracketed feat credit", () => {
     const song = "music/Cafe del Mar.flac";
     const credit = "music/Someone Else.flac";
