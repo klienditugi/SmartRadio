@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { NAVIDROME_NOT_CONFIGURED, type VerifyStatus } from "@subwave-ai/shared";
+import { CONFIGURED_UNVERIFIED_MESSAGE, NAVIDROME_NOT_CONFIGURED, type VerifyStatus } from "@subwave-ai/shared";
 import { defaultFetch, joinUrl, NotConfiguredError, ProviderHttpError, readJson, type FetchLike, type ProviderHealth } from "../http.js";
 import type { LibrarySong, MusicLibraryProvider } from "../types.js";
 
@@ -53,7 +53,7 @@ export class NavidromeProvider implements MusicLibraryProvider {
     this.clientName = opts.clientName ?? "subwave-ai";
     this.apiVersion = opts.apiVersion ?? "1.16.1";
     this.fetchImpl = opts.fetch ?? defaultFetch();
-    this.verifyStatus = opts.verifyStatus ?? "verified";
+    this.verifyStatus = opts.verifyStatus ?? "unverified";
   }
 
   private assertConfigured(): void {
@@ -73,11 +73,15 @@ export class NavidromeProvider implements MusicLibraryProvider {
     };
   }
 
+  private refuseUnverified(): void {
+    if (this.verifyStatus !== "unverified") return;
+    if (this.configured) throw new Error(CONFIGURED_UNVERIFIED_MESSAGE);
+    throw new Error("unverified library adapter: live endpoints not called");
+  }
+
   private async rest<T>(method: string, extra: Record<string, string | number | boolean | undefined> = {}): Promise<T> {
     this.assertConfigured();
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified library adapter: live endpoints not called");
-    }
+    this.refuseUnverified();
     const url = new URL(joinUrl(this.restBase, method));
     for (const [k, v] of Object.entries({ ...this.authParams(), ...extra })) {
       if (v === undefined) continue;
@@ -137,7 +141,12 @@ export class NavidromeProvider implements MusicLibraryProvider {
       };
     }
     if (this.verifyStatus === "unverified") {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: "unverified adapter; not calling live endpoints", checked_at };
+      return {
+        ok: false,
+        verifyStatus: this.verifyStatus,
+        detail: CONFIGURED_UNVERIFIED_MESSAGE,
+        checked_at,
+      };
     }
     try {
       await this.getScanStatus();

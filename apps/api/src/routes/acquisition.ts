@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { acquisitionLiveProbeDecision, probeSlskdConnection, type SlskdProbeChecks } from "@subwave-ai/providers";
 import {
+  CONFIGURED_UNVERIFIED_MESSAGE,
   SECRET_FILES,
   normalizeAcquisitionSettingsPatch,
   writeSecretFile,
@@ -8,7 +9,7 @@ import {
   type RuntimeConfig,
   type VerifyStatus,
 } from "@subwave-ai/shared";
-import { commitConfigPatch } from "../context.js";
+import { commitConfigPatch, matchingIntegrationCheck, recordIntegrationProbe } from "../context.js";
 import { requireAdmin } from "./auth.js";
 
 const VERIFY_REJECTED = "verify_status cannot be set to verified by saving settings; use test-connection";
@@ -120,14 +121,33 @@ async function reportConnection(app: FastifyInstance, mode: "status" | "test"): 
     { ignoreEnabled: mode === "test" },
   );
   if (!decision.probe) {
-    if (mode === "test" && decision.state !== "disabled") {
-      commitConfigPatch(app, { acquisition: { verify_status: "unverified" } });
-    }
     return {
       ok: false,
       state: decision.state,
       probed: false,
       detail: decision.detail,
+      checks: null,
+      settings: acquisitionSettingsView(app.config),
+    };
+  }
+
+  const stored = matchingIntegrationCheck(app.config, app.db, "acquisition");
+  if (mode === "status") {
+    if (!stored) {
+      return {
+        ok: false,
+        state: "configured_unverified",
+        probed: false,
+        detail: CONFIGURED_UNVERIFIED_MESSAGE,
+        checks: null,
+        settings: acquisitionSettingsView(app.config),
+      };
+    }
+    return {
+      ok: stored.state === "ready",
+      state: stored.state,
+      probed: true,
+      detail: stored.state === "ready" ? "ready" : stored.state,
       checks: null,
       settings: acquisitionSettingsView(app.config),
     };
@@ -153,11 +173,7 @@ async function reportConnection(app: FastifyInstance, mode: "status" | "test"): 
       },
     };
   }
-  if (mode === "test") {
-    commitConfigPatch(app, {
-      acquisition: { verify_status: probe.state === "ready" ? "verified" : "unverified" },
-    });
-  }
+  recordIntegrationProbe(app, "acquisition", probe.state);
   return {
     ok: probe.state === "ready",
     state: probe.state,

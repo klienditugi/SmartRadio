@@ -148,6 +148,19 @@ if [[ ! -f "${SECRETS_DIR}/session_secret" ]]; then
   chmod 600 "${SECRETS_DIR}/session_secret"
 fi
 
+# Dedicated HMAC key for stored test-connection fingerprints. Not session_secret:
+# rotating the session secret must not force every integration to be re-verified.
+# 32 raw bytes, mode 600. Never commit this file.
+if [[ ! -f "${SECRETS_DIR}/verification_hmac_key" ]]; then
+  umask 077
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand 32 > "${SECRETS_DIR}/verification_hmac_key"
+  else
+    head -c 32 /dev/urandom > "${SECRETS_DIR}/verification_hmac_key"
+  fi
+  chmod 600 "${SECRETS_DIR}/verification_hmac_key"
+fi
+
 if [[ ! -f "${CONFIG_PATH}" ]]; then
   cp "${ROOT}/config/subwave.example.yaml" "${CONFIG_PATH}"
 fi

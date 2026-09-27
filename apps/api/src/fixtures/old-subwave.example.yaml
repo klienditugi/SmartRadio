@@ -1,0 +1,42 @@
+# Pre-upgrade example shape. verify_status: verified was copied onto real installs.
+# Filled settings stand in for a configured station. The key is ignored after upgrade.
+
+server:
+  host: "127.0.0.1"
+  port: 8788
+
+database:
+  path: "./data/subwave.sqlite"
+
+paths:
+  secrets_dir: "./secrets"
+  downloads: "./data/downloads"
+  staging: "./data/staging"
+  library: "./data/library"
+
+llm:
+  provider: ollama
+  base_url: "http://127.0.0.1:11434"
+  model: "station-model"
+  timeout_ms: 120000
+  verify_status: verified
+
+library:
+  provider: navidrome
+  base_url: "http://127.0.0.1:4533"
+  username: "admin"
+  client_name: "subwave-ai"
+  api_version: "1.16.1"
+  verify_status: verified
+
+radio:
+  provider: subwave
+  base_url: "http://127.0.0.1:7700/api"
+  admin_user: "admin"
+  verify_status: verified
+
+acquisition:
+  enabled: true
+  provider: slskd
+  base_url: "http://127.0.0.1:5030"
+  verify_status: verified

@@ -75,6 +75,7 @@ export class SoulseekProvider implements AcquisitionProvider {
     const res = await this.fetchImpl(joinUrl(this.root, `/transfers/downloads/${encodeURIComponent(user)}`), {
       method: "POST",
       headers: this.headers(),
+      // Caller supplies the search filename unchanged (Windows backslashes included) and size.
       body: JSON.stringify(files),
     });
     if (res.status === 204 || res.status === 201) {

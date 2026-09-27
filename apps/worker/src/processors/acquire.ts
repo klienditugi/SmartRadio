@@ -12,8 +12,9 @@ import {
   isSearchComplete,
   isTransferErrored,
   isTransferSucceeded,
+  observedTransferId,
   resolveDownloadedFile,
-  selectSearchResult,
+  selectSearch,
   type AcquisitionProvider,
   type SelectedSearchFile,
 } from "@subwave-ai/providers";
@@ -31,18 +32,25 @@ type DownloadPayload = {
   user?: string;
   files?: Array<{ filename: string; size: number }>;
   enqueued?: boolean;
+  /** Transfer id from the enqueue response, when that body included exactly one. */
+  transferId?: string;
 };
 
 function acquisitionUnavailable(provider: AcquisitionProvider): boolean {
   return provider.kind === "unverified" || provider.verifyStatus !== "verified";
 }
 
-function fail(ctx: Parameters<JobHandler>[0], requestId: string, message: string): never {
+function fail(
+  ctx: Parameters<JobHandler>[0],
+  requestId: string,
+  message: string,
+  detail?: Record<string, unknown>,
+): never {
   transitionRequest(ctx.db, {
     requestId,
     to: "FAILED",
     actor: ctx.workerId,
-    payload: { error: message },
+    payload: { error: message, ...detail },
     patch: { error: message },
   });
   throw new Error(message);
@@ -156,16 +164,35 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         scheduleDownload(ctx, request.id, payload);
         return { waiting: true, reason: "search_incomplete", searchId: payload.searchId };
       }
-      selected = selectSearchResult(searchPayload, {
+      const selection = ctx.config.acquisition.selection;
+      const decision = selectSearch(searchPayload, {
         allowedExtensions: ctx.config.files.allowed_extensions,
+        minFileSizeMb: selection.min_file_size_mb,
+        maxFileSizeMb: selection.max_file_size_mb,
+        maxDurationSeconds: selection.max_duration_seconds,
+        maxSampleRate: selection.max_sample_rate,
+        maxBitDepth: selection.max_bit_depth,
+        versionPenaltyTerms: selection.version_penalty_terms,
+        instrumentPartBasenames: selection.instrument_part_basenames,
+        query: {
+          artist: request.artist ?? undefined,
+          title: request.title ?? undefined,
+        },
       });
-      if (!selected) {
+      if (decision.outcome === "selected") {
+        selected = decision.file;
+      } else if (decision.outcome === "no_suitable_result") {
+        // QUEUED → FAILED. Filters already removed every candidate; do not enqueue.
+        fail(ctx, request.id, decision.reason, { outcome: "no_suitable_result", removed: decision.removed });
+      } else {
+        // No response rows, or rows with nothing the filters could consider.
         fail(ctx, request.id, "no usable search result");
       }
     }
 
     const files = [{ filename: selected.filename, size: selected.size }];
-    await ctx.providers.acquisition.enqueueDownload(selected.username, files);
+    const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(selected.username, files);
+    const transferId = observedTransferId(enqueuedBody, { filename: selected.filename, size: selected.size });
     // REQUEST_ACCEPTED only after enqueue succeeds (A4).
     await ctx.providers.radio.say({
       text: requestAcceptedContext(ctx.db, request),
@@ -198,6 +225,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       user: selected.username,
       files,
       enqueued: true,
+      ...(transferId ? { transferId } : {}),
     });
     return { enqueued: true, selected };
   }
@@ -223,11 +251,13 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   }
 
   const snapshot = await ctx.providers.acquisition.listDownloads();
+  // Search hits have no id. Correlate on username + the original filename + size.
+  // `transferId` is set only when the enqueue body included one real transfer id.
   const transfer = findCorrelatedTransfer(snapshot, {
     username: selected.username,
     filename: selected.filename,
     size: selected.size,
-    id: selected.fileId,
+    ...(payload.transferId ? { id: payload.transferId } : {}),
   });
 
   const existing = listAcquisitionItems(ctx.db, request.id);

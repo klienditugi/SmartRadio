@@ -49,6 +49,7 @@ cp config/subwave.example.yaml config/subwave.yaml
 mkdir -p secrets data/downloads data/staging data/library
 # secrets/admin_password and session_secret are required to sign in.
 # navidrome_password, subwave_admin_password, and slskd_api_key are optional.
+# verification_hmac_key (32 bytes) is created by install.sh or on first use. Do not commit it.
 # The setup UI writes slskd_api_key and does not store a Soulseek password.
 pnpm install
 pnpm typecheck

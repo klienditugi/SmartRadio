@@ -212,12 +212,9 @@ describe("A6 acquisition settings", () => {
     });
     expect(status.statusCode).toBe(200);
     expect(status.json().probed).toBe(true);
-    expect(status.json().state).toBe("soulseek_not_connected");
+    expect(status.json().state).toBe("ready");
     expect(status.json().settings.verify_status).toBe("verified");
-    expect(calls).toEqual([
-      "GET http://slskd.example/api/v0/application",
-      "GET http://slskd.example/api/v0/server",
-    ]);
+    expect(calls).toEqual([]);
   });
 
   it("reports disabled and not_configured from config without probing", async () => {
@@ -354,13 +351,23 @@ describe("A6 acquisition settings", () => {
       throw new Error(`boom ${API_KEY}`);
     });
     const down = await ctx.app.inject({
-      method: "GET",
-      url: "/api/v1/acquisition/status",
+      method: "POST",
+      url: "/api/v1/acquisition/test-connection",
       headers: ctx.headers,
     });
     expect(down.json().state).toBe("unreachable");
     expect(down.json().probed).toBe(true);
     expect(JSON.stringify(down.json())).not.toContain(API_KEY);
     expect(ctx.logs.join("")).not.toContain(API_KEY);
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("status must not probe");
+    });
+    const stored = await ctx.app.inject({
+      method: "GET",
+      url: "/api/v1/acquisition/status",
+      headers: ctx.headers,
+    });
+    expect(stored.json().state).toBe("unreachable");
+    expect(stored.json().settings.verify_status).toBe("unverified");
   });
 });

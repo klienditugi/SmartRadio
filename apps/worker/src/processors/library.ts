@@ -1,6 +1,7 @@
 import { enqueueJob, getRequest, insertLibraryMatch, transitionRequest } from "@subwave-ai/db";
 import { NotConfiguredError } from "@subwave-ai/providers";
 import type { JobHandler } from "../context.js";
+import { runIntegration } from "./guard.js";
 
 export const handleCheckLibrary: JobHandler = async (ctx, job) => {
   if (!job.request_id) throw new Error("check_library job missing request_id");
@@ -15,16 +16,19 @@ export const handleCheckLibrary: JobHandler = async (ctx, job) => {
   const query = [current.artist, current.title].filter(Boolean).join(" ") || current.raw_query;
   let songs;
   try {
-    songs = await ctx.providers.library.search3(query, { songCount: 10 });
+    songs = await runIntegration(ctx, request.id, () => ctx.providers.library.search3(query, { songCount: 10 }));
   } catch (err) {
     if (err instanceof NotConfiguredError) {
-      transitionRequest(ctx.db, {
-        requestId: request.id,
-        to: "FAILED",
-        actor: ctx.workerId,
-        payload: { error: err.message },
-        patch: { error: err.message },
-      });
+      const row = getRequest(ctx.db, request.id);
+      if (row && row.status !== "FAILED" && row.status !== "CANCELLED" && row.status !== "REJECTED" && row.status !== "READY") {
+        transitionRequest(ctx.db, {
+          requestId: request.id,
+          to: "FAILED",
+          actor: ctx.workerId,
+          payload: { error: err.message, outcome: "not_configured" },
+          patch: { error: err.message },
+        });
+      }
     }
     throw err;
   }

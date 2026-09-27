@@ -35,10 +35,19 @@ export {
 export type { SlskdProbe, SlskdProbeChecks } from "./acquisition/probe.js";
 export { extractTransferProgress } from "./acquisition/progress.js";
 export type { TransferProgress } from "./acquisition/progress.js";
-export { selectSearchResult, isSearchComplete } from "./acquisition/select.js";
-export type { SelectedSearchFile, SelectSearchOptions } from "./acquisition/select.js";
+export { probeOllamaConnection, probeNavidromeConnection, probeSubwaveConnection, navidromeAuthSearchParams } from "./integrations/probe.js";
+export type { IntegrationProbe } from "./integrations/probe.js";
+export { selectSearch, selectSearchResult, removalReason, isSearchComplete } from "./acquisition/select.js";
+export type {
+  SelectedSearchFile,
+  SelectSearchOptions,
+  SelectSearchQuery,
+  FilterRemovalCounts,
+  SearchSelection,
+} from "./acquisition/select.js";
 export {
   findCorrelatedTransfer,
+  observedTransferId,
   isTransferSucceeded,
   isTransferErrored,
   isTransferInProgress,

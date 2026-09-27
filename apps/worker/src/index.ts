@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import { loadConfig } from "@subwave-ai/shared";
-import { openDatabase } from "@subwave-ai/db";
+import { applyStoredVerification, loadConfig } from "@subwave-ai/shared";
+import { listIntegrationChecks, openDatabase } from "@subwave-ai/db";
 import { createProviders } from "@subwave-ai/providers";
 import { claimAndRun } from "./dispatch.js";
 import type { WorkerContext } from "./context.js";
@@ -10,11 +10,12 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const config = loadConfig();
-  fs.mkdirSync(config.paths.downloads, { recursive: true });
-  fs.mkdirSync(config.paths.staging, { recursive: true });
-  fs.mkdirSync(config.paths.library, { recursive: true });
-  const db = openDatabase(config.database.path);
+  const loaded = loadConfig();
+  fs.mkdirSync(loaded.paths.downloads, { recursive: true });
+  fs.mkdirSync(loaded.paths.staging, { recursive: true });
+  fs.mkdirSync(loaded.paths.library, { recursive: true });
+  const db = openDatabase(loaded.database.path);
+  const config = applyStoredVerification(loaded, listIntegrationChecks(db));
   const ctx: WorkerContext = {
     db,
     config,

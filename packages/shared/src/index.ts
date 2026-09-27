@@ -44,6 +44,20 @@ export type { LoadedSecrets } from "./secrets.js";
 export {
   stationPolicySchema,
   appConfigSchema,
+  DEFAULT_MAX_FILE_SIZE_MB,
+  DEFAULT_MIN_FILE_SIZE_MB,
+  DEFAULT_MAX_SAMPLE_RATE,
+  DEFAULT_MAX_BIT_DEPTH,
+  DEFAULT_VERSION_PENALTY_TERMS,
+  DEFAULT_INSTRUMENT_PART_BASENAMES,
+  CONFIGURED_UNVERIFIED_MESSAGE,
+  warnDeprecatedVerifyStatus,
+  resetDeprecatedVerifyStatusWarning,
+  readVerifyStatusExplicit,
+  integrationIsConfigured,
+  isConfiguredUnverified,
+  assertSettingsDoNotVerify,
+  clearIntegrationVerifyOnChange,
   interpolateEnv,
   applyEnvOverrides,
   parseAppConfig,
@@ -59,4 +73,21 @@ export {
   isSubwaveRadioConfigured,
   integrationStatus,
 } from "./config.js";
-export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions, AppConfigPatch, IntegrationStatusMap } from "./config.js";
+export type {
+  StationPolicy,
+  AppConfig,
+  RuntimeConfig,
+  LoadConfigOptions,
+  AppConfigPatch,
+  CoreIntegration,
+  VerifyStatusExplicit,
+  IntegrationStatusMap,
+} from "./config.js";
+
+export {
+  INTEGRATION_NAMES,
+  integrationConfigFingerprint,
+  findMatchingIntegrationCheck,
+  applyStoredVerification,
+} from "./verification.js";
+export type { IntegrationName, StoredIntegrationCheck } from "./verification.js";

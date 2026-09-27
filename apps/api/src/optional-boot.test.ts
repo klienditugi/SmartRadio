@@ -2,8 +2,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { updateProviderHealth } from "@subwave-ai/db";
-import { loadConfig } from "@subwave-ai/shared";
+import { listIntegrationChecks, updateProviderHealth, upsertIntegrationCheck } from "@subwave-ai/db";
+import { applyStoredVerification, integrationConfigFingerprint, loadConfig } from "@subwave-ai/shared";
 import { buildApp } from "./app.js";
 import { testDb } from "./test-harness.js";
 
@@ -102,6 +102,18 @@ describe("first boot without Navidrome or SUB/WAVE", () => {
       verifyStatus: "verified",
       checked_at: "t",
     });
+    const unverified = await app.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(unverified.json().integrations.library.state).toBe("configured_unverified");
+    expect(unverified.json().integrations.library.detail).toBe("configured but unverified, run test connection");
+    const fingerprint = integrationConfigFingerprint(app.config, "library");
+    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    upsertIntegrationCheck(db, {
+      integration: "library",
+      state: "ready",
+      fingerprint: fingerprint as string,
+      testedAt: Date.now(),
+    });
+    applyStoredVerification(app.config, listIntegrationChecks(db));
     const probed = await app.inject({ method: "GET", url: "/api/v1/doctor" });
     expect(probed.json().integrations.library.state).toBe("unreachable");
     expect(probed.json().integrations.radio.state).toBe("not_configured");

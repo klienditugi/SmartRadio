@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { AcquisitionForm } from "../components/AcquisitionForm";
+import { IntegrationProbe } from "../components/IntegrationProbe";
 
 const STEPS = ["Admin", "Paths", "Ollama", "Navidrome", "Radio", "Acquisition", "Review"];
 
@@ -180,6 +181,8 @@ export function SetupPage() {
               <span>Model name (no default)</span>
               <input value={form.ollama_model} onChange={(e) => set("ollama_model", e.target.value)} />
             </label>
+            <p className="muted">Saving this step does not mark Ollama verified. Sign in, then use Test connection.</p>
+            {user?.role === "admin" ? <IntegrationProbe kind="llm" /> : null}
           </>
         )}
         {step === 3 && (
@@ -197,6 +200,8 @@ export function SetupPage() {
               <span>Navidrome password (written to secrets/)</span>
               <input type="password" value={form.navidrome_password} onChange={(e) => set("navidrome_password", e.target.value)} />
             </label>
+            <p className="muted">Saving this step does not mark Navidrome verified. Sign in, then use Test connection.</p>
+            {user?.role === "admin" ? <IntegrationProbe kind="library" /> : null}
           </>
         )}
         {step === 4 && (
@@ -217,6 +222,8 @@ export function SetupPage() {
               <span>Admin password (secrets/)</span>
               <input type="password" value={form.radio_password} onChange={(e) => set("radio_password", e.target.value)} />
             </label>
+            <p className="muted">Saving this step does not mark SUB/WAVE verified. Sign in, then use Test connection.</p>
+            {user?.role === "admin" ? <IntegrationProbe kind="radio" /> : null}
           </>
         )}
         {step === 5 &&
