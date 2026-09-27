@@ -5,6 +5,8 @@ export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Res
 export type ProviderHealth = {
   ok: boolean;
   verifyStatus: VerifyStatus;
+  /** `not_configured` is missing settings. `unreachable` is a failed connection. */
+  state?: "not_configured" | "unreachable" | "reachable";
   detail?: string;
   checked_at: string;
 };
@@ -30,6 +32,16 @@ export class UnverifiedAdapterError extends Error {
   constructor(kind: string, detail: string) {
     super(`unverified ${kind} adapter: ${detail}`);
     this.name = "UnverifiedAdapterError";
+  }
+}
+
+/** Integration settings are missing. Not a connection failure. */
+export class NotConfiguredError extends Error {
+  readonly state = "not_configured" as const;
+
+  constructor(detail: string) {
+    super(detail);
+    this.name = "NotConfiguredError";
   }
 }
 

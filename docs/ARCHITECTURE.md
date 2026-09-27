@@ -137,6 +137,8 @@ Unverified adapters set `verifyStatus` and **do not** call live endpoints with i
 
 YAML (`config/subwave.yaml`) + env interpolation/overrides + `secrets/` files. No hard-coded production IPs, passwords, API keys, ports, model names, or library paths in source. Oracle paths `/music/downloads` and `/music/library`, Tailscale Ollama, and SUB/WAVE `:7700/api` belong in **operator config**, not required defaults.
 
+Navidrome (`NAVIDROME_URL`, `NAVIDROME_USER`, `secrets/navidrome_password`), SUB/WAVE (`SUBWAVE_RADIO_URL`, `SUBWAVE_RADIO_ADMIN_USER`, `secrets/subwave_admin_password`), and Ollama (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`) are optional at boot. An empty string is the same as unset. The API and worker still start. Doctor and provider health report that integration as `not_configured` and do not call it. A later health probe that cannot connect reports `unreachable`. Library search and SUB/WAVE `say` / `/dj/search` / `/dj/queue-track` fail the job with a not-configured error instead of a false success. Required to boot: database path, data directories, and (to sign in) admin password and session secret. Ollama is never installed or given a default model.
+
 ## API (`/api/v1`)
 
 - Auth: `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` (cookie or Bearer)

@@ -7,6 +7,8 @@
 
 Live URLs/credentials are configurable and NEEDS_SERVER_INSPECTION unless noted.
 
+Navidrome, SUB/WAVE, and Ollama settings are **optional at first boot**. Empty or unset URL, user, and password/secret values are the same thing. The API still starts. Status is `not_configured` until they are set (distinct from `unreachable`, which is only used after a configured health probe cannot connect). Calls that need the integration fail with a not-configured error. Ollama is never installed, and no model name is defaulted.
+
 ## Live environment examples (A3 — operator config only)
 
 - Oracle VM: aarch64 Linux

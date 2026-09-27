@@ -71,5 +71,74 @@ export const ACQUISITION_CONNECTION_STATES = [
 ] as const;
 export type AcquisitionConnectionState = (typeof ACQUISITION_CONNECTION_STATES)[number];
 
+/**
+ * Live or config-derived state for Ollama, Navidrome, and SUB/WAVE.
+ * `not_configured` means settings are missing and no network call was made.
+ * `unreachable` means settings were present and a probe could not connect.
+ * `reachable` means a probe got a response from the host.
+ */
+export const INTEGRATION_CONNECTION_STATES = ["not_configured", "unreachable", "reachable"] as const;
+export type IntegrationConnectionState = (typeof INTEGRATION_CONNECTION_STATES)[number];
+
+export type IntegrationReport = {
+  state: IntegrationConnectionState | null;
+  probed: boolean;
+  detail: string;
+};
+
+export const NAVIDROME_NOT_CONFIGURED = "navidrome is not configured";
+export const SUBWAVE_RADIO_NOT_CONFIGURED = "subwave radio is not configured";
+
+/** No default host or model. A blank model is still not_configured, never a hard-coded name. */
+export function ollamaNotConfiguredDetail(input: { baseUrl: string; model: string }): string {
+  if (!input.model.trim()) {
+    return "ollama is not configured: LLM model is not configured (refusing to hard-code a model name)";
+  }
+  if (!input.baseUrl.trim()) return "ollama is not configured";
+  return "ollama is not configured";
+}
+
+type StoredIntegrationHealth = {
+  ok?: boolean;
+  state?: string;
+  detail?: string;
+};
+
+function readStoredHealth(healthJson?: string | null): StoredIntegrationHealth | null {
+  if (!healthJson) return null;
+  try {
+    const parsed = JSON.parse(healthJson) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as StoredIntegrationHealth;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Config wins over a stale probe. Missing settings are always `not_configured`
+ * and are not described as unreachable.
+ */
+export function describeIntegration(
+  configured: boolean,
+  missingDetail: string,
+  healthJson?: string | null,
+): IntegrationReport {
+  if (!configured) {
+    return { state: "not_configured", probed: false, detail: missingDetail };
+  }
+  const health = readStoredHealth(healthJson);
+  if (health?.state === "unreachable") {
+    return { state: "unreachable", probed: true, detail: health.detail ?? "unreachable" };
+  }
+  if (health?.state === "reachable" || health?.ok === true) {
+    return { state: "reachable", probed: true, detail: health.detail ?? "reachable" };
+  }
+  if (health && health.ok === false && health.state !== "not_configured") {
+    return { state: null, probed: true, detail: health.detail ?? "health check failed" };
+  }
+  return { state: null, probed: false, detail: "settings present; health probe has not run" };
+}
+
 export const USER_ROLES = ["admin", "operator", "viewer"] as const;
 export type UserRole = (typeof USER_ROLES)[number];

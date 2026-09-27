@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { enqueueJob, getRequest, transitionRequest } from "@subwave-ai/db";
-import { NeverPlayError } from "@subwave-ai/providers";
+import { NeverPlayError, NotConfiguredError } from "@subwave-ai/providers";
 import { assertInsideRoot, isAllowedAudioExtension, safeJoin } from "@subwave-ai/shared";
 import type { JobHandler } from "../context.js";
 import { trackReadyContext } from "./notify.js";
@@ -177,6 +177,21 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
   if (!request) throw new Error("request not found");
   const payload = job.payload_json ? (JSON.parse(job.payload_json) as { track_ready?: boolean }) : {};
 
+  try {
+    return await queueRadio(ctx, request, payload);
+  } catch (err) {
+    if (err instanceof NotConfiguredError) {
+      fail(ctx, request.id, err.message);
+    }
+    throw err;
+  }
+};
+
+async function queueRadio(
+  ctx: Parameters<JobHandler>[0],
+  request: NonNullable<ReturnType<typeof getRequest>>,
+  payload: { track_ready?: boolean },
+) {
   if (payload.track_ready === true) {
     if (request.status !== "IMPORTING") return { skipped: true, status: request.status };
     const search = await ctx.providers.radio.djSearch(radioQuery(request));
@@ -218,4 +233,4 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
     return { queued: false };
   }
   return queueVisibleTrack(ctx, request.id, track);
-};
+}

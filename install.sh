@@ -34,9 +34,9 @@ Environment (no hard-coded production IPs/hosts/creds/models):
   SUBWAVE_API_HOST SUBWAVE_API_PORT
   SUBWAVE_LIBRARY_DIR SUBWAVE_DOWNLOADS_DIR SUBWAVE_STAGING_DIR SUBWAVE_DB_PATH
   SUBWAVE_SECRETS_DIR SUBWAVE_ADMIN_USERNAME SUBWAVE_ADMIN_PASSWORD
-  OLLAMA_BASE_URL OLLAMA_MODEL
-  NAVIDROME_URL NAVIDROME_USER NAVIDROME_PASSWORD
-  SUBWAVE_RADIO_URL SUBWAVE_RADIO_ADMIN_USER SUBWAVE_RADIO_ADMIN_PASSWORD
+  OLLAMA_BASE_URL OLLAMA_MODEL   (optional; empty stays not_configured)
+  NAVIDROME_URL NAVIDROME_USER NAVIDROME_PASSWORD   (optional)
+  SUBWAVE_RADIO_URL SUBWAVE_RADIO_ADMIN_USER SUBWAVE_RADIO_ADMIN_PASSWORD   (optional)
   SLSKD_URL SLSKD_API_KEY
 
 Ollama is external only. This script will not apt/dnf/docker install ollama.
@@ -98,14 +98,14 @@ prompt SUBWAVE_DOWNLOADS_DIR "Downloads directory (host path)"
 prompt SUBWAVE_STAGING_DIR "Staging directory (host path)"
 prompt SUBWAVE_ADMIN_USERNAME "Admin username"
 prompt SUBWAVE_ADMIN_PASSWORD "Admin password" 1
-prompt OLLAMA_BASE_URL "External Ollama base URL (do not install Ollama here)"
-prompt OLLAMA_MODEL "Ollama model already present on that host (no default)"
-prompt NAVIDROME_URL "Navidrome base URL"
-prompt NAVIDROME_USER "Navidrome username"
-prompt NAVIDROME_PASSWORD "Navidrome password" 1
-prompt SUBWAVE_RADIO_URL "SUB/WAVE radio base URL (opaque; may already include /api)"
-prompt SUBWAVE_RADIO_ADMIN_USER "SUB/WAVE admin username"
-prompt SUBWAVE_RADIO_ADMIN_PASSWORD "SUB/WAVE admin password" 1
+prompt OLLAMA_BASE_URL "External Ollama base URL (optional; empty stays not_configured; do not install Ollama here)"
+prompt OLLAMA_MODEL "Ollama model already present on that host (optional; no default)"
+prompt NAVIDROME_URL "Navidrome base URL (optional; configure after boot)"
+prompt NAVIDROME_USER "Navidrome username (optional)"
+prompt NAVIDROME_PASSWORD "Navidrome password (optional)" 1
+prompt SUBWAVE_RADIO_URL "SUB/WAVE radio base URL (optional; opaque; may already include /api)"
+prompt SUBWAVE_RADIO_ADMIN_USER "SUB/WAVE admin username (optional)"
+prompt SUBWAVE_RADIO_ADMIN_PASSWORD "SUB/WAVE admin password (optional)" 1
 prompt SLSKD_URL "slskd base URL"
 prompt SLSKD_API_KEY "slskd API key" 1
 
@@ -252,8 +252,14 @@ print_web_url
 info "doctor: ${ROOT}/doctor.sh"
 info "Ollama was not installed or modified."
 info "Music library path: ${LIBRARY_DIR} (host persistent)"
-if [[ -z "${OLLAMA_MODEL:-}" ]]; then
-  warn "OLLAMA_MODEL is empty. The API will not start until you set a model already present on the external Ollama host."
+if [[ -z "${OLLAMA_BASE_URL:-}" || -z "${OLLAMA_MODEL:-}" ]]; then
+  warn "Ollama URL or model is empty. The API still starts and reports ollama as not_configured. Set both to a model already on the external host. This installer does not install or pull a model."
+fi
+if [[ -z "${NAVIDROME_URL:-}" || -z "${NAVIDROME_USER:-}" || -z "${NAVIDROME_PASSWORD:-}" ]]; then
+  warn "Navidrome is incomplete. Optional at boot; library status stays not_configured until URL, user, and password are set."
+fi
+if [[ -z "${SUBWAVE_RADIO_URL:-}" || -z "${SUBWAVE_RADIO_ADMIN_USER:-}" || -z "${SUBWAVE_RADIO_ADMIN_PASSWORD:-}" ]]; then
+  warn "SUB/WAVE radio is incomplete. Optional at boot; radio status stays not_configured until URL, admin user, and password are set."
 fi
 
 if command -v curl >/dev/null 2>&1; then

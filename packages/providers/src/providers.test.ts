@@ -8,7 +8,7 @@ import { NavidromeProvider } from "./library/navidrome.js";
 import { NeverPlayError, SubWaveProvider } from "./radio/subwave.js";
 import { SoulseekProvider } from "./acquisition/slskd.js";
 import { UnverifiedAcquisitionProvider } from "./acquisition/unverified.js";
-import { UnverifiedAdapterError } from "./http.js";
+import { NotConfiguredError, UnverifiedAdapterError } from "./http.js";
 import type { FetchLike } from "./http.js";
 
 function jsonResponse(body: unknown, status = 200, url = "http://example"): Response {
@@ -399,5 +399,94 @@ describe("createProviders acquisition gate", () => {
     expect(createProviders(runtime({})).acquisition.kind).toBe("slskd");
     expect(createProviders(runtime({ enabled: false })).acquisition.kind).toBe("unverified");
     expect(createProviders(runtime({ provider: "other-daemon" })).acquisition.kind).toBe("unverified");
+  });
+});
+
+describe("integrations that are not configured", () => {
+  it("does not call Navidrome and returns not_configured, distinct from unreachable", async () => {
+    let calls = 0;
+    const fetchMock: FetchLike = async () => {
+      calls += 1;
+      throw new Error("connect ECONNREFUSED");
+    };
+    const missing = new NavidromeProvider({
+      baseUrl: "  ",
+      username: "",
+      password: "",
+      fetch: fetchMock,
+    });
+    const health = await missing.health();
+    expect(health.state).toBe("not_configured");
+    expect(health.ok).toBe(false);
+    expect(health.detail).toBe("navidrome is not configured");
+    await expect(missing.search3("query")).rejects.toBeInstanceOf(NotConfiguredError);
+    await expect(missing.getSong("1")).rejects.toThrow(/navidrome is not configured/);
+    expect(calls).toBe(0);
+
+    const partial = new NavidromeProvider({
+      baseUrl: "http://navidrome.example",
+      username: "nd",
+      password: "   ",
+      fetch: fetchMock,
+    });
+    expect((await partial.health()).state).toBe("not_configured");
+    expect(calls).toBe(0);
+
+    const down = new NavidromeProvider({
+      baseUrl: "http://navidrome.example",
+      username: "nd",
+      password: "secret",
+      fetch: fetchMock,
+    });
+    const unreachable = await down.health();
+    expect(unreachable.state).toBe("unreachable");
+    expect(unreachable.detail).not.toMatch(/not configured/);
+    expect(calls).toBe(1);
+  });
+
+  it("does not call SUB/WAVE say, search, or queue-track when unset", async () => {
+    let calls = 0;
+    const fetchMock: FetchLike = async () => {
+      calls += 1;
+      throw new Error("connect ECONNREFUSED");
+    };
+    const radio = new SubWaveProvider({
+      baseUrl: "",
+      adminUser: "",
+      adminPassword: "",
+      fetch: fetchMock,
+    });
+    expect((await radio.health()).state).toBe("not_configured");
+    await expect(radio.say({ text: "REQUEST_ACCEPTED. Track: A — T." })).rejects.toThrow(/subwave radio is not configured/);
+    await expect(radio.djSearch("query")).rejects.toBeInstanceOf(NotConfiguredError);
+    await expect(radio.queueTrack({ id: "1", title: "T" })).rejects.toThrow(/subwave radio is not configured/);
+    expect(calls).toBe(0);
+
+    const down = new SubWaveProvider({
+      baseUrl: "http://radio.example/api",
+      adminUser: "dj",
+      adminPassword: "secret",
+      fetch: fetchMock,
+    });
+    expect((await down.health()).state).toBe("unreachable");
+    expect(calls).toBe(1);
+  });
+
+  it("does not call Ollama or invent a model when URL and model are empty", async () => {
+    let calls = 0;
+    const fetchMock: FetchLike = async () => {
+      calls += 1;
+      throw new Error("connect ECONNREFUSED");
+    };
+    const llm = new OllamaProvider({ baseUrl: "", model: "", fetch: fetchMock });
+    const health = await llm.health();
+    expect(health.state).toBe("not_configured");
+    expect(health.detail).toMatch(/refusing to hard-code a model name/);
+    await expect(llm.classify({ text: "play techno" })).rejects.toBeInstanceOf(NotConfiguredError);
+    expect(calls).toBe(0);
+
+    const down = new OllamaProvider({ baseUrl: "http://ollama.example", model: "configured-model", fetch: fetchMock });
+    expect((await down.health()).state).toBe("unreachable");
+    expect(calls).toBe(1);
   });
 });

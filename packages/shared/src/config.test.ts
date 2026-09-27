@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
   applyEnvOverrides,
+  integrationStatus,
   interpolateEnv,
   loadConfig,
   normalizeAcquisitionSettingsPatch,
@@ -73,15 +74,60 @@ describe("config", () => {
     expect(cfg.acquisition.provider).toBe("slskd");
   });
 
-  it("rejects a missing LLM model (never default a model name)", () => {
-    const bad = structuredClone(exampleYamlObject);
-    (bad.llm as { model: string }).model = "";
-    expect(() => parseAppConfig(bad)).toThrow();
+  it("accepts an empty LLM model without inventing a name", () => {
+    const raw = structuredClone(exampleYamlObject);
+    (raw.llm as { model: string }).model = "   ";
+    (raw.llm as { base_url: string }).base_url = "";
+    const cfg = parseAppConfig(raw);
+    expect(cfg.llm.model).toBe("");
+    expect(cfg.llm.base_url).toBe("");
+    expect(cfg.llm.model).not.toMatch(/qwen|llama|mistral/i);
+  });
+
+  it("treats blank Navidrome and SUB/WAVE settings as unset", () => {
+    const raw = structuredClone(exampleYamlObject);
+    (raw.library as { base_url: string }).base_url = "  ";
+    (raw.library as { username: string }).username = "";
+    (raw.radio as { base_url: string }).base_url = "";
+    (raw.radio as { admin_user: string }).admin_user = "   ";
+    const cfg = parseAppConfig(raw);
+    expect(cfg.library.base_url).toBe("");
+    expect(cfg.library.username).toBe("");
+    expect(cfg.radio.base_url).toBe("");
+    expect(cfg.radio.admin_user).toBe("");
+    expect(cfg.library.provider).toBe("navidrome");
+    expect(cfg.radio.provider).toBe("subwave");
+  });
+
+  it("still requires a database path and data directories", () => {
+    const raw = structuredClone(exampleYamlObject);
+    (raw.database as { path: string }).path = "";
+    expect(() => parseAppConfig(raw)).toThrow();
+    const paths = structuredClone(exampleYamlObject);
+    (paths.paths as { library: string }).library = "";
+    expect(() => parseAppConfig(paths)).toThrow();
   });
 
   it("interpolates ${ENV} placeholders", () => {
     const out = interpolateEnv({ model: "${OLLAMA_MODEL}" }, { OLLAMA_MODEL: "my-local-model" });
     expect(out).toEqual({ model: "my-local-model" });
+  });
+
+  it("treats empty integration env vars as unset and does not clobber yaml", () => {
+    const overridden = applyEnvOverrides(structuredClone(exampleYamlObject), {
+      NAVIDROME_URL: "",
+      NAVIDROME_USER: "   ",
+      SUBWAVE_RADIO_URL: "",
+      SUBWAVE_RADIO_ADMIN_USER: "",
+      OLLAMA_BASE_URL: "",
+      OLLAMA_MODEL: "  ",
+    });
+    expect((overridden.library as { base_url: string }).base_url).toBe("http://navidrome.example");
+    expect((overridden.library as { username: string }).username).toBe("nd");
+    expect((overridden.radio as { base_url: string }).base_url).toBe("http://radio.example/api");
+    expect((overridden.radio as { admin_user: string }).admin_user).toBe("dj");
+    expect((overridden.llm as { model: string }).model).toBe("configured-model");
+    expect((overridden.llm as { base_url: string }).base_url).toBe("http://127.0.0.1:11434");
   });
 
   it("applies explicit env overrides without using generic PORT/HOST", () => {
@@ -183,6 +229,73 @@ acquisition:
     expect(roundTrip.acquisition.enabled).toBe(false);
     expect(roundTrip.acquisition.verify_status).toBe("unverified");
     expect(serializeAppConfig(saved)).not.toContain("api_key");
+  });
+
+  it("loads with Navidrome, SUB/WAVE, and Ollama empty or unset", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "subwave-cfg-empty-"));
+    const secrets = path.join(dir, "secrets");
+    mkdirSync(secrets);
+    writeFileSync(path.join(secrets, "admin_password"), "test-admin-secret\n");
+    writeFileSync(path.join(secrets, "session_secret"), "test-session-secret\n");
+    writeFileSync(path.join(secrets, "navidrome_password"), "   \n");
+    writeFileSync(path.join(secrets, "subwave_admin_password"), "\n");
+    const cfgPath = path.join(dir, "subwave.yaml");
+    writeFileSync(
+      cfgPath,
+      `
+server:
+  host: "127.0.0.1"
+  port: 8788
+database:
+  path: "${path.join(dir, "db.sqlite")}"
+paths:
+  secrets_dir: "${secrets}"
+  downloads: "${path.join(dir, "dl")}"
+  staging: "${path.join(dir, "st")}"
+  library: "${path.join(dir, "lib")}"
+llm:
+  base_url: "\${OLLAMA_BASE_URL}"
+  model: "\${OLLAMA_MODEL}"
+library:
+  base_url: "\${NAVIDROME_URL}"
+  username: "\${NAVIDROME_USER}"
+radio:
+  base_url: "\${SUBWAVE_RADIO_URL}"
+  admin_user: "\${SUBWAVE_RADIO_ADMIN_USER}"
+`,
+    );
+    const env = {
+      OLLAMA_BASE_URL: "",
+      OLLAMA_MODEL: "",
+      NAVIDROME_URL: "",
+      NAVIDROME_USER: "  ",
+      SUBWAVE_RADIO_URL: "",
+      SUBWAVE_RADIO_ADMIN_USER: "",
+    };
+    const loaded = loadConfig({ configPath: cfgPath, env });
+    expect(loaded.llm.base_url).toBe("");
+    expect(loaded.llm.model).toBe("");
+    expect(loaded.library.base_url).toBe("");
+    expect(loaded.library.username).toBe("");
+    expect(loaded.radio.base_url).toBe("");
+    expect(loaded.radio.admin_user).toBe("");
+    expect(loaded.secrets.navidromePassword).toBeUndefined();
+    expect(loaded.secrets.subwaveAdminPassword).toBeUndefined();
+    expect(loaded.secrets.adminPassword).toBe("test-admin-secret");
+    const status = integrationStatus(loaded);
+    expect(status.llm.state).toBe("not_configured");
+    expect(status.library.state).toBe("not_configured");
+    expect(status.radio.state).toBe("not_configured");
+    expect(status.llm.detail).toMatch(/not configured/);
+    expect(status.llm.detail).not.toMatch(/unreachable/);
+    expect(status.library.detail).toBe("navidrome is not configured");
+    expect(status.radio.detail).toBe("subwave radio is not configured");
+    expect(JSON.stringify(publicSettings(loaded))).not.toMatch(/qwen3:8b/);
+
+    const unset = loadConfig({ configPath: cfgPath, env: {} });
+    expect(unset.library.base_url).toBe("");
+    expect(unset.radio.admin_user).toBe("");
+    expect(integrationStatus(unset).llm.state).toBe("not_configured");
   });
 });
 

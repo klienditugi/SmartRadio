@@ -1,4 +1,5 @@
 import { enqueueJob, getRequest, insertLibraryMatch, transitionRequest } from "@subwave-ai/db";
+import { NotConfiguredError } from "@subwave-ai/providers";
 import type { JobHandler } from "../context.js";
 
 export const handleCheckLibrary: JobHandler = async (ctx, job) => {
@@ -12,7 +13,21 @@ export const handleCheckLibrary: JobHandler = async (ctx, job) => {
   if (current.status !== "CHECKING_LIBRARY") return { skipped: true, status: current.status };
 
   const query = [current.artist, current.title].filter(Boolean).join(" ") || current.raw_query;
-  const songs = await ctx.providers.library.search3(query, { songCount: 10 });
+  let songs;
+  try {
+    songs = await ctx.providers.library.search3(query, { songCount: 10 });
+  } catch (err) {
+    if (err instanceof NotConfiguredError) {
+      transitionRequest(ctx.db, {
+        requestId: request.id,
+        to: "FAILED",
+        actor: ctx.workerId,
+        payload: { error: err.message },
+        patch: { error: err.message },
+      });
+    }
+    throw err;
+  }
   const match = songs[0];
   if (match) {
     insertLibraryMatch(ctx.db, {
