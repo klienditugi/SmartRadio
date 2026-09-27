@@ -147,6 +147,9 @@ importers:
 
   packages/providers:
     dependencies:
+      '@subwave-ai/core':
+        specifier: workspace:*
+        version: link:../core
       '@subwave-ai/shared':
         specifier: workspace:*
         version: link:../shared

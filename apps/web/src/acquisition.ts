@@ -1,3 +1,5 @@
+import type { FieldSources } from "./types";
+
 /** Live `state` values from GET /api/v1/acquisition/status and POST /api/v1/acquisition/test-connection. */
 export const ACQUISITION_CONNECTION_STATES = [
   "disabled",
@@ -12,6 +14,17 @@ export const ACQUISITION_CONNECTION_STATES = [
 
 export type AcquisitionConnectionState = (typeof ACQUISITION_CONNECTION_STATES)[number];
 
+/** Selector policy edited with acquisition settings. Sizes are mebibytes. */
+export type AcquisitionSelectionSettings = {
+  preferred_max_file_size_mb: number;
+  max_file_size_mb: number;
+  preferred_max_duration_seconds: number;
+  /** Null disables the hard duration cap. */
+  max_duration_seconds: number | null;
+  extended_version_bonus: boolean;
+  lossless_preference: number;
+};
+
 /** GET/PUT /api/v1/acquisition/settings. The API key is never part of this object. */
 export type AcquisitionSettings = {
   enabled: boolean;
@@ -19,6 +32,8 @@ export type AcquisitionSettings = {
   base_url: string;
   verify_status: string;
   paths: { downloads: string; library: string };
+  selection?: AcquisitionSelectionSettings;
+  sources?: FieldSources;
   secrets_present: { slskd_api_key: boolean };
 };
 

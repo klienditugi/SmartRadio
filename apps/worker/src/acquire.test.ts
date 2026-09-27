@@ -446,7 +446,7 @@ describe("A5 acquisition worker", () => {
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
   });
 
-  it("enqueues the clean file unless the request title asks for the remix", async () => {
+  it("enqueues the normal-length remix and records the score breakdown", async () => {
     const album = "\\\\music\\\\Album\\\\Get Lucky.flac";
     const remix = "\\\\music\\\\Remix\\\\Get Lucky (Remix).flac";
     const responses = [
@@ -491,7 +491,7 @@ describe("A5 acquisition worker", () => {
       const { acquisition, radio, library, enqueued } = harness({ responses });
       const request = createRequest(db, { rawQuery: `Daft Punk - ${title}` });
       advance(db, request.id, "QUEUED", { artist: "Daft Punk", title });
-      await handleDownload(
+      const result = await handleDownload(
         {
           db,
           config,
@@ -500,13 +500,26 @@ describe("A5 acquisition worker", () => {
         },
         enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
       );
-      return enqueued;
+      const accepted = listRequestEvents(db, request.id).find((event) => event.to_status === "DOWNLOADING");
+      const payload = JSON.parse(accepted?.payload_json ?? "{}") as {
+        event?: string;
+        selection_score?: { breakdown: Record<string, number>; total: number };
+      };
+      expect(payload.event).toBe("REQUEST_ACCEPTED");
+      expect(payload.selection_score?.total).toBe(
+        Object.values(payload.selection_score?.breakdown ?? {}).reduce((sum, value) => sum + value, 0),
+      );
+      expect(result).toMatchObject({ selection_score: payload.selection_score });
+      return { enqueued, score: payload.selection_score };
     }
 
-    expect(await chosen("Get Lucky")).toEqual([{ user: "album-peer", files: [{ filename: album, size: 40_000_000 }] }]);
-    expect(await chosen("Get Lucky Remix")).toEqual([
-      { user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] },
-    ]);
+    const plain = await chosen("Get Lucky");
+    expect(plain.enqueued).toEqual([{ user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] }]);
+    expect(plain.score?.breakdown.extendedBonus).toBeGreaterThan(0);
+    expect(plain.score?.breakdown.requestedVersion).toBe(0);
+    const asked = await chosen("Get Lucky Remix");
+    expect(asked.enqueued).toEqual([{ user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] }]);
+    expect(asked.score?.breakdown.requestedVersion).toBeGreaterThan(0);
   });
 
   it("fails QUEUED with no_suitable_result when filters remove every candidate and does not enqueue", async () => {

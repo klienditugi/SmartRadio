@@ -16,6 +16,7 @@
     "typecheck": "tsc -b --pretty"
   },
   "dependencies": {
+    "@subwave-ai/core": "workspace:*",
     "@subwave-ai/shared": "workspace:*"
   }
 }

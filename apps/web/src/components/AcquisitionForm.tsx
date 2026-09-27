@@ -5,9 +5,19 @@ import {
   providerOptions,
   type AcquisitionConnectionReport,
   type AcquisitionDraft,
+  type AcquisitionSelectionSettings,
   type AcquisitionSettings,
 } from "../acquisition";
 import { isEnvPinned, pinNote, type FieldSources } from "../types";
+
+const SELECTION_DEFAULTS: AcquisitionSelectionSettings = {
+  preferred_max_file_size_mb: 30,
+  max_file_size_mb: 200,
+  preferred_max_duration_seconds: 720,
+  max_duration_seconds: 1200,
+  extended_version_bonus: true,
+  lossless_preference: 36,
+};
 
 type WizardProps = {
   mode: "wizard";
@@ -142,6 +152,14 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [savedNote, setSavedNote] = useState(false);
+  const [preferredFileMb, setPreferredFileMb] = useState(String(SELECTION_DEFAULTS.preferred_max_file_size_mb));
+  const [hardFileMb, setHardFileMb] = useState(SELECTION_DEFAULTS.max_file_size_mb);
+  const [preferredDuration, setPreferredDuration] = useState(String(SELECTION_DEFAULTS.preferred_max_duration_seconds));
+  const [hardDuration, setHardDuration] = useState(
+    SELECTION_DEFAULTS.max_duration_seconds == null ? "" : String(SELECTION_DEFAULTS.max_duration_seconds),
+  );
+  const [extendedBonus, setExtendedBonus] = useState(SELECTION_DEFAULTS.extended_version_bonus);
+  const [losslessPreference, setLosslessPreference] = useState(String(SELECTION_DEFAULTS.lossless_preference));
 
   function applySettings(settings: AcquisitionSettings) {
     setLoaded(settings);
@@ -151,6 +169,13 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     setDownloads(settings.paths.downloads);
     setLibrary(settings.paths.library);
     setApiKey("");
+    const selection = settings.selection ?? SELECTION_DEFAULTS;
+    setPreferredFileMb(String(selection.preferred_max_file_size_mb));
+    setHardFileMb(selection.max_file_size_mb);
+    setPreferredDuration(String(selection.preferred_max_duration_seconds));
+    setHardDuration(selection.max_duration_seconds == null ? "" : String(selection.max_duration_seconds));
+    setExtendedBonus(selection.extended_version_bonus);
+    setLosslessPreference(String(selection.lossless_preference));
   }
 
   useEffect(() => {
@@ -200,6 +225,12 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
 
   const providers = providerOptions(provider, ["slskd"]);
   const apiKeyConfigured = loaded?.secrets_present.slskd_api_key ?? false;
+  const fieldSources = props.sources ?? loaded?.sources;
+  const preferredSizeLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.preferred_max_file_size_mb");
+  const preferredDurationLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.preferred_max_duration_seconds");
+  const hardDurationLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.max_duration_seconds");
+  const bonusLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.extended_version_bonus");
+  const losslessLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.lossless_preference");
 
   function patchLocal(patch: Partial<AcquisitionDraft>) {
     if (patch.enabled !== undefined) setEnabled(patch.enabled);
@@ -210,29 +241,80 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     if (patch.library !== undefined) setLibrary(patch.library);
   }
 
+  function selectionBody() {
+    const preferredSize = Number(preferredFileMb);
+    const preferredSeconds = Number(preferredDuration);
+    const lossless = Number(losslessPreference);
+    const hardSeconds = hardDuration.trim() === "" ? null : Number(hardDuration);
+    return {
+      preferred_max_file_size_mb: preferredSize,
+      preferred_max_duration_seconds: preferredSeconds,
+      max_duration_seconds: hardSeconds,
+      extended_version_bonus: extendedBonus,
+      lossless_preference: lossless,
+    };
+  }
+
+  function selectionError(): string | null {
+    const body = selectionBody();
+    if (!Number.isFinite(body.preferred_max_file_size_mb) || body.preferred_max_file_size_mb <= 0) {
+      return "preferred_max_file_size_mb must be a positive number";
+    }
+    if (body.preferred_max_file_size_mb > hardFileMb) {
+      return "preferred_max_file_size_mb must be <= max_file_size_mb";
+    }
+    if (!Number.isFinite(body.preferred_max_duration_seconds) || body.preferred_max_duration_seconds <= 0) {
+      return "preferred_max_duration_seconds must be a positive number";
+    }
+    if (body.max_duration_seconds !== null && (!Number.isFinite(body.max_duration_seconds) || body.max_duration_seconds <= 0)) {
+      return "max_duration_seconds must be a positive number or empty";
+    }
+    if (body.max_duration_seconds !== null && body.preferred_max_duration_seconds > body.max_duration_seconds) {
+      return "preferred_max_duration_seconds must be <= max_duration_seconds";
+    }
+    if (!Number.isFinite(body.lossless_preference) || body.lossless_preference < 0) {
+      return "lossless_preference must be a number greater than or equal to 0";
+    }
+    return null;
+  }
+
   function requestBody() {
     return {
       enabled,
       provider,
       base_url: baseUrl,
       paths: { downloads, library },
+      selection: selectionBody(),
       ...(apiKey ? { slskd_api_key: apiKey } : {}),
     };
   }
 
   function dirty(): boolean {
     if (!loaded) return apiKey !== "";
+    const selection = loaded.selection ?? SELECTION_DEFAULTS;
+    const body = selectionBody();
     return (
       apiKey !== "" ||
       enabled !== loaded.enabled ||
       provider !== loaded.provider ||
       baseUrl !== loaded.base_url ||
       downloads !== loaded.paths.downloads ||
-      library !== loaded.paths.library
+      library !== loaded.paths.library ||
+      body.preferred_max_file_size_mb !== selection.preferred_max_file_size_mb ||
+      body.preferred_max_duration_seconds !== selection.preferred_max_duration_seconds ||
+      body.max_duration_seconds !== selection.max_duration_seconds ||
+      body.extended_version_bonus !== selection.extended_version_bonus ||
+      body.lossless_preference !== selection.lossless_preference
     );
   }
 
   async function persist(): Promise<boolean> {
+    const invalid = selectionError();
+    if (invalid) {
+      setError(invalid);
+      setSavedNote(false);
+      return false;
+    }
     setBusy(true);
     setError(null);
     setSavedNote(false);
@@ -302,6 +384,82 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
           onChange={patchLocal}
         />
       ) : null}
+      {loaded ? (
+        <>
+          <h3>Which file to download</h3>
+          <p className="muted">
+            Hard max file size is {hardFileMb} MiB. A file above the preferred size is penalized, not dropped, until it
+            hits that hard max. Preferred size and preferred duration must stay at or under the hard limits.
+          </p>
+          <label className="field">
+            <span>Preferred max file size (MiB)</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={preferredFileMb}
+              readOnly={preferredSizeLocked}
+              disabled={readOnly}
+              onChange={(e) => setPreferredFileMb(e.target.value)}
+            />
+          </label>
+          <SourceLine sources={fieldSources} path="acquisition.selection.preferred_max_file_size_mb" />
+          <label className="field check">
+            <input
+              type="checkbox"
+              checked={extendedBonus}
+              disabled={bonusLocked}
+              onChange={(e) => setExtendedBonus(e.target.checked)}
+            />
+            <span>Prefer extended mixes and remixes</span>
+          </label>
+          <SourceLine sources={fieldSources} path="acquisition.selection.extended_version_bonus" />
+          <label className="field">
+            <span>Preferred max duration (seconds)</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={preferredDuration}
+              readOnly={preferredDurationLocked}
+              disabled={readOnly}
+              onChange={(e) => setPreferredDuration(e.target.value)}
+            />
+          </label>
+          <SourceLine sources={fieldSources} path="acquisition.selection.preferred_max_duration_seconds" />
+          <label className="field">
+            <span>Hard max duration (seconds)</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={hardDuration}
+              readOnly={hardDurationLocked}
+              disabled={readOnly}
+              placeholder="empty disables the cap"
+              onChange={(e) => setHardDuration(e.target.value)}
+            />
+          </label>
+          <SourceLine sources={fieldSources} path="acquisition.selection.max_duration_seconds" />
+          <p className="muted">Leave hard max duration empty to disable it. Files with no duration stay eligible.</p>
+          <label className="field">
+            <span>Lossless preference</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={losslessPreference}
+              readOnly={losslessLocked}
+              disabled={readOnly}
+              onChange={(e) => setLosslessPreference(e.target.value)}
+            />
+          </label>
+          <SourceLine sources={fieldSources} path="acquisition.selection.lossless_preference" />
+          <p className="muted">
+            Default 36 picks a normal 6-minute 16/44.1 FLAC over a 320 kbps MP3. 0 picks the MP3.
+          </p>
+        </>
+      ) : null}
       {status ? (
         <div className="card" style={{ boxShadow: "none", marginBottom: "0.8rem" }}>
           <div className="row">
@@ -333,4 +491,17 @@ function PinLine(props: { sources?: FieldSources; path: string }) {
   const note = pinNote(props.sources, props.path);
   if (!note) return null;
   return <p className="muted">{note}</p>;
+}
+
+function sourceLabel(sources: FieldSources | undefined, path: string): string | null {
+  const field = sources?.[path];
+  if (!field) return null;
+  if (field.source === "env" && field.env) return `set by ${field.env} in .env`;
+  return `source: ${field.source}`;
+}
+
+function SourceLine(props: { sources?: FieldSources; path: string }) {
+  const label = sourceLabel(props.sources, props.path);
+  if (!label) return null;
+  return <p className="muted">{label}</p>;
 }

@@ -15,12 +15,22 @@ import {
 import { commitConfigPatch, matchingIntegrationCheck, recordIntegrationProbe } from "../context.js";
 import { requireAdmin } from "./auth.js";
 
+type SelectionBody = {
+  preferred_max_file_size_mb?: unknown;
+  preferred_max_duration_seconds?: unknown;
+  max_duration_seconds?: unknown;
+  extended_version_bonus?: unknown;
+  lossless_preference?: unknown;
+  long_recording_phrases?: unknown;
+};
+
 type SettingsBody = {
   enabled?: boolean;
   provider?: string;
   base_url?: string;
   verify_status?: VerifyStatus;
   paths?: { downloads?: string; library?: string };
+  selection?: SelectionBody;
   slskd_api_key?: string;
   username?: unknown;
   password?: unknown;
@@ -30,7 +40,22 @@ type SettingsBody = {
   slskd_password?: unknown;
 };
 
+const SELECTION_SOURCE_PATHS = [
+  "acquisition.selection.preferred_max_file_size_mb",
+  "acquisition.selection.preferred_max_duration_seconds",
+  "acquisition.selection.max_duration_seconds",
+  "acquisition.selection.extended_version_bonus",
+  "acquisition.selection.lossless_preference",
+  "acquisition.selection.max_file_size_mb",
+] as const;
+
 export function acquisitionSettingsView(config: RuntimeConfig) {
+  const selection = config.acquisition.selection;
+  const sources: Record<string, { source: string; env?: string }> = {};
+  for (const path of SELECTION_SOURCE_PATHS) {
+    const field = config.field_sources?.[path];
+    if (field) sources[path] = field.env ? { source: field.source, env: field.env } : { source: field.source };
+  }
   return {
     enabled: config.acquisition.enabled,
     provider: config.acquisition.provider,
@@ -40,10 +65,68 @@ export function acquisitionSettingsView(config: RuntimeConfig) {
       downloads: config.paths.downloads,
       library: config.paths.library,
     },
+    selection: {
+      preferred_max_file_size_mb: selection.preferred_max_file_size_mb,
+      max_file_size_mb: selection.max_file_size_mb,
+      preferred_max_duration_seconds: selection.preferred_max_duration_seconds,
+      max_duration_seconds: selection.max_duration_seconds ?? null,
+      extended_version_bonus: selection.extended_version_bonus,
+      lossless_preference: selection.lossless_preference,
+    },
+    sources,
     secrets_present: {
       slskd_api_key: Boolean(config.secrets.slskdApiKey?.trim()),
     },
   };
+}
+
+function positiveNumber(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive number`);
+  }
+  return value;
+}
+
+function nonNegativeNumber(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be a number greater than or equal to 0`);
+  }
+  return value;
+}
+
+function selectionPatch(current: RuntimeConfig["acquisition"]["selection"], body: SelectionBody) {
+  const next: Partial<RuntimeConfig["acquisition"]["selection"]> = {};
+  if (body.preferred_max_file_size_mb !== undefined) {
+    next.preferred_max_file_size_mb = positiveNumber(body.preferred_max_file_size_mb, "preferred_max_file_size_mb");
+  }
+  if (body.preferred_max_duration_seconds !== undefined) {
+    next.preferred_max_duration_seconds = positiveNumber(body.preferred_max_duration_seconds, "preferred_max_duration_seconds");
+  }
+  if (body.max_duration_seconds !== undefined) {
+    if (body.max_duration_seconds === null) next.max_duration_seconds = null;
+    else next.max_duration_seconds = positiveNumber(body.max_duration_seconds, "max_duration_seconds");
+  }
+  if (body.extended_version_bonus !== undefined) {
+    if (typeof body.extended_version_bonus !== "boolean") throw new Error("extended_version_bonus must be a boolean");
+    next.extended_version_bonus = body.extended_version_bonus;
+  }
+  if (body.lossless_preference !== undefined) {
+    next.lossless_preference = nonNegativeNumber(body.lossless_preference, "lossless_preference");
+  }
+  if (body.long_recording_phrases !== undefined) {
+    if (!Array.isArray(body.long_recording_phrases) || body.long_recording_phrases.some((item) => typeof item !== "string" || !item.trim())) {
+      throw new Error("long_recording_phrases must be an array of non-empty strings");
+    }
+    next.long_recording_phrases = body.long_recording_phrases.map((item) => item.trim());
+  }
+  const merged = { ...current, ...next };
+  if (merged.preferred_max_file_size_mb > merged.max_file_size_mb) {
+    throw new Error("preferred_max_file_size_mb must be <= max_file_size_mb");
+  }
+  if (merged.max_duration_seconds != null && merged.preferred_max_duration_seconds > merged.max_duration_seconds) {
+    throw new Error("preferred_max_duration_seconds must be <= max_duration_seconds");
+  }
+  return next;
 }
 
 function rejectsSoulseekCredentials(body: SettingsBody): boolean {
@@ -86,6 +169,7 @@ function settingsPatch(config: RuntimeConfig, body: SettingsBody): AppConfigPatc
   if (body.provider !== undefined) acquisition.provider = body.provider;
   if (body.base_url !== undefined) acquisition.base_url = body.base_url;
   if (body.verify_status !== undefined) acquisition.verify_status = body.verify_status;
+  if (body.selection) acquisition.selection = selectionPatch(config.acquisition.selection, body.selection);
   const patch: AppConfigPatch = {
     acquisition: normalizeAcquisitionSettingsPatch(config.acquisition, acquisition, {
       apiKeyChanged: Boolean(body.slskd_api_key?.trim()),
