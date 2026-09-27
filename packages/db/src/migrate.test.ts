@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { migrate } from "./migrate.js";
-import { listIntegrationChecks, upsertIntegrationCheck } from "./store.js";
+import { listIntegrationChecks, listSettings, upsertIntegrationCheck } from "./store.js";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
 
@@ -45,6 +45,33 @@ describe("integration_checks migration", () => {
     const applied = db.prepare("SELECT id FROM schema_migrations WHERE id = ?").all("002_integration_checks.sql");
     expect(applied).toHaveLength(1);
     expect(listIntegrationChecks(db)).toHaveLength(1);
+    db.close();
+  });
+
+  it("removes verify_status from the settings table", () => {
+    const db = new Database(":memory:");
+    db.exec(readFileSync(path.join(migrationsDir, "001_initial.sql"), "utf8"));
+    db.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)").run("001_initial.sql", 1);
+    db.prepare("INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)").run(
+      "llm",
+      JSON.stringify({ model: "kept", verify_status: "verified" }),
+      1,
+    );
+    db.prepare("INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)").run("verify_status", '"verified"', 1);
+    db.prepare("INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)").run(
+      "nested",
+      JSON.stringify({ wrapper: { verify_status: "verified", keep: true } }),
+      1,
+    );
+
+    migrate(db);
+
+    const llm = db.prepare("SELECT value_json FROM settings WHERE key = ?").get("llm") as { value_json: string };
+    expect(llm.value_json).not.toContain("verify_status");
+    expect(JSON.parse(llm.value_json).model).toBe("kept");
+    expect(db.prepare("SELECT key FROM settings WHERE key = ?").get("verify_status")).toBeUndefined();
+    expect(JSON.stringify(listSettings(db))).not.toContain("verify_status");
+    expect(listSettings(db).nested).toEqual({ wrapper: { keep: true } });
     db.close();
   });
 });
