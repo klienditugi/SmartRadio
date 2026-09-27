@@ -107,6 +107,21 @@ describe("AcquisitionForm", () => {
     expect(calls.some((call) => /searches|transfers/.test(call.url))).toBe(false);
   });
 
+  it("shows an env-pinned slskd URL as read-only", async () => {
+    installFetch([]);
+    render(
+      <AcquisitionForm
+        mode="settings"
+        sources={{ "acquisition.base_url": { source: "env", env: "SLSKD_URL" } }}
+      />,
+    );
+    const url = (await screen.findByLabelText("slskd URL")) as HTMLInputElement;
+    expect(url.readOnly).toBe(true);
+    expect(url.value).toBe("http://slskd.example:5030");
+    expect(screen.getByText("set by SLSKD_URL in .env")).toBeTruthy();
+    expect(document.body.textContent).not.toContain(LEAKED);
+  });
+
   it("keeps an unknown provider selectable and can switch to slskd", async () => {
     const calls: Call[] = [];
     installFetch(calls, "not_configured", "future-daemon");

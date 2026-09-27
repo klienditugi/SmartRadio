@@ -2,6 +2,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
+import { applyEnvOverrides, fieldSourcesFor, type FieldSources } from "./field-source.js";
 import { loadSecrets, type LoadedSecrets } from "./secrets.js";
 import {
   describeIntegration,
@@ -16,12 +17,6 @@ const optionalSetting = z.preprocess((value) => {
   if (value === undefined || value === null) return "";
   return value;
 }, z.string().trim());
-
-function nonemptyEnv(value: string | undefined): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
 
 /** Mebibytes (1024×1024 bytes). Default search-hit size cap. */
 export const DEFAULT_MAX_FILE_SIZE_MB = 200;
@@ -263,6 +258,8 @@ export type RuntimeConfig = AppConfig & {
   secrets: LoadedSecrets;
   /** False when that section's yaml/env object omitted verify_status and the schema default applied. */
   verify_status_explicit?: VerifyStatusExplicit;
+  /** Where each reported setting came from. Env-pinned fields cannot be saved over. */
+  field_sources?: FieldSources;
 };
 
 const ENV_INTERPOLATION = /\$\{([A-Z0-9_]+)\}/g;
@@ -284,103 +281,7 @@ export function interpolateEnv(value: unknown, env: NodeJS.ProcessEnv): unknown 
   return value;
 }
 
-export function applyEnvOverrides(raw: Record<string, unknown>, env: NodeJS.ProcessEnv): Record<string, unknown> {
-  const next = structuredClone(raw);
-
-  const set = (obj: Record<string, unknown>, key: string, value: unknown) => {
-    obj[key] = value;
-  };
-
-  const server = (next.server ?? {}) as Record<string, unknown>;
-  if (env.SUBWAVE_API_HOST) set(server, "host", env.SUBWAVE_API_HOST);
-  if (env.SUBWAVE_API_PORT) set(server, "port", Number(env.SUBWAVE_API_PORT));
-  next.server = server;
-
-  const database = (next.database ?? {}) as Record<string, unknown>;
-  if (env.SUBWAVE_DB_PATH) set(database, "path", env.SUBWAVE_DB_PATH);
-  next.database = database;
-
-  const paths = (next.paths ?? {}) as Record<string, unknown>;
-  if (env.SUBWAVE_SECRETS_DIR) set(paths, "secrets_dir", env.SUBWAVE_SECRETS_DIR);
-  if (env.SUBWAVE_DOWNLOADS_DIR) set(paths, "downloads", env.SUBWAVE_DOWNLOADS_DIR);
-  if (env.SUBWAVE_STAGING_DIR) set(paths, "staging", env.SUBWAVE_STAGING_DIR);
-  if (env.SUBWAVE_LIBRARY_DIR) set(paths, "library", env.SUBWAVE_LIBRARY_DIR);
-  next.paths = paths;
-
-  const auth = (next.auth ?? {}) as Record<string, unknown>;
-  if (env.SUBWAVE_ADMIN_USERNAME) set(auth, "admin_username", env.SUBWAVE_ADMIN_USERNAME);
-  next.auth = auth;
-
-  const llm = (next.llm ?? {}) as Record<string, unknown>;
-  const ollamaUrl = nonemptyEnv(env.OLLAMA_BASE_URL);
-  const ollamaModel = nonemptyEnv(env.OLLAMA_MODEL);
-  if (ollamaUrl) set(llm, "base_url", ollamaUrl);
-  if (ollamaModel) set(llm, "model", ollamaModel);
-  next.llm = llm;
-
-  const library = (next.library ?? {}) as Record<string, unknown>;
-  const navidromeUrl = nonemptyEnv(env.NAVIDROME_URL);
-  const navidromeUser = nonemptyEnv(env.NAVIDROME_USER);
-  if (navidromeUrl) set(library, "base_url", navidromeUrl);
-  if (navidromeUser) set(library, "username", navidromeUser);
-  next.library = library;
-
-  const radio = (next.radio ?? {}) as Record<string, unknown>;
-  const radioUrl = nonemptyEnv(env.SUBWAVE_RADIO_URL);
-  const radioUser = nonemptyEnv(env.SUBWAVE_RADIO_ADMIN_USER);
-  if (radioUrl) set(radio, "base_url", radioUrl);
-  if (radioUser) set(radio, "admin_user", radioUser);
-  next.radio = radio;
-
-  const acquisition = (next.acquisition ?? {}) as Record<string, unknown>;
-  if (env.SLSKD_URL) set(acquisition, "base_url", env.SLSKD_URL);
-  const selection = { ...((acquisition.selection ?? {}) as Record<string, unknown>) };
-  let selectionTouched = false;
-  const sizeMb = env.SLSKD_MAX_FILE_SIZE_MB?.trim();
-  if (sizeMb) {
-    const mb = Number(sizeMb);
-    if (Number.isFinite(mb) && mb > 0) {
-      selection.max_file_size_mb = mb;
-      selectionTouched = true;
-    }
-  }
-  const minSizeMb = env.SLSKD_MIN_FILE_SIZE_MB?.trim();
-  if (minSizeMb) {
-    const mb = Number(minSizeMb);
-    if (Number.isFinite(mb) && mb > 0) {
-      selection.min_file_size_mb = mb;
-      selectionTouched = true;
-    }
-  }
-  const durationRaw = env.SLSKD_MAX_DURATION_SECONDS?.trim();
-  if (durationRaw) {
-    const seconds = Number(durationRaw);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      selection.max_duration_seconds = seconds;
-      selectionTouched = true;
-    }
-  }
-  const sampleRateRaw = env.SLSKD_MAX_SAMPLE_RATE?.trim();
-  if (sampleRateRaw) {
-    const sampleRate = Number(sampleRateRaw);
-    if (Number.isFinite(sampleRate) && sampleRate > 0) {
-      selection.max_sample_rate = sampleRate;
-      selectionTouched = true;
-    }
-  }
-  const bitDepthRaw = env.SLSKD_MAX_BIT_DEPTH?.trim();
-  if (bitDepthRaw) {
-    const bitDepth = Number(bitDepthRaw);
-    if (Number.isFinite(bitDepth) && bitDepth > 0) {
-      selection.max_bit_depth = bitDepth;
-      selectionTouched = true;
-    }
-  }
-  if (selectionTouched) acquisition.selection = selection;
-  next.acquisition = acquisition;
-
-  return next;
-}
+export { applyEnvOverrides } from "./field-source.js";
 
 export function parseAppConfig(input: unknown): AppConfig {
   return appConfigSchema.parse(input);
@@ -430,7 +331,9 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
     throw new Error(`config file not found: ${configPath}`);
   }
   const rawYaml = parseYaml(readFileSync(configPath, "utf8"));
-  const interpolated = interpolateEnv(rawYaml, env) as Record<string, unknown>;
+  const rawObject =
+    rawYaml && typeof rawYaml === "object" && !Array.isArray(rawYaml) ? (rawYaml as Record<string, unknown>) : {};
+  const interpolated = interpolateEnv(rawObject, env) as Record<string, unknown>;
   const overridden = applyEnvOverrides(interpolated, env);
   const parsed = parseAppConfig(overridden);
   warnDeprecatedVerifyStatus(overridden, env);
@@ -446,6 +349,7 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
     paths: { ...parsed.paths, secrets_dir: secretsDir },
     secrets,
     verify_status_explicit: readVerifyStatusExplicit(overridden),
+    field_sources: fieldSourcesFor(rawObject, env),
   };
 }
 

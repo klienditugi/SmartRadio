@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertTransition, assertCancellable } from "@subwave-ai/core";
-import type { JobStatus, JobType, RequestStatus, UserRole, VerifyStatus } from "@subwave-ai/shared";
+import { omitVerifyStatusKeys, type JobStatus, type JobType, type RequestStatus, type UserRole, type VerifyStatus } from "@subwave-ai/shared";
 import type { Db } from "./client.js";
 
 export type UserRow = {
@@ -476,7 +476,10 @@ export function putSetting(db: Db, key: string, value: unknown, updatedBy?: stri
 export function listSettings(db: Db): Record<string, unknown> {
   const rows = db.prepare("SELECT key, value_json FROM settings").all() as { key: string; value_json: string }[];
   const out: Record<string, unknown> = {};
-  for (const row of rows) out[row.key] = JSON.parse(row.value_json);
+  for (const row of rows) {
+    if (row.key === "verify_status") continue;
+    out[row.key] = omitVerifyStatusKeys(JSON.parse(row.value_json));
+  }
   return out;
 }
 

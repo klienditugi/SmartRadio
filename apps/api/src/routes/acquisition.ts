@@ -1,7 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { acquisitionLiveProbeDecision, probeSlskdConnection, type SlskdProbeChecks } from "@subwave-ai/providers";
 import {
+  assertEnvPinnedUnchanged,
+  assertNoVerifyStatusKey,
   CONFIGURED_UNVERIFIED_MESSAGE,
+  EnvPinnedError,
   SECRET_FILES,
   normalizeAcquisitionSettingsPatch,
   writeSecretFile,
@@ -11,8 +14,6 @@ import {
 } from "@subwave-ai/shared";
 import { commitConfigPatch, matchingIntegrationCheck, recordIntegrationProbe } from "../context.js";
 import { requireAdmin } from "./auth.js";
-
-const VERIFY_REJECTED = "verify_status cannot be set to verified by saving settings; use test-connection";
 
 type SettingsBody = {
   enabled?: boolean;
@@ -57,10 +58,10 @@ function rejectsSoulseekCredentials(body: SettingsBody): boolean {
 }
 
 function assertSettingsBody(body: SettingsBody): void {
+  assertNoVerifyStatusKey(body);
   if (rejectsSoulseekCredentials(body)) {
     throw new Error("Soulseek username and password are not stored by SmartRadio");
   }
-  if (body.verify_status === "verified") throw new Error(VERIFY_REJECTED);
   if (body.enabled !== undefined && typeof body.enabled !== "boolean") throw new Error("enabled must be a boolean");
   if (body.provider !== undefined && (typeof body.provider !== "string" || body.provider.trim().length === 0)) {
     throw new Error("provider must be a non-empty string");
@@ -70,9 +71,6 @@ function assertSettingsBody(body: SettingsBody): void {
     if (typeof body.slskd_api_key !== "string" || body.slskd_api_key.trim().length === 0) {
       throw new Error("slskd_api_key must be a non-empty string when provided");
     }
-  }
-  if (body.verify_status !== undefined && body.verify_status !== "unverified" && body.verify_status !== "needs_server_inspection") {
-    throw new Error("verify_status must be unverified or needs_server_inspection");
   }
   for (const key of ["downloads", "library"] as const) {
     const value = body.paths?.[key];
@@ -201,12 +199,15 @@ export async function registerAcquisitionRoutes(app: FastifyInstance): Promise<v
       const body = (request.body ?? {}) as SettingsBody;
       try {
         assertSettingsBody(body);
+        const patch = settingsPatch(app.config, body);
+        assertEnvPinnedUnchanged(app.config, patch);
         if (body.slskd_api_key?.trim()) {
           writeSecretFile(app.config.paths.secrets_dir, SECRET_FILES.slskdApiKey, body.slskd_api_key);
         }
-        commitConfigPatch(app, settingsPatch(app.config, body));
+        commitConfigPatch(app, patch);
       } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
+        const status = err instanceof EnvPinnedError ? 409 : 400;
+        return reply.code(status).send({ error: (err as Error).message });
       }
       request.log.info(
         { provider: app.config.acquisition.provider, base_url: app.config.acquisition.base_url, enabled: app.config.acquisition.enabled },

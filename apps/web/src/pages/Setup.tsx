@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { AcquisitionForm } from "../components/AcquisitionForm";
 import { IntegrationProbe } from "../components/IntegrationProbe";
+import { isEnvPinned, pinNote, type FieldSources } from "../types";
 
 const STEPS = ["Admin", "Paths", "Ollama", "Navidrome", "Radio", "Acquisition", "Review"];
 
@@ -59,6 +60,7 @@ export function SetupPage() {
   type TextKey = { [K in keyof FormState]: FormState[K] extends string ? K : never }[keyof FormState];
   const set = (key: TextKey, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
 
+  const sources = setup?.sources;
   const payload = useMemo(
     () => ({
       setup_complete: true,
@@ -69,36 +71,39 @@ export function SetupPage() {
         ...(form.slskd_key ? { slskd_api_key: form.slskd_key } : {}),
       },
       config: {
-        auth: form.admin_username ? { admin_username: form.admin_username } : undefined,
+        auth:
+          form.admin_username && !isEnvPinned(sources, "auth.admin_username")
+            ? { admin_username: form.admin_username }
+            : undefined,
         paths: {
-          ...(form.library ? { library: form.library } : {}),
-          ...(form.downloads ? { downloads: form.downloads } : {}),
-          ...(form.staging ? { staging: form.staging } : {}),
+          ...(form.library && !isEnvPinned(sources, "paths.library") ? { library: form.library } : {}),
+          ...(form.downloads && !isEnvPinned(sources, "paths.downloads") ? { downloads: form.downloads } : {}),
+          ...(form.staging && !isEnvPinned(sources, "paths.staging") ? { staging: form.staging } : {}),
         },
         llm: {
-          ...(form.ollama_url ? { base_url: form.ollama_url } : {}),
-          ...(form.ollama_model ? { model: form.ollama_model } : {}),
+          ...(form.ollama_url && !isEnvPinned(sources, "llm.base_url") ? { base_url: form.ollama_url } : {}),
+          ...(form.ollama_model && !isEnvPinned(sources, "llm.model") ? { model: form.ollama_model } : {}),
         },
         library: {
-          ...(form.navidrome_url ? { base_url: form.navidrome_url } : {}),
-          ...(form.navidrome_user ? { username: form.navidrome_user } : {}),
+          ...(form.navidrome_url && !isEnvPinned(sources, "library.base_url") ? { base_url: form.navidrome_url } : {}),
+          ...(form.navidrome_user && !isEnvPinned(sources, "library.username") ? { username: form.navidrome_user } : {}),
         },
         radio: {
-          ...(form.radio_url ? { base_url: form.radio_url } : {}),
-          ...(form.radio_user ? { admin_user: form.radio_user } : {}),
+          ...(form.radio_url && !isEnvPinned(sources, "radio.base_url") ? { base_url: form.radio_url } : {}),
+          ...(form.radio_user && !isEnvPinned(sources, "radio.admin_user") ? { admin_user: form.radio_user } : {}),
         },
         ...(bootstrap
           ? {
               acquisition: {
                 enabled: form.acquisition_enabled,
                 provider: form.acquisition_provider || "slskd",
-                ...(form.slskd_url ? { base_url: form.slskd_url } : {}),
+                ...(form.slskd_url && !isEnvPinned(sources, "acquisition.base_url") ? { base_url: form.slskd_url } : {}),
               },
             }
           : {}),
       },
     }),
-    [bootstrap, form],
+    [bootstrap, form, sources],
   );
 
   async function onSubmit(event: FormEvent) {
@@ -142,8 +147,14 @@ export function SetupPage() {
           <>
             <label className="field">
               <span>Admin username</span>
-              <input value={form.admin_username} onChange={(e) => set("admin_username", e.target.value)} required={bootstrap} />
+              <input
+                value={form.admin_username}
+                onChange={(e) => set("admin_username", e.target.value)}
+                required={bootstrap && !isEnvPinned(sources, "auth.admin_username")}
+                readOnly={isEnvPinned(sources, "auth.admin_username")}
+              />
             </label>
+            <PinNote sources={sources} path="auth.admin_username" />
             <label className="field">
               <span>Admin password {bootstrap ? "(required)" : "(leave blank to keep)"}</span>
               <input type="password" value={form.admin_password} onChange={(e) => set("admin_password", e.target.value)} />
@@ -155,16 +166,32 @@ export function SetupPage() {
             <p className="muted">Persistent host paths. Music must not live only in an ephemeral container.</p>
             <label className="field">
               <span>Library directory</span>
-              <input value={form.library} onChange={(e) => set("library", e.target.value)} placeholder="host path" />
+              <input
+                value={form.library}
+                onChange={(e) => set("library", e.target.value)}
+                placeholder="host path"
+                readOnly={isEnvPinned(sources, "paths.library")}
+              />
             </label>
+            <PinNote sources={sources} path="paths.library" />
             <label className="field">
               <span>Downloads directory</span>
-              <input value={form.downloads} onChange={(e) => set("downloads", e.target.value)} />
+              <input
+                value={form.downloads}
+                onChange={(e) => set("downloads", e.target.value)}
+                readOnly={isEnvPinned(sources, "paths.downloads")}
+              />
             </label>
+            <PinNote sources={sources} path="paths.downloads" />
             <label className="field">
               <span>Staging directory</span>
-              <input value={form.staging} onChange={(e) => set("staging", e.target.value)} />
+              <input
+                value={form.staging}
+                onChange={(e) => set("staging", e.target.value)}
+                readOnly={isEnvPinned(sources, "paths.staging")}
+              />
             </label>
+            <PinNote sources={sources} path="paths.staging" />
           </>
         )}
         {step === 2 && (
@@ -175,12 +202,23 @@ export function SetupPage() {
             </p>
             <label className="field">
               <span>Ollama base URL</span>
-              <input value={form.ollama_url} onChange={(e) => set("ollama_url", e.target.value)} placeholder="https://…" />
+              <input
+                value={form.ollama_url}
+                onChange={(e) => set("ollama_url", e.target.value)}
+                placeholder="https://…"
+                readOnly={isEnvPinned(sources, "llm.base_url")}
+              />
             </label>
+            <PinNote sources={sources} path="llm.base_url" />
             <label className="field">
               <span>Model name (no default)</span>
-              <input value={form.ollama_model} onChange={(e) => set("ollama_model", e.target.value)} />
+              <input
+                value={form.ollama_model}
+                onChange={(e) => set("ollama_model", e.target.value)}
+                readOnly={isEnvPinned(sources, "llm.model")}
+              />
             </label>
+            <PinNote sources={sources} path="llm.model" />
             <p className="muted">Saving this step does not mark Ollama verified. Sign in, then use Test connection.</p>
             {user?.role === "admin" ? <IntegrationProbe kind="llm" /> : null}
           </>
@@ -190,12 +228,22 @@ export function SetupPage() {
             <p className="muted">Optional. Leave blank to boot; Navidrome stays not_configured until URL, username, and password are set.</p>
             <label className="field">
               <span>Navidrome URL</span>
-              <input value={form.navidrome_url} onChange={(e) => set("navidrome_url", e.target.value)} />
+              <input
+                value={form.navidrome_url}
+                onChange={(e) => set("navidrome_url", e.target.value)}
+                readOnly={isEnvPinned(sources, "library.base_url")}
+              />
             </label>
+            <PinNote sources={sources} path="library.base_url" />
             <label className="field">
               <span>Navidrome username</span>
-              <input value={form.navidrome_user} onChange={(e) => set("navidrome_user", e.target.value)} />
+              <input
+                value={form.navidrome_user}
+                onChange={(e) => set("navidrome_user", e.target.value)}
+                readOnly={isEnvPinned(sources, "library.username")}
+              />
             </label>
+            <PinNote sources={sources} path="library.username" />
             <label className="field">
               <span>Navidrome password (written to secrets/)</span>
               <input type="password" value={form.navidrome_password} onChange={(e) => set("navidrome_password", e.target.value)} />
@@ -212,12 +260,22 @@ export function SetupPage() {
             </p>
             <label className="field">
               <span>Radio base URL</span>
-              <input value={form.radio_url} onChange={(e) => set("radio_url", e.target.value)} />
+              <input
+                value={form.radio_url}
+                onChange={(e) => set("radio_url", e.target.value)}
+                readOnly={isEnvPinned(sources, "radio.base_url")}
+              />
             </label>
+            <PinNote sources={sources} path="radio.base_url" />
             <label className="field">
               <span>Admin username</span>
-              <input value={form.radio_user} onChange={(e) => set("radio_user", e.target.value)} />
+              <input
+                value={form.radio_user}
+                onChange={(e) => set("radio_user", e.target.value)}
+                readOnly={isEnvPinned(sources, "radio.admin_user")}
+              />
             </label>
+            <PinNote sources={sources} path="radio.admin_user" />
             <label className="field">
               <span>Admin password (secrets/)</span>
               <input type="password" value={form.radio_password} onChange={(e) => set("radio_password", e.target.value)} />
@@ -230,6 +288,7 @@ export function SetupPage() {
           (bootstrap ? (
             <AcquisitionForm
               mode="wizard"
+              sources={sources}
               draft={{
                 enabled: form.acquisition_enabled,
                 provider: form.acquisition_provider,
@@ -251,7 +310,7 @@ export function SetupPage() {
               }
             />
           ) : (
-            <AcquisitionForm mode="settings" readOnly={user?.role !== "admin"} />
+            <AcquisitionForm mode="settings" readOnly={user?.role !== "admin"} sources={sources} />
           ))}
         {step === 6 && (
           <div className="pre">
@@ -278,4 +337,10 @@ export function SetupPage() {
       </form>
     </div>
   );
+}
+
+function PinNote(props: { sources?: FieldSources; path: string }) {
+  const note = pinNote(props.sources, props.path);
+  if (!note) return null;
+  return <p className="muted">{note}</p>;
 }
