@@ -7,10 +7,10 @@ import {
   applyEnvOverrides,
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_BITRATE_FLOOR_KBPS,
-  DEFAULT_EXTENDED_VERSION_BONUS,
   DEFAULT_EXTENDED_VERSION_TERMS,
+  DEFAULT_FORMAT_PREFERENCE,
   DEFAULT_LONG_RECORDING_PHRASES,
-  DEFAULT_LOSSLESS_PREFERENCE,
+  DEFAULT_VERSION_PREFERENCE,
   DEFAULT_MAX_DURATION_SECONDS,
   DEFAULT_MAX_FILE_SIZE_MB,
   DEFAULT_MIN_FILE_SIZE_MB,
@@ -24,6 +24,8 @@ import {
   interpolateEnv,
   loadConfig,
   normalizeAcquisitionSettingsPatch,
+  resetDeprecatedSelectionWarning,
+  selectionDeprecationNotes,
   parseAppConfig,
   publicSettings,
   serializeAppConfig,
@@ -277,8 +279,8 @@ acquisition:
     expect(cfg.acquisition.selection.preferred_max_file_size_mb).toBe(DEFAULT_PREFERRED_MAX_FILE_SIZE_MB);
     expect(cfg.acquisition.selection.max_duration_seconds).toBe(DEFAULT_MAX_DURATION_SECONDS);
     expect(cfg.acquisition.selection.preferred_max_duration_seconds).toBe(DEFAULT_PREFERRED_MAX_DURATION_SECONDS);
-    expect(cfg.acquisition.selection.extended_version_bonus).toBe(DEFAULT_EXTENDED_VERSION_BONUS);
-    expect(cfg.acquisition.selection.lossless_preference).toBe(DEFAULT_LOSSLESS_PREFERENCE);
+    expect(cfg.acquisition.selection.version_preference).toBe(DEFAULT_VERSION_PREFERENCE);
+    expect(cfg.acquisition.selection.format_preference).toBe(DEFAULT_FORMAT_PREFERENCE);
     expect(cfg.acquisition.selection.bitrate_floor_kbps).toBe(DEFAULT_BITRATE_FLOOR_KBPS);
     expect(cfg.acquisition.selection.max_sample_rate).toBe(DEFAULT_MAX_SAMPLE_RATE);
     expect(cfg.acquisition.selection.max_bit_depth).toBe(DEFAULT_MAX_BIT_DEPTH);
@@ -310,6 +312,8 @@ acquisition:
       SLSKD_PREFERRED_MAX_FILE_SIZE_MB: "25",
       SLSKD_MAX_DURATION_SECONDS: "420",
       SLSKD_PREFERRED_MAX_DURATION_SECONDS: "300",
+      SLSKD_VERSION_PREFERENCE: "radio_edit",
+      SLSKD_FORMAT_PREFERENCE: "auto",
       SLSKD_EXTENDED_VERSION_BONUS: "false",
       SLSKD_LOSSLESS_PREFERENCE: "0",
       SLSKD_MAX_SAMPLE_RATE: "96000",
@@ -321,8 +325,10 @@ acquisition:
     expect(parsed.acquisition.selection.preferred_max_file_size_mb).toBe(25);
     expect(parsed.acquisition.selection.max_duration_seconds).toBe(420);
     expect(parsed.acquisition.selection.preferred_max_duration_seconds).toBe(300);
-    expect(parsed.acquisition.selection.extended_version_bonus).toBe(false);
-    expect(parsed.acquisition.selection.lossless_preference).toBe(0);
+    expect(parsed.acquisition.selection.version_preference).toBe("radio_edit");
+    expect(parsed.acquisition.selection.format_preference).toBe("auto");
+    expect(parsed.acquisition.selection).not.toHaveProperty("extended_version_bonus");
+    expect(parsed.acquisition.selection).not.toHaveProperty("lossless_preference");
     expect(parsed.acquisition.selection.max_sample_rate).toBe(96000);
     expect(parsed.acquisition.selection.max_bit_depth).toBe(32);
     const ignored = applyEnvOverrides(structuredClone(exampleYamlObject), {
@@ -354,8 +360,8 @@ acquisition:
       preferred_max_file_size_mb: DEFAULT_PREFERRED_MAX_FILE_SIZE_MB,
       max_duration_seconds: 480,
       preferred_max_duration_seconds: 400,
-      extended_version_bonus: DEFAULT_EXTENDED_VERSION_BONUS,
-      lossless_preference: DEFAULT_LOSSLESS_PREFERENCE,
+      version_preference: DEFAULT_VERSION_PREFERENCE,
+      format_preference: DEFAULT_FORMAT_PREFERENCE,
       bitrate_floor_kbps: DEFAULT_BITRATE_FLOOR_KBPS,
       max_sample_rate: 96000,
       max_bit_depth: null,
@@ -382,6 +388,104 @@ acquisition:
         },
       }),
     ).toThrow(/preferred_max_duration_seconds/);
+    expect(() =>
+      parseAppConfig({
+        ...exampleYamlObject,
+        acquisition: {
+          ...exampleYamlObject.acquisition,
+          selection: { version_preference: "hip-hop" },
+        },
+      }),
+    ).toThrow(/version_preference/);
+  });
+
+  it("ignores deprecated selector keys without translating them and names the replacement", () => {
+    resetDeprecatedSelectionWarning();
+    const warned: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((message) => {
+      warned.push(String(message));
+    });
+    const raw = {
+      ...exampleYamlObject,
+      acquisition: {
+        ...exampleYamlObject.acquisition,
+        selection: {
+          extended_version_bonus: false,
+          lossless_preference: 0,
+          version_preference: "remix",
+        },
+      },
+    };
+    const parsed = parseAppConfig(raw);
+    expect(parsed.acquisition.selection.version_preference).toBe("remix");
+    expect(parsed.acquisition.selection.format_preference).toBe(DEFAULT_FORMAT_PREFERENCE);
+    expect(parsed.acquisition.selection).not.toHaveProperty("extended_version_bonus");
+    expect(parsed.acquisition.selection).not.toHaveProperty("lossless_preference");
+
+    const onlyOld = parseAppConfig({
+      ...exampleYamlObject,
+      acquisition: {
+        ...exampleYamlObject.acquisition,
+        selection: { extended_version_bonus: false, lossless_preference: 36 },
+      },
+    });
+    expect(onlyOld.acquisition.selection.version_preference).toBe("balanced");
+    expect(onlyOld.acquisition.selection.format_preference).toBe("prefer_mp3");
+
+    const envOnly = applyEnvOverrides(structuredClone(exampleYamlObject), {
+      SLSKD_EXTENDED_VERSION_BONUS: "true",
+      SLSKD_LOSSLESS_PREFERENCE: "0",
+    });
+    expect(parseAppConfig(envOnly).acquisition.selection.version_preference).toBe(DEFAULT_VERSION_PREFERENCE);
+    expect(parseAppConfig(envOnly).acquisition.selection.format_preference).toBe(DEFAULT_FORMAT_PREFERENCE);
+
+    const notes = selectionDeprecationNotes(raw, { SLSKD_LOSSLESS_PREFERENCE: "0" });
+    expect(notes.join("\n")).toContain("extended_version_bonus is deprecated and ignored");
+    expect(notes.join("\n")).toContain("acquisition.selection.version_preference");
+    expect(notes.join("\n")).toContain("SLSKD_VERSION_PREFERENCE");
+    expect(notes.join("\n")).toContain("lossless_preference is deprecated and ignored");
+    expect(notes.join("\n")).toContain("acquisition.selection.format_preference");
+    expect(notes.join("\n")).toContain("SLSKD_LOSSLESS_PREFERENCE is deprecated and ignored");
+    expect(notes.join("\n")).toContain("SLSKD_FORMAT_PREFERENCE");
+
+    const dir = mkdtempSync(path.join(os.tmpdir(), "subwave-cfg-deprecation-"));
+    const secrets = path.join(dir, "secrets");
+    mkdirSync(secrets);
+    writeFileSync(path.join(secrets, "admin_password"), "test-admin-secret\n");
+    writeFileSync(path.join(secrets, "session_secret"), "test-session-secret\n");
+    const cfgPath = path.join(dir, "subwave.yaml");
+    writeFileSync(
+      cfgPath,
+      `
+server:
+  host: "127.0.0.1"
+  port: 8788
+database:
+  path: ":memory:"
+paths:
+  secrets_dir: "${secrets}"
+  downloads: "${path.join(dir, "downloads")}"
+  staging: "${path.join(dir, "staging")}"
+  library: "${path.join(dir, "library")}"
+acquisition:
+  selection:
+    extended_version_bonus: false
+    lossless_preference: 0
+`,
+    );
+    const loaded = loadConfig({
+      configPath: cfgPath,
+      env: { ...process.env, SLSKD_EXTENDED_VERSION_BONUS: "false", SLSKD_LOSSLESS_PREFERENCE: "12" },
+    });
+    expect(loaded.acquisition.selection.version_preference).toBe("balanced");
+    expect(loaded.acquisition.selection.format_preference).toBe("prefer_mp3");
+    const doctorNotes = (loaded.deprecation_notes ?? []).join("\n");
+    expect(doctorNotes).toContain("version_preference");
+    expect(doctorNotes).toContain("format_preference");
+    expect(doctorNotes).toContain("extended_version_bonus");
+    expect(doctorNotes).toContain("lossless_preference");
+    expect(warned.join("\n")).toContain("deprecated and ignored");
+    spy.mockRestore();
   });
 
   it("loads with Navidrome, SUB/WAVE, and Ollama empty or unset", () => {

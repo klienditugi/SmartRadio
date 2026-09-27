@@ -14,6 +14,25 @@ export const ACQUISITION_CONNECTION_STATES = [
 
 export type AcquisitionConnectionState = (typeof ACQUISITION_CONNECTION_STATES)[number];
 
+export const VERSION_PREFERENCE_OPTIONS = [
+  { value: "balanced", label: "Balanced — no version bonus" },
+  { value: "radio_edit", label: "Radio edit" },
+  { value: "original", label: "Original / album version" },
+  { value: "extended", label: "Extended / club mix" },
+  { value: "remix", label: "Remix" },
+] as const;
+
+export const FORMAT_PREFERENCE_OPTIONS = [
+  { value: "auto", label: "Auto — no format bonus" },
+  { value: "prefer_mp3", label: "Prefer MP3" },
+  { value: "prefer_flac", label: "Prefer FLAC" },
+  { value: "mp3_only", label: "MP3 only" },
+  { value: "flac_only", label: "FLAC only" },
+] as const;
+
+export type VersionPreference = (typeof VERSION_PREFERENCE_OPTIONS)[number]["value"];
+export type FormatPreference = (typeof FORMAT_PREFERENCE_OPTIONS)[number]["value"];
+
 /** Selector policy edited with acquisition settings. Sizes are mebibytes. */
 export type AcquisitionSelectionSettings = {
   preferred_max_file_size_mb: number;
@@ -21,8 +40,8 @@ export type AcquisitionSelectionSettings = {
   preferred_max_duration_seconds: number;
   /** Null disables the hard duration cap. */
   max_duration_seconds: number | null;
-  extended_version_bonus: boolean;
-  lossless_preference: number;
+  version_preference: VersionPreference;
+  format_preference: FormatPreference;
 };
 
 /** GET/PUT /api/v1/acquisition/settings. The API key is never part of this object. */

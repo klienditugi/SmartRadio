@@ -37,7 +37,7 @@ function selected(tracks: CandidateTrack[], opts: Parameters<typeof selectTracks
 }
 
 describe("selection score", () => {
-  it("lets the extended bonus win for comparable normal-length files, and not when the bonus is off", () => {
+  it("gives a normal-length extended mix the version bonus only when that preference is saved", () => {
     const original = track({
       peer: "a-original",
       path: "@@share\\Daft Punk\\Random Access Memories\\06 Get Lucky.flac",
@@ -54,14 +54,14 @@ describe("selection score", () => {
       bitDepth: 16,
       sampleRateHz: 44100,
     });
-    const on = selected([original, extended], { query });
-    expect(on.pick.peer).toBe("z-extended");
-    expect(on.breakdown.extendedBonus).toBe(SCORE_WEIGHTS.extendedBonus);
-    expect(on.breakdown.longRecording).toBe(0);
+    const balanced = selected([original, extended], { query, versionPreference: "balanced" });
+    expect(balanced.pick.peer).toBe("a-original");
+    expect(balanced.breakdown.versionPreference).toBe(0);
 
-    const off = selected([original, extended], { query, extendedVersionBonus: false });
-    expect(off.pick.peer).toBe("a-original");
-    expect(off.breakdown.extendedBonus).toBe(0);
+    const on = selected([original, extended], { query, versionPreference: "extended" });
+    expect(on.pick.peer).toBe("z-extended");
+    expect(on.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+    expect(on.breakdown.longRecording).toBe(0);
   });
 
   it("lets a requested remix dominate every other component that still passes the filters", () => {
@@ -117,7 +117,7 @@ describe("selection score", () => {
     expect(scoreTrack(unknown, { query }).breakdown.quality).toBe(0);
   });
 
-  it("prefers a normal-duration 42 MiB 16/44.1 FLAC over a 14 MiB 320 kbps MP3, and the reverse at weight 0", () => {
+  it("scores 320 kbps and 16/44.1 FLAC as the same quality, then applies format and size", () => {
     const flac = track({
       peer: "flac",
       path: "@@share\\Album\\Get Lucky.flac",
@@ -133,18 +133,32 @@ describe("selection score", () => {
       durationSeconds: 360,
       bitrateKbps: 320,
     });
-    const atDefault = selected([flac, mp3]);
-    expect(atDefault.pick.peer).toBe("flac");
-    expect(atDefault.breakdown.format).toBe(SCORE_WEIGHTS.losslessPreference);
-    expect(atDefault.breakdown.quality).toBe(SCORE_WEIGHTS.qualityLosslessGood);
-    expect(atDefault.breakdown.sizeOvershoot).toBe(-5);
-    expect(scoreTrack(mp3).breakdown.quality).toBe(SCORE_WEIGHTS.qualityLossyReward);
-    expect(atDefault.total).toBeGreaterThan(scoreTrack(mp3).total);
+    const hires = track({
+      peer: "hires",
+      path: "@@share\\Album\\Get Lucky.flac",
+      sizeBytes: 42 * MIB,
+      durationSeconds: 360,
+      bitDepth: 24,
+      sampleRateHz: 48000,
+    });
+    expect(scoreTrack(flac).breakdown.quality).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(scoreTrack(mp3).breakdown.quality).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(scoreTrack(hires).breakdown.quality).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(scoreTrack(flac).breakdown.sizeOvershoot).toBe(-5);
 
-    const alternate = selected([flac, mp3], { losslessPreference: 0 });
-    expect(alternate.pick.peer).toBe("mp3");
-    expect(scoreTrack(flac, { losslessPreference: 0 }).breakdown.format).toBe(0);
-    expect(scoreTrack(flac, { losslessPreference: 0 }).total).toBeLessThan(scoreTrack(mp3, { losslessPreference: 0 }).total);
+    const preferMp3 = selected([flac, mp3], { formatPreference: "prefer_mp3" });
+    expect(preferMp3.pick.peer).toBe("mp3");
+    expect(preferMp3.breakdown.format).toBe(SCORE_WEIGHTS.formatPreference);
+    expect(scoreTrack(flac, { formatPreference: "prefer_mp3" }).breakdown.format).toBe(0);
+
+    const auto = selected([flac, mp3], { formatPreference: "auto" });
+    expect(auto.pick.peer).toBe("mp3");
+    expect(scoreTrack(flac, { formatPreference: "auto" }).breakdown.format).toBe(0);
+    expect(scoreTrack(mp3, { formatPreference: "auto" }).total - scoreTrack(flac, { formatPreference: "auto" }).total).toBe(5);
+
+    const preferFlac = selected([flac, mp3], { formatPreference: "prefer_flac" });
+    expect(preferFlac.pick.peer).toBe("flac");
+    expect(preferFlac.breakdown.format).toBe(SCORE_WEIGHTS.formatPreference);
   });
 
   it("excludes a 60 min SYNTHETIC DJ set, heavily penalizes a 15 min live file, and drops unknown-duration long recordings", () => {
@@ -264,10 +278,18 @@ describe("selection score", () => {
     for (const row of [cd1, disc, cdSpaced, extended, club, discUnderLive]) {
       expect(scoreTrack(row, { query }).breakdown.longRecording).toBe(0);
     }
-    expect(scoreTrack(extended, { query }).breakdown.extendedBonus).toBe(SCORE_WEIGHTS.extendedBonus);
-    expect(scoreTrack(club, { query }).breakdown.extendedBonus).toBe(SCORE_WEIGHTS.extendedBonus);
-    expect(scoreTrack(mixshow, { query }).breakdown.longRecording).toBe(SCORE_WEIGHTS.longRecording);
-    expect(scoreTrack(mixshow, { query }).breakdown.extendedBonus).toBe(0);
+    expect(scoreTrack(extended, { query, versionPreference: "extended" }).breakdown.versionPreference).toBe(
+      SCORE_WEIGHTS.versionBasename,
+    );
+    expect(scoreTrack(club, { query, versionPreference: "extended" }).breakdown.versionPreference).toBe(
+      SCORE_WEIGHTS.versionBasename,
+    );
+    expect(scoreTrack(extended, { query, versionPreference: "extended" }).breakdown.longRecording).toBe(0);
+    expect(scoreTrack(club, { query, versionPreference: "extended" }).breakdown.longRecording).toBe(0);
+    expect(scoreTrack(mixshow, { query, versionPreference: "extended" }).breakdown.longRecording).toBe(
+      SCORE_WEIGHTS.longRecording,
+    );
+    expect(scoreTrack(mixshow, { query, versionPreference: "extended" }).breakdown.versionPreference).toBe(0);
     expect(selected([cd1, mixshow], { query }).pick.peer).toBe("cd1");
     expect(selected([disc, mixshow], { query }).pick.peer).toBe("disc");
     // A configured disc phrase still does not count.

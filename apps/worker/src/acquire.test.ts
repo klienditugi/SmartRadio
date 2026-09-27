@@ -515,7 +515,7 @@ describe("A5 acquisition worker", () => {
 
     const plain = await chosen("Get Lucky");
     expect(plain.enqueued).toEqual([{ user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] }]);
-    expect(plain.score?.breakdown.extendedBonus).toBeGreaterThan(0);
+    expect(plain.score?.breakdown.versionPreference).toBe(0);
     expect(plain.score?.breakdown.requestedVersion).toBe(0);
     const asked = await chosen("Get Lucky Remix");
     expect(asked.enqueued).toEqual([{ user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] }]);
@@ -570,7 +570,7 @@ describe("A5 acquisition worker", () => {
     const row = getRequest(db, request.id);
     expect(row?.status).toBe("FAILED");
     expect(row?.error).toBe(
-      "no_suitable_result: locked=1, junk=0, extensions=1, min_file_size=0, max_file_size=1, max_duration=0, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
+      "no_suitable_result: locked=1, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=1, max_duration=0, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
     );
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
     expect(failed?.from_status).toBe("QUEUED");
@@ -580,6 +580,7 @@ describe("A5 acquisition worker", () => {
         locked: 1,
         junk: 0,
         extensions: 1,
+        format_preference: 0,
         min_file_size: 0,
         max_file_size: 1,
         max_duration: 0,

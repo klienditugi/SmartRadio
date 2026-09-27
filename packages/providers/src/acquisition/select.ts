@@ -147,12 +147,6 @@ function locked(file: Record<string, unknown>): boolean {
   return file.isLocked === true || file.IsLocked === true;
 }
 
-/** Reported lossy bitrate. Outside 32–500 kbps is dropped so the scorer treats it as unknown. */
-function plausibleBitrate(value: number | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  if (value < 32 || value > 500) return undefined;
-  return value;
-}
 
 function collect(payload: unknown): MappedFile[] {
   const out: MappedFile[] = [];
@@ -176,7 +170,9 @@ function collect(payload: unknown): MappedFile[] {
       const { basename, folders } = pathParts(path);
       const rawBitRate = num(file.bitRate) ?? num(file.bitrate) ?? num(file.BitRate);
       const lossless = LOSSLESS_EXTENSIONS.has(ext);
-      const bitrateKbps = lossless ? undefined : plausibleBitrate(rawBitRate);
+      // Pass the reported number through, including junk. The scorer decides unknown vs usable.
+      // A lossless file is scored from bit depth and sample rate, never from bitRate.
+      const bitrateKbps = lossless ? undefined : rawBitRate;
       const sampleRateHz = num(file.sampleRate) ?? num(file.SampleRate);
       const bitDepth = num(file.bitDepth) ?? num(file.BitDepth);
       const length = num(file.length);

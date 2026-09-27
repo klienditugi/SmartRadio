@@ -42,14 +42,22 @@ export const DEFAULT_MAX_DURATION_SECONDS = 1200;
 /** Duration penalty starts above this many seconds. Shorter files are a normal length. */
 export const DEFAULT_PREFERRED_MAX_DURATION_SECONDS = 720;
 
-/** When true, a normal-length extended mix or remix scores above a comparable original. */
-export const DEFAULT_EXTENDED_VERSION_BONUS = true;
+/**
+ * Saved version taste. A ranking bonus only, never a filter.
+ * Owner decision: the default is `balanced` (no version-type bonus).
+ */
+export const VERSION_PREFERENCES = ["balanced", "radio_edit", "original", "extended", "remix"] as const;
+export type VersionPreference = (typeof VERSION_PREFERENCES)[number];
+export const DEFAULT_VERSION_PREFERENCE: VersionPreference = "balanced";
 
 /**
- * Format component for a lossless file. 36 picks a normal-duration 42 MiB
- * 16/44.1 FLAC over a 14 MiB 320 kbps MP3. 0 picks the MP3.
+ * Saved format taste, separate from the quality tier.
+ * Owner decision: the default is `prefer_mp3`.
+ * `mp3_only` and `flac_only` are hard filters. The others are a bonus or nothing.
  */
-export const DEFAULT_LOSSLESS_PREFERENCE = 36;
+export const FORMAT_PREFERENCES = ["auto", "prefer_mp3", "prefer_flac", "mp3_only", "flac_only"] as const;
+export type FormatPreference = (typeof FORMAT_PREFERENCES)[number];
+export const DEFAULT_FORMAT_PREFERENCE: FormatPreference = "prefer_mp3";
 
 /** Lossy bitrates below this (kbps) are penalized. Values outside 32–500 are unknown. */
 export const DEFAULT_BITRATE_FLOOR_KBPS = 192;
@@ -157,13 +165,17 @@ const acquisitionSelectionSchema = z
      * Must be less than or equal to max_duration_seconds when that cap is set.
      */
     preferred_max_duration_seconds: z.number().positive().default(DEFAULT_PREFERRED_MAX_DURATION_SECONDS),
-    /** Normal-length extended mixes and remixes score above a comparable original. */
-    extended_version_bonus: z.boolean().default(DEFAULT_EXTENDED_VERSION_BONUS),
     /**
-     * Points added for a lossless file. Default 36, which prefers a normal-duration
-     * 42 MiB 16/44.1 FLAC over a 14 MiB 320 kbps MP3. 0 prefers the MP3.
+     * Ranking bonus for a normal-length version kind. Default `balanced` (owner decision): no bonus.
+     * Never a filter. An explicit version in the request outranks this.
      */
-    lossless_preference: z.number().min(0).default(DEFAULT_LOSSLESS_PREFERENCE),
+    version_preference: z.enum(VERSION_PREFERENCES).default(DEFAULT_VERSION_PREFERENCE),
+    /**
+     * `auto` adds nothing. `prefer_mp3` / `prefer_flac` add a bonus and keep the other format eligible.
+     * `mp3_only` / `flac_only` are hard filters with no relaxation. Default `prefer_mp3` (owner decision).
+     * Separate from the quality tier.
+     */
+    format_preference: z.enum(FORMAT_PREFERENCES).default(DEFAULT_FORMAT_PREFERENCE),
     /** Lossy kbps below this are penalized. Default 192. */
     bitrate_floor_kbps: z.number().positive().default(DEFAULT_BITRATE_FLOOR_KBPS),
     extended_version_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_EXTENDED_VERSION_TERMS]),
@@ -318,6 +330,64 @@ export function resetDeprecatedVerifyStatusWarning(): void {
  * One non-secret warning when yaml or env still carries verify_status.
  * The value is ignored. Section and env key names only.
  */
+const DEPRECATED_SELECTION_KEYS = [
+  {
+    key: "extended_version_bonus",
+    env: "SLSKD_EXTENDED_VERSION_BONUS",
+    replacement: "acquisition.selection.version_preference",
+    replacementEnv: "SLSKD_VERSION_PREFERENCE",
+  },
+  {
+    key: "lossless_preference",
+    env: "SLSKD_LOSSLESS_PREFERENCE",
+    replacement: "acquisition.selection.format_preference",
+    replacementEnv: "SLSKD_FORMAT_PREFERENCE",
+  },
+] as const;
+
+function selectionRecord(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const acquisition = (raw as Record<string, unknown>).acquisition;
+  if (!acquisition || typeof acquisition !== "object" || Array.isArray(acquisition)) return null;
+  const selection = (acquisition as Record<string, unknown>).selection;
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)) return null;
+  return selection as Record<string, unknown>;
+}
+
+/**
+ * Old selector keys are ignored. They are not translated into the new enums.
+ * Names only — never a secret value.
+ */
+export function selectionDeprecationNotes(raw: unknown, env: NodeJS.ProcessEnv): string[] {
+  const selection = selectionRecord(raw);
+  const notes: string[] = [];
+  for (const item of DEPRECATED_SELECTION_KEYS) {
+    if (selection && Object.prototype.hasOwnProperty.call(selection, item.key)) {
+      notes.push(
+        `${item.key} is deprecated and ignored. Use ${item.replacement} (env ${item.replacementEnv}).`,
+      );
+    }
+    const envValue = env[item.env];
+    if (typeof envValue === "string" && envValue.trim()) {
+      notes.push(`${item.env} is deprecated and ignored. Use ${item.replacementEnv} (${item.replacement}).`);
+    }
+  }
+  return notes;
+}
+
+let selectionDeprecationLogged = false;
+
+/** Test helper. Production logs each distinct note at most once per process. */
+export function resetDeprecatedSelectionWarning(): void {
+  selectionDeprecationLogged = false;
+}
+
+export function warnDeprecatedSelection(notes: readonly string[]): void {
+  if (selectionDeprecationLogged || notes.length === 0) return;
+  selectionDeprecationLogged = true;
+  for (const note of notes) console.warn(note);
+}
+
 export function warnDeprecatedVerifyStatus(raw: unknown, env: NodeJS.ProcessEnv): void {
   if (verifyStatusDeprecationLogged) return;
   const root = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -351,6 +421,8 @@ export type RuntimeConfig = AppConfig & {
   verify_status_explicit?: VerifyStatusExplicit;
   /** Where each reported setting came from. Env-pinned fields cannot be saved over. */
   field_sources?: FieldSources;
+  /** Non-secret deprecation notes for doctor. Old selector keys are named here and ignored. */
+  deprecation_notes?: string[];
 };
 
 const ENV_INTERPOLATION = /\$\{([A-Z0-9_]+)\}/g;
@@ -428,6 +500,8 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
   const overridden = applyEnvOverrides(interpolated, env);
   const parsed = parseAppConfig(overridden);
   warnDeprecatedVerifyStatus(overridden, env);
+  const deprecation_notes = selectionDeprecationNotes(rawObject, env);
+  warnDeprecatedSelection(deprecation_notes);
   for (const section of VERIFY_STATUS_SECTIONS) {
     parsed[section].verify_status = "unverified";
   }
@@ -441,6 +515,7 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
     secrets,
     verify_status_explicit: readVerifyStatusExplicit(overridden),
     field_sources: fieldSourcesFor(rawObject, env),
+    deprecation_notes,
   };
 }
 
@@ -692,8 +767,8 @@ function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
     preferred_max_file_size_mb: selection.preferred_max_file_size_mb,
     max_duration_seconds: selection.max_duration_seconds ?? null,
     preferred_max_duration_seconds: selection.preferred_max_duration_seconds,
-    extended_version_bonus: selection.extended_version_bonus,
-    lossless_preference: selection.lossless_preference,
+    version_preference: selection.version_preference,
+    format_preference: selection.format_preference,
     bitrate_floor_kbps: selection.bitrate_floor_kbps,
     max_sample_rate: selection.max_sample_rate,
     max_bit_depth: selection.max_bit_depth,

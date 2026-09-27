@@ -192,24 +192,30 @@ const phaseOpts = {
 };
 
 describe("slskd search ranking", () => {
-  it("picks the normal-length club remix over the album FLAC when the bonus is on", () => {
+  it("picks the 320 kbps MP3 by default and the club remix when remix is preferred", () => {
     const first = selectSearch(PHASE_C, phaseOpts);
     const second = selectSearch(PHASE_C, phaseOpts);
     expect(first).toEqual(second);
     expect(first.outcome).toBe("selected");
     if (first.outcome !== "selected") return;
     expect(first.file).toEqual({
-      username: "remix-fast",
-      filename: REMIX,
-      size: 40 * MIB,
-      extension: ".flac",
-      bitRate: 2304,
+      username: "slot-album",
+      filename: MP3,
+      size: 8 * MIB,
+      extension: ".mp3",
+      bitRate: 320,
     });
-    expect(first.file.responseId).toBeUndefined();
-    expect(first.file.fileId).toBeUndefined();
-    expect(first.breakdown.extendedBonus).toBeGreaterThan(0);
+    expect(first.breakdown.versionPreference).toBe(0);
+    expect(first.breakdown.format).toBeGreaterThan(0);
     expect(first.total).toBe(Object.values(first.breakdown).reduce((sum, value) => sum + value, 0));
-    expect(first.pick.path).toBe(REMIX);
+
+    const remix = selectSearch(PHASE_C, { ...phaseOpts, versionPreference: "remix" });
+    expect(remix.outcome).toBe("selected");
+    if (remix.outcome !== "selected") return;
+    expect(remix.file).toMatchObject({ username: "remix-fast", filename: REMIX, extension: ".flac", bitRate: 2304 });
+    expect(remix.breakdown.versionPreference).toBeGreaterThan(0);
+    expect(remix.breakdown.longRecording).toBe(0);
+    expect(remix.total).toBe(Object.values(remix.breakdown).reduce((sum, value) => sum + value, 0));
   });
 
   it("still skips the oversize master when the request names the remix", () => {
@@ -354,29 +360,28 @@ describe("slskd search ranking", () => {
     ).toBeNull();
   });
 
-  it("ranks extension ahead of peer availability", () => {
-    const pick = selectSearchResult(
-      {
-        responses: [
-          {
-            username: "aaa-mp3",
-            hasFreeUploadSlot: true,
-            queueLength: 0,
-            uploadSpeed: 50_000_000,
-            files: [{ filename: "\\\\music\\\\track.mp3", size: 8 * MIB, extension: "mp3", bitRate: 320 }],
-          },
-          {
-            username: "zzz-flac",
-            hasFreeUploadSlot: false,
-            queueLength: 20,
-            uploadSpeed: 1,
-            files: [{ filename: "\\\\music\\\\track.flac", size: 20 * MIB, extension: "flac", bitDepth: 16, sampleRate: 44100 }],
-          },
-        ],
-      },
-      { allowedExtensions: AUDIO },
-    );
-    expect(pick?.username).toBe("zzz-flac");
+  it("lets format preference beat peer availability without dropping the other format", () => {
+    const payload = {
+      responses: [
+        {
+          username: "aaa-mp3",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 50_000_000,
+          files: [{ filename: "\\\\music\\\\track.mp3", size: 8 * MIB, extension: "mp3", bitRate: 320 }],
+        },
+        {
+          username: "zzz-flac",
+          hasFreeUploadSlot: false,
+          queueLength: 20,
+          uploadSpeed: 1,
+          files: [{ filename: "\\\\music\\\\track.flac", size: 20 * MIB, extension: "flac", bitDepth: 16, sampleRate: 44100 }],
+        },
+      ],
+    };
+    expect(selectSearchResult(payload, { allowedExtensions: AUDIO, formatPreference: "prefer_mp3" })?.username).toBe("aaa-mp3");
+    expect(selectSearchResult(payload, { allowedExtensions: AUDIO, formatPreference: "prefer_flac" })?.username).toBe("zzz-flac");
+    expect(selectSearchResult(payload, { allowedExtensions: AUDIO, formatPreference: "auto" })?.username).toBe("aaa-mp3");
   });
 
   it("prefers a free slot, then a shorter queue, then a faster upload, and penalizes an extreme queue", () => {
@@ -440,7 +445,7 @@ describe("slskd search ranking", () => {
         responses: [
           {
             username: "aaa-unknown",
-            // 24/48 is a small quality bump and beats a short queue when the peer fields are missing. 192 kHz is dropped before scoring.
+            // 24/48 scores the same quality as 16/44.1. The busy peer is penalized, so the unknown peer wins. 192 kHz is dropped before scoring.
             files: [{ filename: "\\\\music\\\\unknown.flac", size: 20 * MIB, extension: "flac", bitDepth: 24, sampleRate: 48000 }],
           },
           {
@@ -654,7 +659,7 @@ describe("slskd search ranking", () => {
         opts,
       )?.username,
     ).toBe("zzz-cd");
-    // 24/48 is at the cap and still beats 16/44.1. 192 kHz does not, unless the cap is raised.
+    // 24/48 is inside the cap and scores the same quality as 16/44.1. The earlier username wins the tie. 192 kHz does not, unless the cap is raised.
     expect(
       selectSearchResult(
         {
@@ -712,6 +717,7 @@ describe("slskd search ranking", () => {
       locked: 1,
       junk: 0,
       extensions: 1,
+      format_preference: 0,
       min_file_size: 0,
       max_file_size: 1,
       max_duration: 1,
@@ -723,7 +729,7 @@ describe("slskd search ranking", () => {
       outcome: "no_suitable_result",
       removed,
       reason:
-        "no_suitable_result: locked=1, junk=0, extensions=1, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
+        "no_suitable_result: locked=1, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
     });
     expect(selectSearchResult(payload, opts)).toBeNull();
     expect(selectSearch({ responses: [] }, opts)).toEqual({ outcome: "no_responses" });
@@ -914,6 +920,7 @@ describe("slskd search ranking", () => {
         locked: 0,
         junk: 0,
         extensions: 0,
+        format_preference: 0,
         min_file_size: 0,
         max_file_size: 0,
         max_duration: 0,
@@ -922,7 +929,7 @@ describe("slskd search ranking", () => {
         title_mismatch: 1,
       },
       reason:
-        "no_suitable_result: locked=0, junk=0, extensions=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=1",
+        "no_suitable_result: locked=0, junk=0, extensions=0, format_preference=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=1",
     });
     expect(selectSearchResult(drumsOnly, { allowedExtensions: [".ogg"] })?.filename).toBe(drums);
     expect(
@@ -1146,6 +1153,7 @@ describe("slskd search ranking", () => {
       locked: 1,
       junk: 1,
       extensions: 1,
+      format_preference: 0,
       min_file_size: 1,
       max_file_size: 1,
       max_duration: 1,
@@ -1163,7 +1171,7 @@ describe("slskd search ranking", () => {
     ).toEqual({
       outcome: "no_suitable_result",
       removed,
-      reason: `no_suitable_result: locked=1, junk=1, extensions=1, min_file_size=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=1`,
+      reason: `no_suitable_result: locked=1, junk=1, extensions=1, format_preference=0, min_file_size=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=1`,
     });
   });
 
@@ -1234,8 +1242,9 @@ describe("slskd score adapter", () => {
     expect(wrapped).toEqual(inline);
     expect(bare).toEqual(inline);
     if (inline.outcome !== "selected") return;
-    expect(inline.file.username).toBe("peer-a");
-    expect(inline.breakdown.extendedBonus).toBe(0);
+    expect(inline.file.username).toBe("peer-b");
+    expect(inline.breakdown.versionPreference).toBe(0);
+    expect(inline.breakdown.format).toBeGreaterThan(0);
     expect(inline.signals.quality).toBe("reported");
     expect(inline.total).toBe(Object.values(inline.breakdown).reduce((sum, value) => sum + value, 0));
   });
@@ -1341,10 +1350,10 @@ describe("slskd score adapter", () => {
   });
 
   it("uses a derived bitrate only when size and length exist and no reported quality does", () => {
-    const decision = selectSearch(
+    const junk = selectSearch(
       {
         responses: [
-          response("derived", {
+          response("junk-with-length", {
             filename: "@@abcde\\Album\\Get Lucky.mp3",
             size: 10 * MIB,
             length: 369,
@@ -1355,11 +1364,31 @@ describe("slskd score adapter", () => {
       },
       opts,
     );
+    expect(junk.outcome).toBe("selected");
+    if (junk.outcome !== "selected") return;
+    expect(junk.signals).toEqual({ quality: "unknown" });
+    expect(junk.breakdown.quality).toBe(0);
+    expect(junk.file.bitRate).toBe(8);
+
+    const decision = selectSearch(
+      {
+        responses: [
+          response("derived", {
+            filename: "@@abcde\\Album\\Get Lucky.mp3",
+            size: 10 * MIB,
+            length: 369,
+            extension: "mp3",
+          }),
+        ],
+      },
+      opts,
+    );
     expect(decision.outcome).toBe("selected");
     if (decision.outcome !== "selected") return;
     expect(decision.signals.quality).toBe("derived");
     expect(decision.signals.derivedBitrateKbps).toBeGreaterThan(32);
-    expect(decision.signals.derivedBitrateKbps).toBeLessThan(500);
-    expect(decision.file.bitRate).toBe(8);
+    expect(decision.signals.derivedBitrateKbps).toBeLessThanOrEqual(320);
+    expect(decision.breakdown.quality).toBeGreaterThan(0);
+    expect(decision.breakdown.quality).toBeLessThanOrEqual(Math.round(64 * 0.5));
   });
 });

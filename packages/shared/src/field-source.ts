@@ -41,8 +41,8 @@ export const REPORTED_SETTING_PATHS = [
   "acquisition.selection.preferred_max_file_size_mb",
   "acquisition.selection.max_duration_seconds",
   "acquisition.selection.preferred_max_duration_seconds",
-  "acquisition.selection.extended_version_bonus",
-  "acquisition.selection.lossless_preference",
+  "acquisition.selection.version_preference",
+  "acquisition.selection.format_preference",
   "acquisition.selection.bitrate_floor_kbps",
   "acquisition.selection.max_sample_rate",
   "acquisition.selection.max_bit_depth",
@@ -78,21 +78,9 @@ function positiveEnvNumber(value: string | undefined): number | undefined {
   return parsed;
 }
 
-/** Zero is a real setting (lossless preference off). Blank is unset. */
-function nonNegativeEnvNumber(value: string | undefined): number | undefined {
+function enumEnv(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
-  return parsed;
-}
-
-function booleanEnv(value: string | undefined): boolean | undefined {
-  const trimmed = value?.trim().toLowerCase();
-  if (!trimmed) return undefined;
-  if (trimmed === "1" || trimmed === "true" || trimmed === "yes" || trimmed === "on") return true;
-  if (trimmed === "0" || trimmed === "false" || trimmed === "no" || trimmed === "off") return false;
-  return undefined;
+  return trimmed ? trimmed : undefined;
 }
 
 type EnvAssignment = {
@@ -147,14 +135,14 @@ const ENV_ASSIGNMENTS: readonly EnvAssignment[] = [
     read: (env) => positiveEnvNumber(env.SLSKD_PREFERRED_MAX_DURATION_SECONDS),
   },
   {
-    path: "acquisition.selection.extended_version_bonus",
-    env: "SLSKD_EXTENDED_VERSION_BONUS",
-    read: (env) => booleanEnv(env.SLSKD_EXTENDED_VERSION_BONUS),
+    path: "acquisition.selection.version_preference",
+    env: "SLSKD_VERSION_PREFERENCE",
+    read: (env) => enumEnv(env.SLSKD_VERSION_PREFERENCE),
   },
   {
-    path: "acquisition.selection.lossless_preference",
-    env: "SLSKD_LOSSLESS_PREFERENCE",
-    read: (env) => nonNegativeEnvNumber(env.SLSKD_LOSSLESS_PREFERENCE),
+    path: "acquisition.selection.format_preference",
+    env: "SLSKD_FORMAT_PREFERENCE",
+    read: (env) => enumEnv(env.SLSKD_FORMAT_PREFERENCE),
   },
   {
     path: "acquisition.selection.max_sample_rate",

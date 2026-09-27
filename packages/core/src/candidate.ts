@@ -27,7 +27,10 @@ export type CandidateTrack = {
   sizeBytes: number;
   durationSeconds?: number;
   format: TrackFormat;
-  /** Lossy bitrate in kbps, only when the provider reported a plausible value. */
+  /**
+   * Reported lossy bitrate in kbps, including junk. The scorer treats 321 or more,
+   * and anything outside 32–500, as unknown. It does not invent a replacement.
+   */
   bitrateKbps?: number;
   sampleRateHz?: number;
   bitDepth?: number;

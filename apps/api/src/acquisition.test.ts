@@ -1,7 +1,10 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listJobs } from "@subwave-ai/db";
+import { loadConfig, resetDeprecatedSelectionWarning } from "@subwave-ai/shared";
 import { buildApp } from "./app.js";
 import { testConfig, testDb } from "./test-harness.js";
 
@@ -381,8 +384,8 @@ describe("A6 acquisition settings", () => {
       max_file_size_mb: 200,
       preferred_max_duration_seconds: 720,
       max_duration_seconds: 1200,
-      extended_version_bonus: true,
-      lossless_preference: 36,
+      version_preference: "balanced",
+      format_preference: "prefer_mp3",
     });
     expect(before.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({ source: "default" });
     expect(before.json().sources["acquisition.selection.max_duration_seconds"]).toEqual({ source: "default" });
@@ -397,8 +400,8 @@ describe("A6 acquisition settings", () => {
           preferred_max_file_size_mb: 40,
           preferred_max_duration_seconds: 600,
           max_duration_seconds: 900,
-          extended_version_bonus: false,
-          lossless_preference: 0,
+          version_preference: "radio_edit",
+          format_preference: "flac_only",
         },
       },
     });
@@ -407,11 +410,23 @@ describe("A6 acquisition settings", () => {
       preferred_max_file_size_mb: 40,
       preferred_max_duration_seconds: 600,
       max_duration_seconds: 900,
-      extended_version_bonus: false,
-      lossless_preference: 0,
+      version_preference: "radio_edit",
+      format_preference: "flac_only",
     });
     expect(saved.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({ source: "yaml" });
-    expect(ctx.app.config.acquisition.selection.lossless_preference).toBe(0);
+    expect(ctx.app.config.acquisition.selection.format_preference).toBe("flac_only");
+    expect(saved.json().sources["acquisition.selection.version_preference"]).toEqual({ source: "yaml" });
+    expect(saved.json().sources["acquisition.selection.format_preference"]).toEqual({ source: "yaml" });
+
+    const invalid = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { version_preference: "hip-hop", format_preference: "wav" } },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error).toMatch(/version_preference/);
+    expect(ctx.app.config.acquisition.selection.version_preference).toBe("radio_edit");
 
     const tooBig = await ctx.app.inject({
       method: "PUT",
@@ -471,10 +486,106 @@ describe("A6 acquisition settings", () => {
       method: "PUT",
       url: "/api/v1/acquisition/settings",
       headers: ctx.headers,
-      payload: { selection: { preferred_max_file_size_mb: 28, extended_version_bonus: false } },
+      payload: { selection: { preferred_max_file_size_mb: 28, version_preference: "remix" } },
     });
     expect(same.statusCode).toBe(200);
-    expect(same.json().selection.extended_version_bonus).toBe(false);
+    expect(same.json().selection.version_preference).toBe("remix");
     expect(same.json().selection.preferred_max_file_size_mb).toBe(28);
+  });
+
+  it("keeps an env-pinned version preference read-only and rejects an invalid format", async () => {
+    const previous = process.env.SLSKD_VERSION_PREFERENCE;
+    process.env.SLSKD_VERSION_PREFERENCE = "original";
+    const ctx = await adminApp();
+    fixtures.push(() => {
+      ctx.cleanup();
+      if (previous === undefined) delete process.env.SLSKD_VERSION_PREFERENCE;
+      else process.env.SLSKD_VERSION_PREFERENCE = previous;
+    });
+    const got = await ctx.app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers: ctx.headers });
+    expect(got.json().selection.version_preference).toBe("original");
+    expect(got.json().sources["acquisition.selection.version_preference"]).toEqual({
+      source: "env",
+      env: "SLSKD_VERSION_PREFERENCE",
+    });
+    expect(got.json().selection.format_preference).toBe("prefer_mp3");
+    expect(got.json().sources["acquisition.selection.format_preference"]).toEqual({ source: "default" });
+    const rejected = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { version_preference: "remix" } },
+    });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json().error).toContain("SLSKD_VERSION_PREFERENCE");
+    expect(ctx.app.config.acquisition.selection.version_preference).toBe("original");
+    const badFormat = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { format_preference: "lossy" } },
+    });
+    expect(badFormat.statusCode).toBe(400);
+    expect(badFormat.json().error).toMatch(/format_preference/);
+  });
+
+  it("doctor warns that deprecated selector keys are ignored and does not translate them", async () => {
+    resetDeprecatedSelectionWarning();
+    const dir = mkdtempSync(path.join(os.tmpdir(), "subwave-api-deprecation-"));
+    const secrets = path.join(dir, "secrets");
+    mkdirSync(secrets);
+    writeFileSync(path.join(secrets, "admin_password"), "test-admin-password");
+    writeFileSync(path.join(secrets, "session_secret"), "test-session-secret");
+    const cfgPath = path.join(dir, "subwave.yaml");
+    writeFileSync(
+      cfgPath,
+      `
+server:
+  host: "127.0.0.1"
+  port: 8788
+database:
+  path: ":memory:"
+paths:
+  secrets_dir: "${secrets}"
+  downloads: "${path.join(dir, "downloads")}"
+  staging: "${path.join(dir, "staging")}"
+  library: "${path.join(dir, "library")}"
+acquisition:
+  provider: slskd
+  base_url: ""
+  selection:
+    extended_version_bonus: false
+    lossless_preference: 0
+`,
+    );
+    const previousVersion = process.env.SLSKD_EXTENDED_VERSION_BONUS;
+    const previousFormat = process.env.SLSKD_LOSSLESS_PREFERENCE;
+    process.env.SLSKD_EXTENDED_VERSION_BONUS = "true";
+    process.env.SLSKD_LOSSLESS_PREFERENCE = "36";
+    const config = loadConfig({ configPath: cfgPath });
+    const db = testDb(config);
+    const app = await buildApp({ config, db, serveWeb: false, logger: false });
+    fixtures.push(() => {
+      void app.close();
+      if (previousVersion === undefined) delete process.env.SLSKD_EXTENDED_VERSION_BONUS;
+      else process.env.SLSKD_EXTENDED_VERSION_BONUS = previousVersion;
+      if (previousFormat === undefined) delete process.env.SLSKD_LOSSLESS_PREFERENCE;
+      else process.env.SLSKD_LOSSLESS_PREFERENCE = previousFormat;
+      rmSync(dir, { recursive: true, force: true });
+    });
+    expect(config.acquisition.selection.version_preference).toBe("balanced");
+    expect(config.acquisition.selection.format_preference).toBe("prefer_mp3");
+    const doctor = await app.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(doctor.statusCode).toBe(200);
+    const notes = doctor.json().notes.join("\n");
+    expect(notes).toContain("extended_version_bonus is deprecated and ignored");
+    expect(notes).toContain("acquisition.selection.version_preference");
+    expect(notes).toContain("SLSKD_VERSION_PREFERENCE");
+    expect(notes).toContain("lossless_preference is deprecated and ignored");
+    expect(notes).toContain("acquisition.selection.format_preference");
+    expect(notes).toContain("SLSKD_LOSSLESS_PREFERENCE is deprecated and ignored");
+    expect(notes).toContain("SLSKD_FORMAT_PREFERENCE");
+    const deprecation = (doctor.json().notes as string[]).filter((note) => note.includes("deprecated and ignored")).join("\n");
+    expect(deprecation).not.toMatch(/password|api_key|secret|true|false|\b36\b|\b0\b/i);
   });
 });

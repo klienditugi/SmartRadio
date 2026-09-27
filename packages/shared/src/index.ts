@@ -51,8 +51,10 @@ export {
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_MAX_DURATION_SECONDS,
   DEFAULT_PREFERRED_MAX_DURATION_SECONDS,
-  DEFAULT_EXTENDED_VERSION_BONUS,
-  DEFAULT_LOSSLESS_PREFERENCE,
+  VERSION_PREFERENCES,
+  DEFAULT_VERSION_PREFERENCE,
+  FORMAT_PREFERENCES,
+  DEFAULT_FORMAT_PREFERENCE,
   DEFAULT_BITRATE_FLOOR_KBPS,
   DEFAULT_VERSION_PENALTY_TERMS,
   DEFAULT_INSTRUMENT_PART_BASENAMES,
@@ -61,6 +63,9 @@ export {
   CONFIGURED_UNVERIFIED_MESSAGE,
   warnDeprecatedVerifyStatus,
   resetDeprecatedVerifyStatusWarning,
+  selectionDeprecationNotes,
+  warnDeprecatedSelection,
+  resetDeprecatedSelectionWarning,
   readVerifyStatusExplicit,
   integrationIsConfigured,
   isConfiguredUnverified,
@@ -91,6 +96,8 @@ export type {
   CoreIntegration,
   VerifyStatusExplicit,
   IntegrationStatusMap,
+  VersionPreference,
+  FormatPreference,
 } from "./config.js";
 
 export { assertEnvPinnedUnchanged, EnvPinnedError, fieldSourcesFor } from "./field-source.js";

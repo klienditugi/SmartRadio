@@ -1,0 +1,600 @@
+{
+  "label": "real-shaped",
+  "note": "Sanitized stand-in for the Phase C slskd search \"Daft Punk Get Lucky\" (251 responses, 583 files, 483 audio, 33 locked). Windows paths, @@ share aliases, album or quality text in folders, extension often empty. mp3 rows carry bitRate and no bit depth. FLAC rows carry bitDepth and sampleRate and no bitRate. Durations sit in the observed 105–635s band; extended and club mixes are 8–11 min. Replace this file with a sanitized real extract later. Usernames or paths containing SYNTHETIC are not from that search.",
+  "id": "phase-c-get-lucky",
+  "state": "Completed",
+  "isComplete": true,
+  "responses": [
+    {
+      "username": "peer-a-clean",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Random Access Memories\\06 Get Lucky.mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-radio",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Random Access Memories\\06 Get Lucky (Radio Edit).mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-single",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Singles\\Get Lucky (Single Version).mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-original",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Get Lucky (Original Mix).mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-album-version",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Random Access Memories\\Get Lucky (Album Version).mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "mp3",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-extended",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Get Lucky (Extended Mix)\\Get Lucky (Extended Mix).mp3",
+          "size": 20971520,
+          "length": 510,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-club",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Club\\Get Lucky (Club Mix).mp3",
+          "size": 25165824,
+          "length": 600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-twelve",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\12 inch\\Get Lucky (12\" Version).mp3",
+          "size": 14680064,
+          "length": 450,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-remix",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Remixes\\Get Lucky (Todd Terje Remix).mp3",
+          "size": 14680064,
+          "length": 400,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-rmx",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Get Lucky (RMX).mp3",
+          "size": 14680064,
+          "length": 380,
+          "extension": ".mp3",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-named-edit",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Edits\\Get Lucky (Purple Edit).mp3",
+          "size": 14680064,
+          "length": 340,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-bare-mix",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Random Access Memories\\Get Lucky Mix.mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-parent-extended",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Get Lucky (Extended Mix)\\06 Get Lucky.mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-stem",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Get Lucky\\drums.mp3",
+          "size": 8388608,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-z-acapella",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Get Lucky (Acapella).mp3",
+          "size": 8388608,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-mp3-320",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Random Access Memories\\06 Get Lucky.mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-flac-cd",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Random Access Memories\\FLAC 16-44.1\\06 Get Lucky.flac",
+          "size": 44040192,
+          "length": 369,
+          "extension": "",
+          "bitDepth": 16,
+          "sampleRate": 44100
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-a-cd",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\06 Get Lucky.flac",
+          "size": 44040192,
+          "length": 369,
+          "extension": "",
+          "bitDepth": 16,
+          "sampleRate": 44100
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-z-hires",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\06 Get Lucky.flac",
+          "size": 44040192,
+          "length": 369,
+          "extension": "",
+          "bitDepth": 24,
+          "sampleRate": 48000
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-2496",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\06 Get Lucky.flac",
+          "size": 44040192,
+          "length": 369,
+          "extension": "",
+          "bitDepth": 24,
+          "sampleRate": 96000
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-24882",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\06 Get Lucky.flac",
+          "size": 83886080,
+          "length": 369,
+          "extension": "",
+          "bitDepth": 24,
+          "sampleRate": 88200
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-mp3-192",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.mp3",
+          "size": 9437184,
+          "length": 369,
+          "extension": "",
+          "bitRate": 192
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-mp3-128",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.mp3",
+          "size": 6291456,
+          "length": 369,
+          "extension": "",
+          "bitRate": 128
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-junk-8",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.mp3",
+          "size": 8388608,
+          "length": 369,
+          "extension": "",
+          "bitRate": 8
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-junk-2991",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.mp3",
+          "size": 10485760,
+          "length": 369,
+          "extension": "",
+          "bitRate": 2991
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-junk-400",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.mp3",
+          "size": 10485760,
+          "length": 369,
+          "extension": "",
+          "bitRate": 400
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-good-35",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.flac",
+          "size": 36700160,
+          "length": 360,
+          "extension": "",
+          "bitDepth": 16,
+          "sampleRate": 44100
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-poor-8",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.mp3",
+          "size": 8388608,
+          "length": 360,
+          "extension": "",
+          "bitRate": 128
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-flac-34",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.flac",
+          "size": 35651584,
+          "length": 369,
+          "extension": "",
+          "bitDepth": 16,
+          "sampleRate": 44100
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-opus",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.opus",
+          "size": 6291456,
+          "extension": ""
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-derived",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.mp3",
+          "size": 11010048,
+          "length": 369,
+          "extension": ""
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-locked",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\06 Get Lucky.mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320,
+          "isLocked": true
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-short",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.mp3",
+          "size": 4194304,
+          "length": 105,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "peer-fmt-longish",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\Daft Punk\\Album\\Get Lucky.flac",
+          "size": 26214400,
+          "length": 635,
+          "extension": "",
+          "bitDepth": 16,
+          "sampleRate": 48000
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-dj-set",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@abcde\\SYNTHETIC DJ Set\\Get Lucky (Remix DJ Set).mp3",
+          "size": 20971520,
+          "length": 600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-continuous-60",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@abcde\\SYNTHETIC continuous mix\\Get Lucky Continuous Mix.mp3",
+          "size": 83886080,
+          "length": 3600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-continuous-15",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@abcde\\SYNTHETIC continuous mix\\Get Lucky Continuous Mix.mp3",
+          "size": 31457280,
+          "length": 900,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-radio-show",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@abcde\\SYNTHETIC Radio Show Episode 4\\Get Lucky.mp3",
+          "size": 20971520,
+          "length": 600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-podcast",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@abcde\\SYNTHETIC podcast\\Get Lucky.mp3",
+          "size": 20971520,
+          "length": 500,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    }
+  ]
+}
