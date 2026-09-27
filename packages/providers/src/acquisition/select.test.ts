@@ -714,7 +714,7 @@ describe("slskd search ranking", () => {
     };
     const opts = { allowedExtensions: AUDIO, maxFileSizeMb: 200, maxDurationSeconds: 400 };
     const removed = {
-      locked: 1,
+      locked: 2,
       junk: 0,
       extensions: 1,
       format_preference: 0,
@@ -729,7 +729,7 @@ describe("slskd search ranking", () => {
       outcome: "no_suitable_result",
       removed,
       reason:
-        "no_suitable_result: locked=1, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
+        "no_suitable_result: locked=2, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
     });
     expect(selectSearchResult(payload, opts)).toBeNull();
     expect(selectSearch({ responses: [] }, opts)).toEqual({ outcome: "no_responses" });

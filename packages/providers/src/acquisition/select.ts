@@ -7,7 +7,8 @@
  * - `{ responses: [...] }`
  * - a bare array of responses
  *
- * `lockedFiles` is never read. `length` is duration in seconds, never bytes.
+ * `lockedFiles` are mapped as locked candidates. They are filtered and counted, never chosen,
+ * and never used as a fallback pool. `length` is duration in seconds, never bytes.
  * An empty or junk `extension` falls back to the filename.
  *
  * Hard filters are exclusions and are not relaxed. See `selectTracks`.
@@ -57,6 +58,7 @@ export type SearchSelection =
   | ({
       outcome: "selected";
       file: SelectedSearchFile;
+      removed: FilterRemovalCounts;
     } & TrackScore)
   | { outcome: "no_responses" }
   | { outcome: "no_usable_candidate" }
@@ -113,6 +115,12 @@ function filesFrom(response: Record<string, unknown>): unknown[] {
   return [];
 }
 
+function lockedFilesFrom(response: Record<string, unknown>): unknown[] {
+  if (Array.isArray(response.lockedFiles)) return response.lockedFiles;
+  if (Array.isArray(response.LockedFiles)) return response.LockedFiles;
+  return [];
+}
+
 /**
  * A usable extension is a short alphanumeric token, with or without a leading dot.
  * `flac@synoeastream` and other junk fall through to the filename.
@@ -159,13 +167,12 @@ function collect(payload: unknown): MappedFile[] {
     const freeSlot = slotFlag(response.hasFreeUploadSlot ?? response.HasFreeUploadSlot);
     const queueLength = num(response.queueLength ?? response.QueueLength);
     const speedBps = num(response.uploadSpeed ?? response.UploadSpeed);
-    // `lockedFiles` is intentionally ignored. It is not a fallback pool.
-    for (const rawFile of filesFrom(response)) {
+    const pushFile = (rawFile: unknown, forceLocked: boolean) => {
       const file = asRecord(rawFile);
-      if (!file) continue;
+      if (!file) return;
       const path = str(file.filename) ?? str(file.fileName) ?? str(file.name);
       const sizeBytes = num(file.size) ?? num(file.bytes) ?? num(file.Size);
-      if (!path || sizeBytes === undefined || sizeBytes <= 0) continue;
+      if (!path || sizeBytes === undefined || sizeBytes <= 0) return;
       const ext = resolveExtension(file.extension ?? file.Extension, path);
       const { basename, folders } = pathParts(path);
       const rawBitRate = num(file.bitRate) ?? num(file.bitrate) ?? num(file.BitRate);
@@ -199,7 +206,7 @@ function collect(payload: unknown): MappedFile[] {
         ...(bitDepth !== undefined ? { bitDepth } : {}),
         ...(vbrFlag === true || vbrFlag === false ? { vbr: vbrFlag } : {}),
         ...(availability ? { availability } : {}),
-        locked: locked(file),
+        locked: forceLocked || locked(file),
       };
       out.push({
         track,
@@ -207,7 +214,11 @@ function collect(payload: unknown): MappedFile[] {
         ...(idStr(file.id) ?? idStr(file.fileId) ? { fileId: idStr(file.id) ?? idStr(file.fileId) } : {}),
         ...(rawBitRate !== undefined ? { rawBitRate } : {}),
       });
-    }
+    };
+    // `files` keep their own isLocked flag. `lockedFiles` are always locked.
+    // They are not a fallback when the unlocked files are filtered out.
+    for (const rawFile of filesFrom(response)) pushFile(rawFile, false);
+    for (const rawFile of lockedFilesFrom(response)) pushFile(rawFile, true);
   }
   return out;
 }

@@ -268,7 +268,7 @@ type ResolvedPolicy = {
 };
 
 export type TrackSelection =
-  | ({ outcome: "selected" } & TrackScore)
+  | ({ outcome: "selected"; removed: FilterRemovalCounts } & TrackScore)
   | { outcome: "no_suitable_result"; removed: FilterRemovalCounts; reason: string };
 
 type VersionMarks = {
@@ -782,5 +782,5 @@ export function selectTracks(tracks: readonly CandidateTrack[], input: Selection
   scored.sort(compareScored);
   const best = scored[0];
   if (!best) return { outcome: "no_suitable_result", removed, reason: removalReason(removed) };
-  return { outcome: "selected", ...best };
+  return { outcome: "selected", ...best, removed };
 }
