@@ -370,4 +370,111 @@ describe("A6 acquisition settings", () => {
     expect(stored.json().state).toBe("unreachable");
     expect(stored.json().settings.verify_status).toBe("unverified");
   });
+
+  it("reads and writes selector policy, reports sources, and rejects a preferred value above the hard max", async () => {
+    const ctx = await adminApp();
+    fixtures.push(ctx.cleanup);
+    const before = await ctx.app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers: ctx.headers });
+    expect(before.statusCode).toBe(200);
+    expect(before.json().selection).toMatchObject({
+      preferred_max_file_size_mb: 30,
+      max_file_size_mb: 200,
+      preferred_max_duration_seconds: 720,
+      max_duration_seconds: 1200,
+      extended_version_bonus: true,
+      lossless_preference: 36,
+    });
+    expect(before.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({ source: "default" });
+    expect(before.json().sources["acquisition.selection.max_duration_seconds"]).toEqual({ source: "default" });
+    expect(JSON.stringify(before.json())).not.toContain(API_KEY);
+
+    const saved = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: {
+        selection: {
+          preferred_max_file_size_mb: 40,
+          preferred_max_duration_seconds: 600,
+          max_duration_seconds: 900,
+          extended_version_bonus: false,
+          lossless_preference: 0,
+        },
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().selection).toMatchObject({
+      preferred_max_file_size_mb: 40,
+      preferred_max_duration_seconds: 600,
+      max_duration_seconds: 900,
+      extended_version_bonus: false,
+      lossless_preference: 0,
+    });
+    expect(saved.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({ source: "yaml" });
+    expect(ctx.app.config.acquisition.selection.lossless_preference).toBe(0);
+
+    const tooBig = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { preferred_max_file_size_mb: 250 } },
+    });
+    expect(tooBig.statusCode).toBe(400);
+    expect(tooBig.json().error).toMatch(/preferred_max_file_size_mb/);
+    expect(ctx.app.config.acquisition.selection.preferred_max_file_size_mb).toBe(40);
+
+    const tooLong = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { preferred_max_duration_seconds: 1000, max_duration_seconds: 900 } },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error).toMatch(/preferred_max_duration_seconds/);
+
+    const disabled = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { max_duration_seconds: null, preferred_max_duration_seconds: 900 } },
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json().selection.max_duration_seconds).toBeNull();
+    expect(disabled.json().selection.preferred_max_duration_seconds).toBe(900);
+  });
+
+  it("keeps an env-pinned preferred file size read-only", async () => {
+    const previous = process.env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB;
+    process.env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB = "28";
+    const ctx = await adminApp();
+    fixtures.push(() => {
+      ctx.cleanup();
+      if (previous === undefined) delete process.env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB;
+      else process.env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB = previous;
+    });
+    const got = await ctx.app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers: ctx.headers });
+    expect(got.json().selection.preferred_max_file_size_mb).toBe(28);
+    expect(got.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({
+      source: "env",
+      env: "SLSKD_PREFERRED_MAX_FILE_SIZE_MB",
+    });
+    const rejected = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { preferred_max_file_size_mb: 32 } },
+    });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json().error).toContain("SLSKD_PREFERRED_MAX_FILE_SIZE_MB");
+    expect(ctx.app.config.acquisition.selection.preferred_max_file_size_mb).toBe(28);
+    const same = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { preferred_max_file_size_mb: 28, extended_version_bonus: false } },
+    });
+    expect(same.statusCode).toBe(200);
+    expect(same.json().selection.extended_version_bonus).toBe(false);
+    expect(same.json().selection.preferred_max_file_size_mb).toBe(28);
+  });
 });

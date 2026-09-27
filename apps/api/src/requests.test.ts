@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createRequest, enqueueJob, transitionRequest } from "@subwave-ai/db";
+import { selectionScoreFromEvents } from "./routes/requests.js";
 import { buildApp } from "./app.js";
 import { testConfig, testDb } from "./test-harness.js";
 
@@ -79,6 +80,7 @@ describe("request operator API", () => {
     expect(detail.statusCode).toBe(200);
     expect(detail.json().jobs.length).toBeGreaterThan(0);
     expect(detail.json().events.length).toBeGreaterThan(0);
+    expect(detail.json().selection_score).toBeNull();
 
     const overview = await app.inject({ method: "GET", url: "/api/v1/ops/overview", headers });
     expect(overview.statusCode).toBe(200);
@@ -93,6 +95,53 @@ describe("request operator API", () => {
     expect(scan.statusCode).toBe(201);
     expect(scan.json().job.type).toBe("index_library");
     expect(String(scan.json().note)).toMatch(/ops-only/i);
+  });
+
+  it("returns the selector breakdown stored on the request", async () => {
+    const score = {
+      breakdown: { quality: 30, format: 36, sizeOvershoot: -5 },
+      total: 61,
+      signals: { quality: "reported" },
+    };
+    expect(selectionScoreFromEvents([])).toBeNull();
+    expect(
+      selectionScoreFromEvents([
+        {
+          id: "e1",
+          request_id: "r",
+          from_status: "QUEUED",
+          to_status: "DOWNLOADING",
+          actor: "worker",
+          payload_json: JSON.stringify({ event: "REQUEST_ACCEPTED", selection_score: score }),
+          created_at: 1,
+        },
+      ]),
+    ).toEqual(score);
+
+    const { config, cleanup } = testConfig();
+    fixtures.push(cleanup);
+    const db = testDb(config);
+    const app = await buildApp({ config, db, serveWeb: false });
+    fixtures.push(() => {
+      void app.close();
+    });
+    const headers = { authorization: `Bearer ${await login(app)}` };
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/requests",
+      headers,
+      payload: { text: "Daft Punk - Get Lucky" },
+    });
+    const id = (created.json() as { request: { id: string } }).request.id;
+    transitionRequest(db, {
+      requestId: id,
+      to: "CLASSIFYING",
+      actor: "test",
+      payload: { selection_score: score },
+    });
+    const detail = await app.inject({ method: "GET", url: `/api/v1/requests/${id}`, headers });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().selection_score).toEqual(score);
   });
 
   it("retries acquisition only from FAILED", async () => {

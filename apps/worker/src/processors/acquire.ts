@@ -149,6 +149,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
 
   const payload = parsePayload(job.payload_json);
   let selected = selectedFromPayload(payload);
+  let selectionScore: { breakdown: Record<string, number>; total: number; signals: unknown } | undefined;
 
   // --- Phase 1: poll search + select + enqueue (QUEUED) ---
   if (request.status === "QUEUED" && !payload.enqueued) {
@@ -172,8 +173,15 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         maxDurationSeconds: selection.max_duration_seconds,
         maxSampleRate: selection.max_sample_rate,
         maxBitDepth: selection.max_bit_depth,
+        preferredMaxFileSizeMb: selection.preferred_max_file_size_mb,
+        preferredMaxDurationSeconds: selection.preferred_max_duration_seconds,
+        extendedVersionBonus: selection.extended_version_bonus,
+        losslessPreference: selection.lossless_preference,
+        bitrateFloorKbps: selection.bitrate_floor_kbps,
         versionPenaltyTerms: selection.version_penalty_terms,
         instrumentPartBasenames: selection.instrument_part_basenames,
+        extendedVersionTerms: selection.extended_version_terms,
+        longRecordingPhrases: selection.long_recording_phrases,
         query: {
           artist: request.artist ?? undefined,
           title: request.title ?? undefined,
@@ -181,6 +189,11 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       });
       if (decision.outcome === "selected") {
         selected = decision.file;
+        selectionScore = {
+          breakdown: decision.breakdown,
+          total: decision.total,
+          signals: decision.signals,
+        };
       } else if (decision.outcome === "no_suitable_result") {
         // QUEUED → FAILED. Filters already removed every candidate; do not enqueue.
         fail(ctx, request.id, decision.reason, { outcome: "no_suitable_result", removed: decision.removed });
@@ -202,7 +215,11 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       requestId: request.id,
       to: "DOWNLOADING",
       actor: ctx.workerId,
-      payload: { event: "REQUEST_ACCEPTED", selected },
+      payload: {
+        event: "REQUEST_ACCEPTED",
+        selected,
+        ...(selectionScore ? { selection_score: selectionScore } : {}),
+      },
     });
     const existing = listAcquisitionItems(ctx.db, request.id);
     const itemId =
@@ -227,7 +244,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       enqueued: true,
       ...(transferId ? { transferId } : {}),
     });
-    return { enqueued: true, selected };
+    return { enqueued: true, selected, ...(selectionScore ? { selection_score: selectionScore } : {}) };
   }
 
   // --- Phase 2: poll transfers until correlated Completed+Succeeded + file exists ---

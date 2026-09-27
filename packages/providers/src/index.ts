@@ -43,6 +43,8 @@ export type {
   SelectSearchOptions,
   SelectSearchQuery,
   FilterRemovalCounts,
+  QualitySignal,
+  ScoreBreakdown,
   SearchSelection,
 } from "./acquisition/select.js";
 export {

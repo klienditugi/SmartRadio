@@ -6,9 +6,17 @@ import { parse as parseYaml } from "yaml";
 import {
   applyEnvOverrides,
   DEFAULT_MAX_BIT_DEPTH,
+  DEFAULT_BITRATE_FLOOR_KBPS,
+  DEFAULT_EXTENDED_VERSION_BONUS,
+  DEFAULT_EXTENDED_VERSION_TERMS,
+  DEFAULT_LONG_RECORDING_PHRASES,
+  DEFAULT_LOSSLESS_PREFERENCE,
+  DEFAULT_MAX_DURATION_SECONDS,
   DEFAULT_MAX_FILE_SIZE_MB,
   DEFAULT_MIN_FILE_SIZE_MB,
   DEFAULT_MAX_SAMPLE_RATE,
+  DEFAULT_PREFERRED_MAX_DURATION_SECONDS,
+  DEFAULT_PREFERRED_MAX_FILE_SIZE_MB,
   DEFAULT_INSTRUMENT_PART_BASENAMES,
   DEFAULT_VERSION_PENALTY_TERMS,
   integrationStatus,
@@ -262,24 +270,35 @@ acquisition:
     expect(serializeAppConfig(saved)).not.toContain("api_key");
   });
 
-  it("defaults search selection to 200 MB, 48 kHz, 24-bit, no duration limit, and the version-term list", () => {
+  it("defaults search selection to 200 MB, 30 MB preferred, 48 kHz, 24-bit, a 1200s cap, and the version-term list", () => {
     const cfg = parseAppConfig(exampleYamlObject);
     expect(cfg.acquisition.selection.max_file_size_mb).toBe(DEFAULT_MAX_FILE_SIZE_MB);
     expect(cfg.acquisition.selection.min_file_size_mb).toBe(DEFAULT_MIN_FILE_SIZE_MB);
-    expect(cfg.acquisition.selection.max_duration_seconds).toBeUndefined();
+    expect(cfg.acquisition.selection.preferred_max_file_size_mb).toBe(DEFAULT_PREFERRED_MAX_FILE_SIZE_MB);
+    expect(cfg.acquisition.selection.max_duration_seconds).toBe(DEFAULT_MAX_DURATION_SECONDS);
+    expect(cfg.acquisition.selection.preferred_max_duration_seconds).toBe(DEFAULT_PREFERRED_MAX_DURATION_SECONDS);
+    expect(cfg.acquisition.selection.extended_version_bonus).toBe(DEFAULT_EXTENDED_VERSION_BONUS);
+    expect(cfg.acquisition.selection.lossless_preference).toBe(DEFAULT_LOSSLESS_PREFERENCE);
+    expect(cfg.acquisition.selection.bitrate_floor_kbps).toBe(DEFAULT_BITRATE_FLOOR_KBPS);
     expect(cfg.acquisition.selection.max_sample_rate).toBe(DEFAULT_MAX_SAMPLE_RATE);
     expect(cfg.acquisition.selection.max_bit_depth).toBe(DEFAULT_MAX_BIT_DEPTH);
     expect(cfg.acquisition.selection.version_penalty_terms).toEqual([...DEFAULT_VERSION_PENALTY_TERMS]);
+    expect(cfg.acquisition.selection.extended_version_terms).toEqual([...DEFAULT_EXTENDED_VERSION_TERMS]);
+    expect(cfg.acquisition.selection.long_recording_phrases).toEqual([...DEFAULT_LONG_RECORDING_PHRASES]);
     expect(cfg.acquisition.selection.instrument_part_basenames).toEqual([...DEFAULT_INSTRUMENT_PART_BASENAMES]);
     const settings = publicSettings({ ...cfg, secrets: {} }).acquisition.selection;
     expect(settings.max_file_size_mb).toBe(200);
+    expect(settings.preferred_max_file_size_mb).toBe(30);
     expect(settings.min_file_size_mb).toBe(1);
+    expect(settings.max_duration_seconds).toBe(1200);
     expect(settings.max_sample_rate).toBe(48000);
     expect(settings.max_bit_depth).toBe(24);
     const raw = structuredClone(exampleYamlObject);
     delete (raw.acquisition as { selection?: unknown }).selection;
     const omitted = parseAppConfig(raw);
     expect(omitted.acquisition.selection.min_file_size_mb).toBe(1);
+    expect(omitted.acquisition.selection.preferred_max_file_size_mb).toBe(30);
+    expect(omitted.acquisition.selection.max_duration_seconds).toBe(1200);
     expect(omitted.acquisition.selection.max_sample_rate).toBe(48000);
     expect(omitted.acquisition.selection.max_bit_depth).toBe(24);
   });
@@ -288,14 +307,22 @@ acquisition:
     const overridden = applyEnvOverrides(structuredClone(exampleYamlObject), {
       SLSKD_MAX_FILE_SIZE_MB: "150",
       SLSKD_MIN_FILE_SIZE_MB: "2",
+      SLSKD_PREFERRED_MAX_FILE_SIZE_MB: "25",
       SLSKD_MAX_DURATION_SECONDS: "420",
+      SLSKD_PREFERRED_MAX_DURATION_SECONDS: "300",
+      SLSKD_EXTENDED_VERSION_BONUS: "false",
+      SLSKD_LOSSLESS_PREFERENCE: "0",
       SLSKD_MAX_SAMPLE_RATE: "96000",
       SLSKD_MAX_BIT_DEPTH: "32",
     });
     const parsed = parseAppConfig(overridden);
     expect(parsed.acquisition.selection.max_file_size_mb).toBe(150);
     expect(parsed.acquisition.selection.min_file_size_mb).toBe(2);
+    expect(parsed.acquisition.selection.preferred_max_file_size_mb).toBe(25);
     expect(parsed.acquisition.selection.max_duration_seconds).toBe(420);
+    expect(parsed.acquisition.selection.preferred_max_duration_seconds).toBe(300);
+    expect(parsed.acquisition.selection.extended_version_bonus).toBe(false);
+    expect(parsed.acquisition.selection.lossless_preference).toBe(0);
     expect(parsed.acquisition.selection.max_sample_rate).toBe(96000);
     expect(parsed.acquisition.selection.max_bit_depth).toBe(32);
     const ignored = applyEnvOverrides(structuredClone(exampleYamlObject), {
@@ -313,6 +340,7 @@ acquisition:
         selection: {
           max_file_size_mb: 150,
           max_duration_seconds: 480,
+          preferred_max_duration_seconds: 400,
           max_sample_rate: 96000,
           max_bit_depth: null,
           version_penalty_terms: ["remix", "live"],
@@ -323,12 +351,37 @@ acquisition:
     expect(roundTrip.acquisition.selection).toEqual({
       max_file_size_mb: 150,
       min_file_size_mb: 1,
+      preferred_max_file_size_mb: DEFAULT_PREFERRED_MAX_FILE_SIZE_MB,
       max_duration_seconds: 480,
+      preferred_max_duration_seconds: 400,
+      extended_version_bonus: DEFAULT_EXTENDED_VERSION_BONUS,
+      lossless_preference: DEFAULT_LOSSLESS_PREFERENCE,
+      bitrate_floor_kbps: DEFAULT_BITRATE_FLOOR_KBPS,
       max_sample_rate: 96000,
       max_bit_depth: null,
       version_penalty_terms: ["remix", "live"],
+      extended_version_terms: [...DEFAULT_EXTENDED_VERSION_TERMS],
+      long_recording_phrases: [...DEFAULT_LONG_RECORDING_PHRASES],
       instrument_part_basenames: [...DEFAULT_INSTRUMENT_PART_BASENAMES],
     });
+    expect(() =>
+      parseAppConfig({
+        ...exampleYamlObject,
+        acquisition: {
+          ...exampleYamlObject.acquisition,
+          selection: { preferred_max_file_size_mb: 250, max_file_size_mb: 200 },
+        },
+      }),
+    ).toThrow(/preferred_max_file_size_mb/);
+    expect(() =>
+      parseAppConfig({
+        ...exampleYamlObject,
+        acquisition: {
+          ...exampleYamlObject.acquisition,
+          selection: { preferred_max_duration_seconds: 1500, max_duration_seconds: 1200 },
+        },
+      }),
+    ).toThrow(/preferred_max_duration_seconds/);
   });
 
   it("loads with Navidrome, SUB/WAVE, and Ollama empty or unset", () => {

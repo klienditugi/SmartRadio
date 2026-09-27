@@ -157,4 +157,52 @@ describe("AcquisitionForm", () => {
     expect((screen.getByLabelText("slskd API key") as HTMLInputElement).value).toBe("");
     expect(document.body.textContent).not.toContain(LEAKED);
   });
+
+  it("edits selector policy, shows the source, and blocks a preferred duration above the hard cap", async () => {
+    const calls: Call[] = [];
+    installFetch(calls);
+    render(
+      <AcquisitionForm
+        mode="settings"
+        sources={{
+          "acquisition.selection.preferred_max_file_size_mb": { source: "default" },
+          "acquisition.selection.extended_version_bonus": { source: "yaml" },
+          "acquisition.selection.preferred_max_duration_seconds": { source: "default" },
+          "acquisition.selection.max_duration_seconds": {
+            source: "env",
+            env: "SLSKD_MAX_DURATION_SECONDS",
+          },
+          "acquisition.selection.lossless_preference": { source: "default" },
+        }}
+      />,
+    );
+    const preferred = (await screen.findByLabelText("Preferred max file size (MiB)")) as HTMLInputElement;
+    expect(preferred.value).toBe("30");
+    expect(screen.getAllByText("source: default").length).toBeGreaterThan(0);
+    expect(screen.getByText("source: yaml")).toBeTruthy();
+    const hard = screen.getByLabelText("Hard max duration (seconds)") as HTMLInputElement;
+    expect(hard.readOnly).toBe(true);
+    expect(screen.getByText("set by SLSKD_MAX_DURATION_SECONDS in .env")).toBeTruthy();
+    const bonus = screen.getByRole("checkbox", { name: "Prefer extended mixes and remixes" }) as HTMLInputElement;
+    expect(bonus.checked).toBe(true);
+
+    fireEvent.change(preferred, { target: { value: "40" } });
+    fireEvent.click(bonus);
+    fireEvent.change(screen.getByLabelText("Lossless preference"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save acquisition" }));
+    await screen.findByText(/Saved\. A filled-in form is not a connection/);
+    const put = calls.find((call) => call.method === "PUT");
+    expect(put?.body?.selection).toMatchObject({
+      preferred_max_file_size_mb: 40,
+      preferred_max_duration_seconds: 720,
+      max_duration_seconds: 1200,
+      extended_version_bonus: false,
+      lossless_preference: 0,
+    });
+
+    fireEvent.change(screen.getByLabelText("Preferred max duration (seconds)"), { target: { value: "2000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save acquisition" }));
+    expect(await screen.findByText("preferred_max_duration_seconds must be <= max_duration_seconds")).toBeTruthy();
+    expect(calls.filter((call) => call.method === "PUT")).toHaveLength(1);
+  });
 });

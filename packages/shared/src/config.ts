@@ -24,11 +24,35 @@ export const DEFAULT_MAX_FILE_SIZE_MB = 200;
 /** Mebibytes (1024×1024 bytes). Default search-hit size floor. */
 export const DEFAULT_MIN_FILE_SIZE_MB = 1;
 
+/**
+ * Mebibytes. Gradual size penalty starts above this. A normal-duration file
+ * may still win when it is a little larger. Not a hard exclusion.
+ */
+export const DEFAULT_PREFERRED_MAX_FILE_SIZE_MB = 30;
+
 /** Broadcast-friendly sample-rate cap (Hz). Files that report a higher rate are not selected. */
 export const DEFAULT_MAX_SAMPLE_RATE = 48_000;
 
 /** Broadcast-friendly bit-depth cap. Files that report a higher depth are not selected. */
 export const DEFAULT_MAX_BIT_DEPTH = 24;
+
+/** Hard duration cap in seconds. Files that report a longer `length` are excluded. Null disables it. */
+export const DEFAULT_MAX_DURATION_SECONDS = 1200;
+
+/** Duration penalty starts above this many seconds. Shorter files are a normal length. */
+export const DEFAULT_PREFERRED_MAX_DURATION_SECONDS = 720;
+
+/** When true, a normal-length extended mix or remix scores above a comparable original. */
+export const DEFAULT_EXTENDED_VERSION_BONUS = true;
+
+/**
+ * Format component for a lossless file. 36 picks a normal-duration 42 MiB
+ * 16/44.1 FLAC over a 14 MiB 320 kbps MP3. 0 picks the MP3.
+ */
+export const DEFAULT_LOSSLESS_PREFERENCE = 36;
+
+/** Lossy bitrates below this (kbps) are penalized. Values outside 32–500 are unknown. */
+export const DEFAULT_BITRATE_FLOOR_KBPS = 192;
 
 /**
  * Basename / parent-folder words that rank below a clean match.
@@ -79,6 +103,36 @@ export const DEFAULT_INSTRUMENT_PART_BASENAMES = [
   "preview",
 ] as const;
 
+/**
+ * Terms that earn the extended/remix bonus when the length is normal.
+ * Word-boundary, case-insensitive. A bare "mix" is not in this list.
+ */
+export const DEFAULT_EXTENDED_VERSION_TERMS = ["remix", "extended", "club mix"] as const;
+
+/**
+ * Heavy long-recording penalty. Matched on the basename and the immediate
+ * parent folder only. Disc numbering is never a match. A bare "mix" is not here:
+ * "extended mix" and "club mix" are normal tracks. "ep." means `ep` plus a number.
+ */
+export const DEFAULT_LONG_RECORDING_PHRASES = [
+  "dj set",
+  "live at",
+  "live from",
+  "full album",
+  "full set",
+  "podcast",
+  "radio show",
+  "radioshow",
+  "mixshow",
+  "continuous mix",
+  "mixed by",
+  "megamix",
+  "essential mix",
+  "concert",
+  "episode",
+  "ep.",
+] as const;
+
 const acquisitionSelectionSchema = z
   .object({
     /** Files larger than this (mebibytes, 1024×1024) are not selected. */
@@ -89,10 +143,31 @@ const acquisitionSelectionSchema = z
      */
     min_file_size_mb: z.number().positive().nullable().default(DEFAULT_MIN_FILE_SIZE_MB),
     /**
-     * When set, files whose slskd `length` (seconds) is greater than this are not selected.
-     * Omit or null: no duration limit. Files that do not report `length` stay eligible.
+     * Files whose duration is greater than this (seconds) are not selected.
+     * Default 1200. Null disables the cap. Files that do not report a duration stay eligible.
      */
-    max_duration_seconds: z.number().positive().nullable().optional(),
+    max_duration_seconds: z.number().positive().nullable().default(DEFAULT_MAX_DURATION_SECONDS),
+    /**
+     * Gradual penalty above this size (mebibytes). Default 30.
+     * Must be less than or equal to max_file_size_mb. Not a hard exclusion.
+     */
+    preferred_max_file_size_mb: z.number().positive().default(DEFAULT_PREFERRED_MAX_FILE_SIZE_MB),
+    /**
+     * Penalty above this duration (seconds). Default 720.
+     * Must be less than or equal to max_duration_seconds when that cap is set.
+     */
+    preferred_max_duration_seconds: z.number().positive().default(DEFAULT_PREFERRED_MAX_DURATION_SECONDS),
+    /** Normal-length extended mixes and remixes score above a comparable original. */
+    extended_version_bonus: z.boolean().default(DEFAULT_EXTENDED_VERSION_BONUS),
+    /**
+     * Points added for a lossless file. Default 36, which prefers a normal-duration
+     * 42 MiB 16/44.1 FLAC over a 14 MiB 320 kbps MP3. 0 prefers the MP3.
+     */
+    lossless_preference: z.number().min(0).default(DEFAULT_LOSSLESS_PREFERENCE),
+    /** Lossy kbps below this are penalized. Default 192. */
+    bitrate_floor_kbps: z.number().positive().default(DEFAULT_BITRATE_FLOOR_KBPS),
+    extended_version_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_EXTENDED_VERSION_TERMS]),
+    long_recording_phrases: z.array(z.string().min(1)).default(() => [...DEFAULT_LONG_RECORDING_PHRASES]),
     /**
      * Hz. Files that report `sampleRate` above this are not selected.
      * Omit for the broadcast-friendly default (48000). Null disables the cap.
@@ -111,6 +186,22 @@ const acquisitionSelectionSchema = z
      * contain the request title. Empty array disables the penalty.
      */
     instrument_part_basenames: z.array(z.string().min(1)).default(() => [...DEFAULT_INSTRUMENT_PART_BASENAMES]),
+  })
+  .superRefine((value, ctx) => {
+    if (value.preferred_max_file_size_mb > value.max_file_size_mb) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["preferred_max_file_size_mb"],
+        message: "preferred_max_file_size_mb must be <= max_file_size_mb",
+      });
+    }
+    if (value.max_duration_seconds != null && value.preferred_max_duration_seconds > value.max_duration_seconds) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["preferred_max_duration_seconds"],
+        message: "preferred_max_duration_seconds must be <= max_duration_seconds",
+      });
+    }
   })
   .default({});
 
@@ -202,7 +293,7 @@ export const appConfigSchema = z.object({
     base_url: z.string().trim().default(""),
     /** Omitted means unverified. `verified` is written only after a live test connection. */
     verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
-    /** Deterministic search-hit ranking. Yaml/env; the settings UI does not edit this. */
+    /** Deterministic search-hit score. The selector does not call an LLM. */
     selection: acquisitionSelectionSchema,
   }),
 });
@@ -450,6 +541,10 @@ export function publicSettings(config: RuntimeConfig) {
   };
 }
 
+export type AcquisitionSettingsPatch = Partial<Omit<AppConfig["acquisition"], "selection">> & {
+  selection?: Partial<AppConfig["acquisition"]["selection"]>;
+};
+
 export type AppConfigPatch = {
   server?: Partial<AppConfig["server"]>;
   database?: Partial<AppConfig["database"]>;
@@ -460,7 +555,7 @@ export type AppConfigPatch = {
   llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms" | "verify_status">>;
   library?: Partial<Pick<AppConfig["library"], "base_url" | "username" | "verify_status">>;
   radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user" | "verify_status">>;
-  acquisition?: Partial<Pick<AppConfig["acquisition"], "enabled" | "provider" | "base_url" | "verify_status">>;
+  acquisition?: AcquisitionSettingsPatch;
 };
 
 /**
@@ -519,10 +614,10 @@ export function clearIntegrationVerifyOnChange(
 
 export function normalizeAcquisitionSettingsPatch(
   current: AppConfig["acquisition"],
-  incoming: Partial<AppConfig["acquisition"]> | undefined,
+  incoming: AcquisitionSettingsPatch | undefined,
   options: { apiKeyChanged?: boolean } = {},
-): Partial<AppConfig["acquisition"]> {
-  const next: Partial<AppConfig["acquisition"]> = { ...(incoming ?? {}) };
+): AcquisitionSettingsPatch {
+  const next: AcquisitionSettingsPatch = { ...(incoming ?? {}) };
   if (typeof next.base_url === "string") next.base_url = next.base_url.trim();
   if (typeof next.provider === "string") next.provider = next.provider.trim();
   if (next.verify_status === "verified") delete next.verify_status;
@@ -545,7 +640,11 @@ export function mergeAppConfigPatch(base: AppConfig, patch: AppConfigPatch): App
   if (patch.llm) Object.assign(next.llm, patch.llm);
   if (patch.library) Object.assign(next.library, patch.library);
   if (patch.radio) Object.assign(next.radio, patch.radio);
-  if (patch.acquisition) Object.assign(next.acquisition, patch.acquisition);
+  if (patch.acquisition) {
+    const { selection, ...rest } = patch.acquisition;
+    Object.assign(next.acquisition, rest);
+    if (selection) Object.assign(next.acquisition.selection, selection);
+  }
   return parseAppConfig(next);
 }
 
@@ -590,10 +689,17 @@ function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
   return {
     max_file_size_mb: selection.max_file_size_mb,
     min_file_size_mb: selection.min_file_size_mb,
-    ...(selection.max_duration_seconds != null ? { max_duration_seconds: selection.max_duration_seconds } : {}),
+    preferred_max_file_size_mb: selection.preferred_max_file_size_mb,
+    max_duration_seconds: selection.max_duration_seconds ?? null,
+    preferred_max_duration_seconds: selection.preferred_max_duration_seconds,
+    extended_version_bonus: selection.extended_version_bonus,
+    lossless_preference: selection.lossless_preference,
+    bitrate_floor_kbps: selection.bitrate_floor_kbps,
     max_sample_rate: selection.max_sample_rate,
     max_bit_depth: selection.max_bit_depth,
     version_penalty_terms: [...selection.version_penalty_terms],
+    extended_version_terms: [...selection.extended_version_terms],
+    long_recording_phrases: [...selection.long_recording_phrases],
     instrument_part_basenames: [...selection.instrument_part_basenames],
   };
 }

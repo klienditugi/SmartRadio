@@ -38,10 +38,17 @@ export const REPORTED_SETTING_PATHS = [
   "acquisition.base_url",
   "acquisition.selection.max_file_size_mb",
   "acquisition.selection.min_file_size_mb",
+  "acquisition.selection.preferred_max_file_size_mb",
   "acquisition.selection.max_duration_seconds",
+  "acquisition.selection.preferred_max_duration_seconds",
+  "acquisition.selection.extended_version_bonus",
+  "acquisition.selection.lossless_preference",
+  "acquisition.selection.bitrate_floor_kbps",
   "acquisition.selection.max_sample_rate",
   "acquisition.selection.max_bit_depth",
   "acquisition.selection.version_penalty_terms",
+  "acquisition.selection.extended_version_terms",
+  "acquisition.selection.long_recording_phrases",
   "acquisition.selection.instrument_part_basenames",
 ] as const;
 
@@ -69,6 +76,23 @@ function positiveEnvNumber(value: string | undefined): number | undefined {
   const parsed = Number(trimmed);
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
+}
+
+/** Zero is a real setting (lossless preference off). Blank is unset. */
+function nonNegativeEnvNumber(value: string | undefined): number | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+  return parsed;
+}
+
+function booleanEnv(value: string | undefined): boolean | undefined {
+  const trimmed = value?.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  if (trimmed === "1" || trimmed === "true" || trimmed === "yes" || trimmed === "on") return true;
+  if (trimmed === "0" || trimmed === "false" || trimmed === "no" || trimmed === "off") return false;
+  return undefined;
 }
 
 type EnvAssignment = {
@@ -108,9 +132,29 @@ const ENV_ASSIGNMENTS: readonly EnvAssignment[] = [
     read: (env) => positiveEnvNumber(env.SLSKD_MIN_FILE_SIZE_MB),
   },
   {
+    path: "acquisition.selection.preferred_max_file_size_mb",
+    env: "SLSKD_PREFERRED_MAX_FILE_SIZE_MB",
+    read: (env) => positiveEnvNumber(env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB),
+  },
+  {
     path: "acquisition.selection.max_duration_seconds",
     env: "SLSKD_MAX_DURATION_SECONDS",
     read: (env) => positiveEnvNumber(env.SLSKD_MAX_DURATION_SECONDS),
+  },
+  {
+    path: "acquisition.selection.preferred_max_duration_seconds",
+    env: "SLSKD_PREFERRED_MAX_DURATION_SECONDS",
+    read: (env) => positiveEnvNumber(env.SLSKD_PREFERRED_MAX_DURATION_SECONDS),
+  },
+  {
+    path: "acquisition.selection.extended_version_bonus",
+    env: "SLSKD_EXTENDED_VERSION_BONUS",
+    read: (env) => booleanEnv(env.SLSKD_EXTENDED_VERSION_BONUS),
+  },
+  {
+    path: "acquisition.selection.lossless_preference",
+    env: "SLSKD_LOSSLESS_PREFERENCE",
+    read: (env) => nonNegativeEnvNumber(env.SLSKD_LOSSLESS_PREFERENCE),
   },
   {
     path: "acquisition.selection.max_sample_rate",
