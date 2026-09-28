@@ -35,7 +35,7 @@ Restart the SmartRadio worker after a successful test. It reads acquisition conf
 
 Selection does not call an LLM. The slskd adapter only maps search JSON into a provider-neutral `CandidateTrack`. The score is a sum of named components. The same payload and settings always pick the same file. Ties break on peer username, then the full path.
 
-Keys live under `acquisition.selection` (see `config/subwave.example.yaml`). The settings screen edits the preferred size, the version preference, the preferred duration, the hard duration cap, and the format preference. Version and format are dropdowns. Each field reports `source`: `env`, `yaml`, or `default`. A value set in the environment is read-only in the UI and a different value is rejected with 409. An invalid enum is rejected with 400.
+Keys live under `acquisition.selection` (see `config/subwave.example.yaml`). Every size setting — `preferred_max_file_size_mb`, `min_file_size_mb`, `max_file_size_mb`, and the size-curve thresholds derived from the preferred size — is MiB. 1 MiB = 1,048,576 bytes. The `_mb` key names stay as they are. The settings screen edits the preferred size, the version preference, the preferred duration, the hard duration cap, and the format preference. Version and format are dropdowns. Each field reports `source`: `env`, `yaml`, or `default`. A value set in the environment is read-only in the UI and a different value is rejected with 409. An invalid enum is rejected with 400.
 
 Optional env overrides: `SLSKD_MAX_FILE_SIZE_MB`, `SLSKD_MIN_FILE_SIZE_MB`, `SLSKD_PREFERRED_MAX_FILE_SIZE_MB`, `SLSKD_MAX_DURATION_SECONDS`, `SLSKD_PREFERRED_MAX_DURATION_SECONDS`, `SLSKD_VERSION_PREFERENCE`, `SLSKD_FORMAT_PREFERENCE`, `SLSKD_MAX_SAMPLE_RATE`, `SLSKD_MAX_BIT_DEPTH`.
 
@@ -43,9 +43,9 @@ Optional env overrides: `SLSKD_MAX_FILE_SIZE_MB`, `SLSKD_MIN_FILE_SIZE_MB`, `SLS
 
 ### Hard filters
 
-Files in `lockedFiles`, or with `isLocked: true`, are never chosen. Real slskd puts locked hits only in `lockedFiles`, often with `isLocked: false`. Those rows are still mapped as locked, so they increment the `locked` filter count and are not a fallback pool. An empty `extension` uses the filename. A junk extension such as `flac@synoeastream` is ignored and the filename is used instead. A basename that starts with `._`, or any path segment named `__MACOSX`, is junk (`\` and `/`, case-insensitive). Files smaller than `min_file_size_mb` (default 1, in 1024×1024-byte units) or larger than `max_file_size_mb` (default 200, same unit as `files.max_bytes`) are excluded. `max_duration_seconds` (default 1200) applies when the file reports a duration; null disables it. Files that omit duration stay eligible. `max_sample_rate` (default 48000 Hz) and `max_bit_depth` (default 24) are broadcast-friendly. A file that reports a sample rate or bit depth above its cap is excluded. A file that does not report that field stays eligible. Set a cap or the size floor to null to disable it.
+Files in `lockedFiles`, or with `isLocked: true`, are never chosen. Real slskd puts locked hits only in `lockedFiles`, often with `isLocked: false`. Those rows are still mapped as locked, so they increment the `locked` filter count and are not a fallback pool. An empty `extension` uses the filename. A junk extension such as `flac@synoeastream` is ignored and the filename is used instead. A basename that starts with `._`, or any path segment named `__MACOSX`, is junk (`\` and `/`, case-insensitive). Files smaller than `min_file_size_mb` (default 1 MiB) or larger than `max_file_size_mb` (default 200 MiB) are excluded. `files.max_bytes` is a separate byte count. `max_duration_seconds` (default 1200) applies when the file reports a duration; null disables it. Files that omit duration stay eligible. `max_sample_rate` (default 48000 Hz) and `max_bit_depth` (default 24) are broadcast-friendly. A file that reports a sample rate or bit depth above its cap is excluded. A file that does not report that field stays eligible. Set a cap or the size floor to null to disable it.
 
-`preferred_max_file_size_mb` (default 30) and `preferred_max_duration_seconds` (default 720) are penalties, not exclusions. Each preferred value must be less than or equal to its hard max when the hard max is set.
+`preferred_max_file_size_mb` (default 30 MiB) and `preferred_max_duration_seconds` (default 720) are penalties, not exclusions. Each preferred value must be less than or equal to its hard max when the hard max is set.
 
 When the selector is given a request title, every significant title token must appear in the basename or a parent folder. The title is lowercased, diacritics are stripped, punctuation is dropped, and a bracketed `feat.` / `ft.` credit is removed before tokenizing. Stopwords (`a`, `an`, `the`, `and`, `of`, `feat`, `ft`) are ignored unless the title is only stopwords. Single-letter tokens are ignored unless the title has no longer token. Version terms in the title are not required tokens. Artist tokens are not required. A call that omits the title skips this filter. The worker always passes the request artist and title.
 
@@ -102,9 +102,9 @@ A bare `mix` is not a remix. `extended mix` and `club mix` are extended, and a n
 
 | Setting | Default | Role |
 | --- | --- | --- |
-| `min_file_size_mb` | 1 | Hard floor. Null disables it. |
-| `preferred_max_file_size_mb` | 30 | Normal target for one song. Size penalty is 0 up to this, then graded. Env `SLSKD_PREFERRED_MAX_FILE_SIZE_MB`. |
-| `max_file_size_mb` | 200 | Hard exclusion. |
+| `min_file_size_mb` | 1 MiB | Hard floor. Null disables it. |
+| `preferred_max_file_size_mb` | 30 MiB | Normal target for one song. Size penalty is 0 up to this, then graded. Env `SLSKD_PREFERRED_MAX_FILE_SIZE_MB`. |
+| `max_file_size_mb` | 200 MiB | Hard exclusion. |
 | `preferred_max_duration_seconds` | 720 | Penalty above 12 min. |
 | `max_duration_seconds` | 1200 | Hard exclusion above 20 min. Null disables it. |
 | `version_preference` | `extended` | Owner-chosen default. Club and extended mixes outrank radio edits. Env `SLSKD_VERSION_PREFERENCE`. |

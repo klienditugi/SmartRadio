@@ -90,8 +90,8 @@ acquisition:
   provider: slskd
   base_url: "${SLSKD_URL}"
   # Search-hit score (worker, deterministic, no LLM). See docs/SLSKD.md.
-  # Sizes are mebibytes (1024×1024). preferred_max_file_size_mb is a gradual
-  # penalty. max_file_size_mb is still a hard exclusion.
+  # Sizes are MiB (1 MiB = 1,048,576 bytes). The _mb key names stay as they are.
+  # preferred_max_file_size_mb is a gradual penalty. max_file_size_mb is still a hard exclusion.
   # max_duration_seconds (default 1200) is a hard cap. Null disables it.
   # preferred_max_duration_seconds (default 720) is the penalty threshold.
   # Preferred values must be <= the matching hard max.

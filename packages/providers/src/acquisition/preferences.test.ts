@@ -563,7 +563,7 @@ describe("priority on real rows", () => {
       { responses: [...huge.responses, ...smallBusy.responses] },
       { formatPreference: "auto", versionPreference: "balanced", ...openCaps },
     );
-    // 224 MB vs ~10 MB is well past the ratio where known-duration size beats a normal peer.
+    // 224 MiB vs ~10 MiB is well past the ratio where known-duration size beats a normal peer.
     expect(sized.file.filename).toContain("(10s)");
     const club = pick(huge, { formatPreference: "auto", versionPreference: "balanced", ...openCaps });
     expect(club.breakdown.durationOvershoot).toBe(0);

@@ -18,14 +18,14 @@ const optionalSetting = z.preprocess((value) => {
   return value;
 }, z.string().trim());
 
-/** Mebibytes (1024×1024 bytes). Default search-hit size cap. */
+/** MiB (1 MiB = 1,048,576 bytes). Default search-hit size cap. */
 export const DEFAULT_MAX_FILE_SIZE_MB = 200;
 
-/** Mebibytes (1024×1024 bytes). Default search-hit size floor. */
+/** MiB (1 MiB = 1,048,576 bytes). Default search-hit size floor. */
 export const DEFAULT_MIN_FILE_SIZE_MB = 1;
 
 /**
- * Mebibytes. Gradual size penalty starts above this. A normal-duration file
+ * MiB (1 MiB = 1,048,576 bytes). Gradual size penalty starts above this. A normal-duration file
  * may still win when it is a little larger. Not a hard exclusion.
  */
 export const DEFAULT_PREFERRED_MAX_FILE_SIZE_MB = 30;
@@ -158,10 +158,10 @@ export const DEFAULT_LONG_RECORDING_PHRASES = [
 
 const acquisitionSelectionSchema = z
   .object({
-    /** Files larger than this (mebibytes, 1024×1024) are not selected. */
+    /** Files larger than this (MiB, 1,048,576 bytes) are not selected. */
     max_file_size_mb: z.number().positive().default(DEFAULT_MAX_FILE_SIZE_MB),
     /**
-     * Files smaller than this (mebibytes, 1024×1024) are not selected.
+     * Files smaller than this (MiB, 1,048,576 bytes) are not selected.
      * Omit for 1. Null disables the floor.
      */
     min_file_size_mb: z.number().positive().nullable().default(DEFAULT_MIN_FILE_SIZE_MB),
@@ -171,7 +171,7 @@ const acquisitionSelectionSchema = z
      */
     max_duration_seconds: z.number().positive().nullable().default(DEFAULT_MAX_DURATION_SECONDS),
     /**
-     * Gradual penalty above this size (mebibytes). Default 30.
+     * Gradual penalty above this size (MiB). Default 30.
      * Must be less than or equal to max_file_size_mb. Not a hard exclusion.
      */
     preferred_max_file_size_mb: z.number().positive().default(DEFAULT_PREFERRED_MAX_FILE_SIZE_MB),

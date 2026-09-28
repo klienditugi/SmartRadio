@@ -738,7 +738,7 @@ function qualityOf(track: CandidateTrack, floor: number): { points: number; sign
 
 /**
  * Known, normal duration. Thresholds are ratios of the preferred size, not fixed
- * megabyte literals. 0 through the preferred size, gentle until 1.5×, then a
+ * MiB literals. 0 through the preferred size, gentle until 1.5×, then a
  * stronger slope from 2× that does not flatten before the hard maximum.
  */
 function knownDurationSizePenalty(sizeMb: number, preferredMb: number): number {

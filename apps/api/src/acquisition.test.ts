@@ -585,6 +585,10 @@ acquisition:
     expect(notes).toContain("acquisition.selection.format_preference");
     expect(notes).toContain("SLSKD_LOSSLESS_PREFERENCE is deprecated and ignored");
     expect(notes).toContain("SLSKD_FORMAT_PREFERENCE");
+    expect(notes).toContain("Selection sizes are MiB (1 MiB = 1,048,576 bytes)");
+    expect(notes).toContain("preferred_max_file_size_mb");
+    expect(notes).toContain("min_file_size_mb");
+    expect(notes).toContain("max_file_size_mb");
     const deprecation = (doctor.json().notes as string[]).filter((note) => note.includes("deprecated and ignored")).join("\n");
     expect(deprecation).not.toMatch(/password|api_key|secret|true|false|\b36\b|\b0\b/i);
   });

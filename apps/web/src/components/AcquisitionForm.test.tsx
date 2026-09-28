@@ -180,6 +180,7 @@ describe("AcquisitionForm", () => {
       />,
     );
     const preferred = (await screen.findByLabelText("Preferred max file size (MiB)")) as HTMLInputElement;
+    expect(document.body.textContent).toContain("1 MiB = 1,048,576 bytes");
     expect(preferred.value).toBe("30");
     expect(screen.getAllByText("source: default").length).toBeGreaterThan(0);
     expect(screen.getByText("source: yaml")).toBeTruthy();

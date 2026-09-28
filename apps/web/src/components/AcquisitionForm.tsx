@@ -388,8 +388,9 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
         <>
           <h3>Which file to download</h3>
           <p className="muted">
-            Hard max file size is {hardFileMb} MiB. A file above the preferred size is penalized, not dropped, until it
-            hits that hard max. Preferred size and preferred duration must stay at or under the hard limits.
+            Sizes are MiB (1 MiB = 1,048,576 bytes). Hard max file size is {hardFileMb} MiB. A file above the
+            preferred size is penalized, not dropped, until it hits that hard max. Preferred size and preferred
+            duration must stay at or under the hard limits.
           </p>
           <label className="field">
             <span>Preferred max file size (MiB)</span>

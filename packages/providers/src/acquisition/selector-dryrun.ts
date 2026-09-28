@@ -156,7 +156,7 @@ export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
     responses: ReturnType<typeof ownerFile>[];
   }> = [
     {
-      scenario: "original + prefer_flac: 14.2 MB album MP3 vs 69.9 MB album FLAC",
+      scenario: "original + prefer_flac: 14.2 MiB album MP3 vs 69.9 MiB album FLAC",
       versionPreference: "original",
       formatPreference: "prefer_flac",
       responses: [
@@ -176,7 +176,7 @@ export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
       ],
     },
     {
-      scenario: "extended + prefer_flac: 25 MB Club Mix MP3 vs 71.1 MB Club Mix FLAC",
+      scenario: "extended + prefer_flac: 25 MiB Club Mix MP3 vs 71.1 MiB Club Mix FLAC",
       versionPreference: "extended",
       formatPreference: "prefer_flac",
       responses: [
@@ -199,7 +199,7 @@ export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
       ],
     },
     {
-      scenario: "extended: only Club Mix is a 70 MB FLAC vs a 10 MB Radio Edit MP3",
+      scenario: "extended: only Club Mix is a 70 MiB FLAC vs a 10 MiB Radio Edit MP3",
       versionPreference: "extended",
       formatPreference: "prefer_mp3",
       responses: [
@@ -223,7 +223,7 @@ export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
       ],
     },
     {
-      scenario: "extended: 40 MB Club Mix vs 10 MB Radio Edit",
+      scenario: "extended: 40 MiB Club Mix vs 10 MiB Radio Edit",
       versionPreference: "extended",
       formatPreference: "prefer_mp3",
       responses: [
@@ -243,7 +243,7 @@ export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
       ],
     },
     {
-      scenario: "flac_only, caps raised: 71 MB slower FLAC vs 224 MB free fast FLAC",
+      scenario: "flac_only, caps raised: 71 MiB slower FLAC vs 224 MiB free fast FLAC",
       versionPreference: "extended",
       formatPreference: "flac_only",
       maxFileSizeMb: null,

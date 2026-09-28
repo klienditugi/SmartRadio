@@ -230,6 +230,7 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
       "Ollama is never installed, updated, or pulled by this process.",
       "Live URLs/credentials are placeholders unless provided via yaml/env/secrets.",
       "Music library/downloads/staging must be host-mounted persistent paths, never only in an ephemeral container.",
+      "Selection sizes are MiB (1 MiB = 1,048,576 bytes): preferred_max_file_size_mb, min_file_size_mb, and max_file_size_mb. The key names are unchanged.",
       "Navidrome is passive on the happy path; index_library/startScan is ops-only and is not enqueued after import.",
       "SUB/WAVE notify is POST {radio base_url}/dj/say with admin Basic and mode styled. SmartRadio sends context only for REQUEST_ACCEPTED and TRACK_READY.",
       ...(acquire_unavailable

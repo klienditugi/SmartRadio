@@ -276,7 +276,7 @@ acquisition:
     expect(serializeAppConfig(saved)).not.toContain("api_key");
   });
 
-  it("defaults search selection to 200 MB, 30 MB preferred, 48 kHz, 24-bit, a 1200s cap, and the version-term list", () => {
+  it("defaults search selection to 200 MiB, 30 MiB preferred, 48 kHz, 24-bit, a 1200s cap, and the version-term list", () => {
     const cfg = parseAppConfig(exampleYamlObject);
     expect(cfg.acquisition.selection.max_file_size_mb).toBe(DEFAULT_MAX_FILE_SIZE_MB);
     expect(cfg.acquisition.selection.min_file_size_mb).toBe(DEFAULT_MIN_FILE_SIZE_MB);

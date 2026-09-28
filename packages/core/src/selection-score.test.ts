@@ -688,7 +688,7 @@ describe("quality priority", () => {
     expect(only.breakdown.sizeOvershoot).toBe(flacScore.breakdown.sizeOvershoot);
   });
 
-  it("lets a normal-size Club Mix beat a large one, and lets the large one beat a radio edit when it is the only club mix", () => {
+  it("lets a 25 MiB Club Mix MP3 beat a 71.1 MiB Club Mix FLAC, and lets that FLAC beat a radio edit when it is the only club mix", () => {
     const clubMp3 = lossy(320, {
       peer: "club-mp3",
       path: "@@share\\SYNTHETIC\\Get Lucky (Club Mix).mp3",
@@ -932,7 +932,7 @@ describe("quality priority", () => {
     expect(selected([album, plainRemix], originalRequest).pick.peer).toBe("album");
   });
 
-  it("prefers a 71 MiB FLAC on a slower peer over a 224 MiB FLAC on a free fast peer", () => {
+  it("prefers a 71 MiB Club Mix FLAC on a slower peer over a 224 MiB Club Mix FLAC on a free fast peer", () => {
     const slow = {
       freeSlot: false as const,
       queueLength: SCORE_WEIGHTS.availabilityQueueCap * SCORE_WEIGHTS.availabilityQueueStep,

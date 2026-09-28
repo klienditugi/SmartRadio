@@ -33,7 +33,7 @@ export const FORMAT_PREFERENCE_OPTIONS = [
 export type VersionPreference = (typeof VERSION_PREFERENCE_OPTIONS)[number]["value"];
 export type FormatPreference = (typeof FORMAT_PREFERENCE_OPTIONS)[number]["value"];
 
-/** Selector policy edited with acquisition settings. Sizes are mebibytes. */
+/** Selector policy edited with acquisition settings. Sizes are MiB (1 MiB = 1,048,576 bytes). */
 export type AcquisitionSelectionSettings = {
   preferred_max_file_size_mb: number;
   max_file_size_mb: number;
