@@ -228,8 +228,8 @@ describe("real artist and title rows", () => {
   });
 
   it("reports the mashup, the other-song remix, and the Pantelis file without a special rule", () => {
+    rejectedAs(one("peer-056", "HALFSTEP Mashup"), "medley");
     for (const [username, needle] of [
-      ["peer-056", "HALFSTEP Mashup"],
       ["peer-084", "Spooky Scary Skeletons"],
       ["peer-069", "Dj Pantelis"],
     ] as const) {
@@ -343,6 +343,10 @@ describe("dry-run grid", () => {
     expect(second).toBe(first);
     const rows = dryRunPreferences(curated);
     expect(rows).toHaveLength(20);
+    const balanced = rows.find((row) => row.versionPreference === "balanced" && row.formatPreference === "prefer_mp3");
+    expect(balanced?.versionClass).toBe("remix");
+    expect(balanced?.basename).toContain("Dj Allan");
+    expect(balanced?.basename).toContain("Bootleg");
     expect(rows.every((row) => row.outcome === "selected" && (row.titleMatch ?? 0) > 0 && (row.artistInPath ?? 0) > 0)).toBe(
       true,
     );

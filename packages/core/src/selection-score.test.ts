@@ -218,6 +218,9 @@ describe("ordered selector", () => {
     const luckyMusic = mp3("lucky-music", "Get Lucky Music.mp3");
     expect(scoreTrack(mind, { query }).breakdown.titleMatch).toBe(1);
     expect(fileVersionClass(mind)).toBe("remix");
+    const mindOnly = selectTracks([mind], { query });
+    expect(mindOnly.outcome).toBe("no_suitable_result");
+    if (mindOnly.outcome === "no_suitable_result") expect(mindOnly.removed.medley).toBe(1);
     expect(scoreTrack(forTheMusic, { query }).breakdown.titleMatch).toBe(1);
     expect(fileVersionClass(forTheMusic)).toBe("original");
     expect(scoreTrack(skeletons, { query }).breakdown.titleMatch).toBe(1);
@@ -327,6 +330,31 @@ describe("ordered selector", () => {
       if (decision.outcome === "no_suitable_result") expect(decision.removed.tribute_or_cover).toBe(1);
     }
     expect(fileVersionClass(leadingCover)).toBe("remix");
+
+    const mashup = mp3("mashup", "Daft Punk - Get Lucky (Mashup).mp3");
+    const mashUp = mp3("mash-up", "Daft Punk - Get Lucky (mash-up).mp3");
+    const mashSpace = mp3("mash-space", "Get Lucky mash up.mp3");
+    const segue = mp3("segue", "Daft Punk - Get Lucky (Segue).mp3");
+    const transition = mp3("transition", "Daft Punk - Get Lucky (Wordplay Transition).mp3");
+    for (const file of [mashup, mashUp, mashSpace, segue, transition]) {
+      const decision = selectTracks([file], { query });
+      expect(decision.outcome).toBe("no_suitable_result");
+      if (decision.outcome === "no_suitable_result") expect(decision.removed.medley).toBe(1);
+    }
+    const inMashupFolder = mp3("folder-mashup", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Mashup\\Daft Punk - Get Lucky.mp3",
+    });
+    const folderMashup = selectTracks([inMashupFolder], { query });
+    expect(folderMashup.outcome).toBe("selected");
+    if (folderMashup.outcome === "selected") expect(folderMashup.removed.medley).toBe(0);
+    const bootleg = mp3("bootleg", "06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg)[Clean].mp3");
+    const editOnly = mp3("edit", "Daft Punk - Get Lucky (Radio Edit).mp3");
+    const remixOnly = mp3("remix-word", "Daft Punk - Get Lucky (Remix).mp3");
+    const vsOnly = mp3("vs", "Daft Punk VS Someone - Get Lucky.mp3");
+    const xOnly = mp3("x", "Daft Punk X Pharrell - Get Lucky.mp3");
+    const featOnly = mp3("feat", "Daft Punk feat. Pharrell Williams - Get Lucky.mp3");
+    expect(selected([bootleg, editOnly, remixOnly, vsOnly, xOnly, featOnly]).pick.peer).toBe("bootleg");
+    expect(selected([bootleg]).removed.medley).toBe(0);
     const inCoverFolder = mp3("album", "Daft Punk - Get Lucky.mp3", {
       path: "music\\cover\\Daft Punk - Get Lucky.mp3",
     });

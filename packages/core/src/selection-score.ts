@@ -10,8 +10,9 @@
  *   files under min_file_size_mb,
  *   wrong title (the phrase must start at a boundary in the original basename;
  *   punctuation is spaces only for that comparison, and anything after the
- *   phrase is allowed), a medley that names
- *   two other songs, a tribute or the word cover in the basename,
+ *   phrase is allowed), a medley (two other songs, or the whole word mashup,
+ *   mash up, segue, or transition in the basename), a tribute or the word
+ *   cover in the basename,
  *   a different artist leading the basename when this artist is only in folders,
  *   stems, long-recording phrases, bitrate under 128 kbps,
  *   files over max_file_size_mb (default 30 MiB), duration, sample rate, bit depth,
@@ -786,6 +787,16 @@ function basenameHasCoverWord(track: CandidateTrack): boolean {
   return /\bcovers?\b/.test(basenameText(track));
 }
 
+/**
+ * Whole word or phrase in the basename only. `mash-up` normalizes to `mash up`.
+ * A folder named Mashup does not count. bootleg, edit, remix, vs, x, and feat do not.
+ */
+const MEDLEY_BASENAME_PHRASES = ["mashup", "mash up", "segue", "transition"] as const;
+
+function basenameHasMedleyWord(track: CandidateTrack): boolean {
+  return hasAnyPhrase(basenameText(track), MEDLEY_BASENAME_PHRASES);
+}
+
 function identityRejection(
   track: CandidateTrack,
   policy: ResolvedPolicy,
@@ -796,7 +807,11 @@ function identityRejection(
   const base = rawBasename(track);
   if (basenameHasCoverWord(track)) return "tribute_or_cover";
   if (titleTokens && !titleEvidence(track, titleTokens, artists)) return "title_mismatch";
-  if (isMedleyName(base, titleTokens, artists) || isMedleyName(albumFolderRaw(track), titleTokens, artists)) {
+  if (
+    basenameHasMedleyWord(track) ||
+    isMedleyName(base, titleTokens, artists) ||
+    isMedleyName(albumFolderRaw(track), titleTokens, artists)
+  ) {
     return "medley";
   }
   if (artists.length === 0) return null;
