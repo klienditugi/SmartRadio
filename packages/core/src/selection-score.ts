@@ -1043,7 +1043,11 @@ export function selectTracks(tracks: readonly CandidateTrack[], input: Selection
     if (rejection) removed[rejection] += 1;
     else pending.push(track);
   }
-  const cohort = pending
+  // Lengths come from every file that matches the song, not only the format
+  // filter. A 105s remix FLAC is short next to the album copies even under flac_only.
+  const lengthPolicy = { ...policy, formatPreference: "prefer_mp3" as const };
+  const cohort = tracks
+    .filter((track) => firstRejection(track, lengthPolicy, titleTokens) === null)
     .map((track) => track.durationSeconds)
     .filter((value): value is number => value !== undefined && Number.isFinite(value) && value > 0);
   const kept: CandidateTrack[] = [];

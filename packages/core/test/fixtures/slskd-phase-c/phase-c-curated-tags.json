@@ -619,5 +619,33 @@
     "tags": [
       "repeated_title_artist_middle_pass"
     ]
+  },
+  {
+    "username": "peer-198",
+    "filename": "root45\\HOME\\user\\18 - Daft Punk - Get Lucky (HOME Remix).flac",
+    "tags": [
+      "short_fragment_relative_reject"
+    ]
+  },
+  {
+    "username": "peer-137",
+    "filename": "root46\\Daft Punk\\2021 - About And Technologic Mashup (2021)\\06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg)[Clean].mp3",
+    "tags": [
+      "remix_bootleg_spaced_underscore_artist_pass"
+    ]
+  },
+  {
+    "username": "peer-137",
+    "filename": "root46\\Daft Punk\\2021 - About And Technologic Mashup (2021)\\19. Tom Petty X Daft Punk - You Get Lucky (Adam Dutch Segue).mp3",
+    "tags": [
+      "other_title_you_get_lucky_reject"
+    ]
+  },
+  {
+    "username": "peer-112",
+    "filename": "@@share096\\00_ORIGINAL_BACKUP\\dir06\\Daft punk - Get Lucky (Feat. Pharrell Williams).mp3",
+    "tags": [
+      "folder_word_not_version_class"
+    ]
   }
 ]

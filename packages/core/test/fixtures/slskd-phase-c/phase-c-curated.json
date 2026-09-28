@@ -1247,6 +1247,81 @@
         }
       ],
       "lockedFiles": []
+    },
+    {
+      "username": "peer-198",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 4917764,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "root45\\HOME\\user\\18 - Daft Punk - Get Lucky (HOME Remix).flac",
+          "length": 105,
+          "sampleRate": 44100,
+          "size": 11735314,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-137",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 4139304,
+      "fileCount": 2,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "root46\\Daft Punk\\2021 - About And Technologic Mashup (2021)\\06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg)[Clean].mp3",
+          "isVariableBitRate": false,
+          "length": 227,
+          "size": 9581047,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "root46\\Daft Punk\\2021 - About And Technologic Mashup (2021)\\19. Tom Petty X Daft Punk - You Get Lucky (Adam Dutch Segue).mp3",
+          "isVariableBitRate": false,
+          "length": 343,
+          "size": 14237811,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-112",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1576475,
+      "fileCount": 9,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share096\\00_ORIGINAL_BACKUP\\dir06\\Daft punk - Get Lucky (Feat. Pharrell Williams).mp3",
+          "length": 369,
+          "size": 14805885,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
     }
   ],
   "_fixture": {
@@ -1254,6 +1329,7 @@
     "sanitization_note": "Usernames replaced (peer-NNN), share aliases replaced (@@shareNNN). Every folder above the artist/album level replaced with neutral rootNN tokens, and any remaining personal (non artist/album/release) folder replaced with dirNN. Basenames, sizes and all metadata unchanged.",
     "curated_addition": "Two real VBR V0-level MP3 rows (peer-096 240 kbps, peer-222 239 kbps) added from the same search on 2026-09-27, cleaned the same way (upper folders to root32/root33).",
     "curated_addition_2": "Two real rows added from the same search on 2026-09-28 for the artist/title filter: peer-192's Nu Deco Ensemble orchestral tribute medley FLAC (574 s, 60.4 MiB; different artist, several titles in one basename) and peer-056's HALFSTEP mashup-pack MP3 from a 'Daft Punk Tribute' folder. Cleaned the same way (upper folders to root34/root35).",
-    "curated_addition_3": "Ten real rows added from the same search on 2026-09-28 as must-pass or must-reject cases for the artist/title filter (Daughter covers, title-first and remixer-first names, underscore names that repeat the title, a non-Latin basename under a titled folder, a repeated-title name, a 'Does Daft Punk' remix, and an other-song mashup). Cleaned the same way (upper folders to root36-root44, personal folders to dir04/dir05)."
+    "curated_addition_3": "Ten real rows added from the same search on 2026-09-28 as must-pass or must-reject cases for the artist/title filter (Daughter covers, title-first and remixer-first names, underscore names that repeat the title, a non-Latin basename under a titled folder, a repeated-title name, a 'Does Daft Punk' remix, and an other-song mashup). Cleaned the same way (upper folders to root36-root44, personal folders to dir04/dir05).",
+    "curated_addition_4": "Four real rows added on 2026-09-28: the 105 s HOME Remix FLAC fragment (must be rejected by the relative short check), two files from an 'About And Technologic Mashup (2021)' folder (a Dj Allan bootleg that must pass, and 'Tom Petty X Daft Punk - You Get Lucky' that must fail the title check), and a plain single under a '00_ORIGINAL_BACKUP' folder (a folder word must not set the version class). Cleaned the same way (root45, root46, dir06)."
   }
 }

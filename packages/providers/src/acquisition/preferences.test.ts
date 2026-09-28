@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { fileVersionClass, type CandidateTrack } from "@subwave-ai/core";
 import { selectSearch, type SearchSelection, type SelectSearchOptions } from "./select.js";
 import { dryRunExplicitRequests, dryRunPreferences, selectorQuery } from "./selector-dryrun.js";
 
@@ -53,14 +54,14 @@ function reasonCounts(decision: SearchSelection): Record<string, number> {
 
 describe("sanitized Phase C fixtures", () => {
   it("keeps the cleaned curated extract byte-for-byte", () => {
-    expect(curated.responses).toHaveLength(38);
-    expect(tagRows).toHaveLength(87);
+    expect(curated.responses).toHaveLength(41);
+    expect(tagRows).toHaveLength(91);
     expect(curated.searchText).toBe("Daft Punk Get Lucky");
     expect(curated.responseCount).toBe(251);
     expect(curated.fileCount).toBe(583);
     expect(curated.lockedFileCount).toBe(33);
-    expect(blobSha(curatedUrl)).toBe("17ba873028ddfcc73dc4f22db6fc4d162c3fe96e");
-    expect(blobSha(tagsUrl)).toBe("5ff304ba7fb2c7baf62b054c96c3b118fde4ad1c");
+    expect(blobSha(curatedUrl)).toBe("55b8d7c4a1cac03cabca8b9921c733296b54655b");
+    expect(blobSha(tagsUrl)).toBe("079a7259de8da161e2486c3c8fc65d2ab9966d87");
     expect(selectorQuery(curated)).toEqual(SONG);
     expect(selectorQuery({ SearchText: "Daft Punk Get Lucky" })).toEqual(SONG);
     expect(selectorQuery({ responses: [] })).toEqual({});
@@ -234,6 +235,100 @@ describe("real artist and title rows", () => {
       if (decision.outcome === "selected") {
         expect(decision.versionClass).toEqual(expect.any(String));
       }
+    }
+  });
+});
+
+describe("real-data traps", () => {
+  function one(username: string, needle: string): SearchPayload {
+    return only((response, file) => response.username === username && file.filename.includes(needle));
+  }
+
+  function asTrack(username: string, filename: string): CandidateTrack {
+    const base = filename.split(/[/\\]/).pop() ?? filename;
+    const folders = filename.split(/[/\\]/).filter((part) => part.length > 0);
+    folders.pop();
+    return {
+      peer: username,
+      path: filename,
+      basename: base,
+      folders,
+      sizeBytes: 8 * MIB,
+      format: { ext: ".mp3", lossless: false },
+      locked: false,
+    };
+  }
+
+  it("does not take a version from the folder", () => {
+    const backup = one("peer-112", "00_ORIGINAL_BACKUP");
+    const decision = run(backup, { query: { artist: "Daft Punk", title: "Get Lucky (Original Mix)" } });
+    expect(decision.outcome).toBe("selected");
+    if (decision.outcome !== "selected") return;
+    expect(decision.versionClass).toBe("original");
+    expect(decision.breakdown.requestedVersion).toBe(0);
+    expect(decision.breakdown.titleMatch).toBe(1);
+    const file = backup.responses[0]?.files?.[0];
+    expect(file).toBeTruthy();
+    if (!file) return;
+    expect(fileVersionClass(asTrack("peer-112", file.filename))).toBe("original");
+
+    const segue = one("peer-137", "You Get Lucky");
+    const segueFile = segue.responses[0]?.files?.[0];
+    expect(segueFile).toBeTruthy();
+    if (!segueFile) return;
+    expect(fileVersionClass(asTrack("peer-137", segueFile.filename))).not.toBe("remix");
+  });
+
+  it("rejects You Get Lucky and keeps the Dj Allan remix", () => {
+    const wrong = run(one("peer-137", "You Get Lucky"));
+    expect(wrong.outcome).toBe("no_suitable_result");
+    if (wrong.outcome === "no_suitable_result") expect(wrong.removed.title_mismatch).toBe(1);
+
+    const remix = run(one("peer-137", "Dj Allan"));
+    expect(remix.outcome).toBe("selected");
+    if (remix.outcome !== "selected") return;
+    expect(remix.versionClass).toBe("remix");
+    expect(remix.breakdown.titleMatch).toBe(1);
+    expect(remix.file.size).toBeLessThanOrEqual(30 * MIB);
+  });
+
+  it("rejects the 105 second HOME files against the song median, including the remix FLAC", () => {
+    const homeFlac = run(one("peer-198", "HOME Remix"));
+    expect(homeFlac.outcome).toBe("selected");
+    if (homeFlac.outcome === "selected") expect(homeFlac.versionClass).toBe("remix");
+
+    const full = run(curated, { versionPreference: "remix", formatPreference: "flac_only" });
+    expect(full.outcome).toBe("selected");
+    if (full.outcome !== "selected") return;
+    expect(full.removed.short_recording).toBeGreaterThan(0);
+    expect(full.file.filename.includes("HOME Remix")).toBe(false);
+    expect(full.file.filename).toContain("01. Daft Punk Feat. Pharrell Williams - Get Lucky.flac");
+    expect(full.versionClass).toBe("original");
+    const withoutHome = {
+      responses: curated.responses.map((response) =>
+        response.username === "peer-198"
+          ? { ...response, files: (response.files ?? []).filter((file) => !file.filename.includes("HOME Remix")) }
+          : response,
+      ),
+      searchText: curated.searchText,
+    };
+    const rest = run(withoutHome, { versionPreference: "remix", formatPreference: "flac_only" });
+    expect(rest.outcome).toBe("selected");
+    if (rest.outcome === "selected") expect(full.removed.short_recording - rest.removed.short_recording).toBe(1);
+
+    for (const needle of ["dir21\\Daft Punk - Get Lucky Remix.mp3", "HOME_The Atlantic Tapes_18_Daft Punk - Get Lucky Remix.mp3"]) {
+      const row = run(curated);
+      expect(row.outcome).toBe("selected");
+      if (row.outcome === "selected") expect(row.removed.short_recording).toBeGreaterThan(0);
+      const alone = run(one("peer-092", needle));
+      expect(alone.outcome).toBe("selected");
+    }
+    const cohort = run(curated);
+    expect(cohort.outcome).toBe("selected");
+    if (cohort.outcome === "selected") {
+      expect(cohort.file.filename.includes("dir21\\Daft Punk - Get Lucky Remix.mp3")).toBe(false);
+      expect(cohort.file.filename.includes("HOME_The Atlantic Tapes")).toBe(false);
+      expect(cohort.file.filename.includes("HOME Remix")).toBe(false);
     }
   });
 });
