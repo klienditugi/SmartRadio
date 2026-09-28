@@ -992,10 +992,55 @@
     }
    ],
    "lockedFiles": []
+  },
+  {
+   "username": "peer-096",
+   "token": 13,
+   "hasFreeUploadSlot": true,
+   "queueLength": 0,
+   "uploadSpeed": 207961,
+   "fileCount": 1,
+   "lockedFileCount": 0,
+   "files": [
+    {
+     "bitRate": 240,
+     "code": 1,
+     "extension": "mp3",
+     "filename": "root32\\Various Artists\\Bravo Hits 82\\102_daft_punk_feat.pharrell_williams-get_lucky.mp3",
+     "isVariableBitRate": true,
+     "length": 249,
+     "size": 7547994,
+     "isLocked": false
+    }
+   ],
+   "lockedFiles": []
+  },
+  {
+   "username": "peer-222",
+   "token": 13,
+   "hasFreeUploadSlot": true,
+   "queueLength": 0,
+   "uploadSpeed": 3038700,
+   "fileCount": 1,
+   "lockedFileCount": 0,
+   "files": [
+    {
+     "bitRate": 239,
+     "code": 1,
+     "extension": "mp3",
+     "filename": "root33\\Daft Punk\\Random Access Memories\\8. Get Lucky.mp3",
+     "isVariableBitRate": true,
+     "length": 369,
+     "size": 11087776,
+     "isLocked": false
+    }
+   ],
+   "lockedFiles": []
   }
  ],
  "_fixture": {
   "source": "REAL slskd 0.26.0 search 'Daft Punk Get Lucky', A6 Phase C, 2026-09-26; curated subset; usernames and @@share aliases replaced; paths, sizes and metadata unchanged. Top-level counts refer to the full search.",
-  "sanitization_note": "Usernames replaced (peer-NNN), share aliases replaced (@@shareNNN). Every folder above the artist/album level replaced with neutral rootNN tokens, and any remaining personal (non artist/album/release) folder replaced with dirNN. Basenames, sizes and all metadata unchanged."
+  "sanitization_note": "Usernames replaced (peer-NNN), share aliases replaced (@@shareNNN). Every folder above the artist/album level replaced with neutral rootNN tokens, and any remaining personal (non artist/album/release) folder replaced with dirNN. Basenames, sizes and all metadata unchanged.",
+  "curated_addition": "Two real VBR V0-level MP3 rows (peer-096 240 kbps, peer-222 239 kbps) added from the same search on 2026-09-27, cleaned the same way (upper folders to root32/root33)."
  }
 }

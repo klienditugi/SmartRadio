@@ -527,14 +527,17 @@ describe("quality priority", () => {
     expect(selected([mp3, flac], policy).pick.peer).toBe("queued-flac");
   });
 
-  it("scores reported VBR at the VBR threshold as good and leaves CBR below 256 acceptable", () => {
+  it("scores reported MP3 VBR at the VBR threshold as good and leaves other formats and CBR below 256 acceptable", () => {
     const vbrMin = SCORE_WEIGHTS.bitrateVbrGoodMin;
     expect(qualityAt(vbrMin, { vbr: true })).toBe(SCORE_WEIGHTS.qualityGood);
     expect(qualityAt(239, { vbr: true })).toBe(SCORE_WEIGHTS.qualityGood);
     expect(qualityAt(240, { vbr: true })).toBe(SCORE_WEIGHTS.qualityGood);
     expect(qualityAt(vbrMin - 1, { vbr: true })).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    expect(qualityAt(189, { vbr: true })).toBeLessThan(SCORE_WEIGHTS.qualityAcceptable);
     expect(qualityAt(vbrMin, { vbr: false })).toBe(SCORE_WEIGHTS.qualityAcceptable);
     expect(qualityAt(239)).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    expect(qualityAt(vbrMin, { vbr: true, path: "@@share\\Album\\Get Lucky.ogg" })).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    expect(qualityAt(240, { vbr: true, path: "@@share\\Album\\Get Lucky.m4a" })).toBe(SCORE_WEIGHTS.qualityAcceptable);
     expect(qualityAt(SCORE_WEIGHTS.bitrateGoodMin)).toBe(SCORE_WEIGHTS.qualityGood);
     expect(qualityAt(SCORE_WEIGHTS.bitrateGoodMin - 1)).toBe(SCORE_WEIGHTS.qualityAcceptable);
   });

@@ -130,14 +130,16 @@
   "username": "peer-092",
   "filename": "root14\\dir20\\dir21\\Daft Punk - Get Lucky Remix.mp3",
   "tags": [
-   "mp3_vbr"
+   "mp3_vbr",
+   "mp3_vbr_below_v0"
   ]
  },
  {
   "username": "peer-092",
   "filename": "root15\\dir22\\dir23\\HOME_The Atlantic Tapes_18_Daft Punk - Get Lucky Remix.mp3",
   "tags": [
-   "mp3_vbr"
+   "mp3_vbr",
+   "mp3_vbr_below_v0"
   ]
  },
  {
@@ -409,7 +411,8 @@
   "username": "peer-180",
   "filename": "root11\\Daft Punk\\Get Lucky (Daft Punk Remix) (feat. Pharrell Williams & Nile Rodgers)\\01 - Get Lucky - Daft Punk Remix.ogg",
   "tags": [
-   "ogg_remix"
+   "ogg_remix",
+   "ogg_vbr"
   ]
  },
  {
@@ -515,6 +518,22 @@
   "filename": "@@share052\\root23\\DAFT PUNK\\DAFT PUNK - COLLECTION\\Daft Punk - Get Lucky (Astre Edit)(with Pharrell Williams).mp3",
   "tags": [
    "peer_long_queue"
+  ]
+ },
+ {
+  "username": "peer-096",
+  "filename": "root32\\Various Artists\\Bravo Hits 82\\102_daft_punk_feat.pharrell_williams-get_lucky.mp3",
+  "tags": [
+   "mp3_vbr",
+   "mp3_vbr_v0"
+  ]
+ },
+ {
+  "username": "peer-222",
+  "filename": "root33\\Daft Punk\\Random Access Memories\\8. Get Lucky.mp3",
+  "tags": [
+   "mp3_vbr",
+   "mp3_vbr_v0"
   ]
  }
 ]

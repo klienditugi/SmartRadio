@@ -468,8 +468,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
           <SourceLine sources={fieldSources} path="acquisition.selection.format_preference" />
           <p className="muted">
             Separate from audio quality. Prefer keeps the other format eligible. MP3 only and FLAC only drop the other
-            format and do not relax if nothing remains. 256–320 kbps CBR, VBR at about 220 kbps or higher, and a 16/44.1
-            FLAC score as the same quality.
+            format and do not relax if nothing remains. 256–320 kbps CBR, VBR MP3 at about 220 kbps or higher, and a
+            16/44.1 FLAC score as the same quality.
           </p>
         </>
       ) : null}

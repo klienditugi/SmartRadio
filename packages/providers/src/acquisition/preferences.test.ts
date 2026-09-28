@@ -81,8 +81,8 @@ function blobSha(url: URL): string {
 
 describe("sanitized Phase C fixtures", () => {
   it("keeps the cleaned curated extract in slskd response shape", () => {
-    expect(curated.responses).toHaveLength(28);
-    expect(tagRows).toHaveLength(73);
+    expect(curated.responses).toHaveLength(30);
+    expect(tagRows).toHaveLength(75);
     const tagNames = new Set(tagRows.flatMap((row) => row.tags));
     for (const tag of [
         "mp3_320_album",
@@ -91,6 +91,9 @@ describe("sanitized Phase C fixtures", () => {
         "mp3_128",
         "mp3_low_lt128",
         "mp3_vbr",
+        "mp3_vbr_v0",
+        "mp3_vbr_below_v0",
+        "ogg_vbr",
         "bitrate_junk",
         "flac_16_44",
         "flac_24_hires",
@@ -121,8 +124,8 @@ describe("sanitized Phase C fixtures", () => {
     expect(curated.lockedFileCount).toBe(33);
     expect(curated.responses.every((response) => (response.lockedFiles ?? []).length === 0)).toBe(true);
     expect(synthetic.label).toBe("SYNTHETIC");
-    expect(blobSha(curatedUrl)).toBe("fe3ed1a7173ed07b30a1c29610193371ba6e9056");
-    expect(blobSha(tagsUrl)).toBe("9e0bca0069bae44d25b90e0266114c7d26970bd5");
+    expect(blobSha(curatedUrl)).toBe("baf4078eb2dad271cb1f59ccabc69cc1d2dfd2bc");
+    expect(blobSha(tagsUrl)).toBe("3d7ebfed94f16923dd508e71e643d33904666106");
   });
 
   it("is deterministic for inline, wrapped, and bare-array copies of the real rows", () => {
@@ -367,78 +370,42 @@ describe("real Phase C format, quality, and peers", () => {
       outcome: "no_suitable_result",
       removed: { max_file_size: 1, max_sample_rate: 1 },
     });
-    const vbr = pick(hasTag("mp3_vbr"));
+    const vbr = pick(hasTag("mp3_vbr_below_v0"));
     expect(vbr.signals.quality).toBe("reported");
+    expect(vbr.pick.vbr).toBe(true);
     expect(vbr.breakdown.quality).toBeLessThan(SCORE_WEIGHTS.qualityAcceptable);
   });
 
-  it("scores a 239 kbps VBR MP3 as good; the 73 curated files have none", () => {
-    const curatedVbrHigh: { username: string; filename: string; bitRate: number }[] = [];
-    let curatedFiles = 0;
-    for (const response of curated.responses) {
-      for (const file of response.files ?? []) {
-        curatedFiles += 1;
-        const bitRate = file.bitRate;
-        if (file.isVariableBitRate !== true || typeof bitRate !== "number") continue;
-        if (bitRate === 239 || bitRate === 240) {
-          curatedVbrHigh.push({ username: response.username, filename: file.filename, bitRate });
-        }
-      }
+  it("scores real mp3_vbr_v0 rows as good and does not promote lower VBR or ogg VBR", () => {
+    const one = (row: TagRow) => tagged((_tags, candidate) => candidate.username === row.username && candidate.filename === row.filename);
+    const v0 = tagRows.filter((row) => row.tags.includes("mp3_vbr_v0"));
+    expect(v0.map((row) => row.username).sort()).toEqual(["peer-096", "peer-222"]);
+    for (const row of v0) {
+      const decision = pick(one(row));
+      expect(decision.file.username).toBe(row.username);
+      expect(decision.pick.format.ext).toBe(".mp3");
+      expect(decision.pick.vbr).toBe(true);
+      expect(decision.pick.bitrateKbps).toBeGreaterThanOrEqual(SCORE_WEIGHTS.bitrateVbrGoodMin);
+      expect(decision.breakdown.quality).toBe(SCORE_WEIGHTS.qualityGood);
     }
-    expect(curatedFiles).toBe(73);
-    // None of the 73 curated files is a 239 or 240 kbps VBR row. The VBR MP3s
-    // in this extract are 189 kbps, so the good-tier case below is SYNTHETIC.
-    expect(curatedVbrHigh).toEqual([]);
 
-    const syntheticVbr = {
-      label: "SYNTHETIC",
-      responses: [
-        {
-          username: "SYNTHETIC-vbr-v0",
-          hasFreeUploadSlot: true,
-          queueLength: 0,
-          uploadSpeed: 1_000_000,
-          files: [
-            {
-              filename: "@@share\\SYNTHETIC\\Daft Punk - Get Lucky.mp3",
-              size: 8 * 1024 * 1024,
-              length: 360,
-              extension: "mp3",
-              bitRate: 239,
-              isVariableBitRate: true,
-            },
-          ],
-        },
-      ],
-    };
-    const vbr = pick(syntheticVbr);
-    expect(vbr.pick.vbr).toBe(true);
-    expect(vbr.pick.bitrateKbps).toBe(239);
-    expect(vbr.breakdown.quality).toBe(SCORE_WEIGHTS.qualityGood);
+    const below = tagRows.filter((row) => row.tags.includes("mp3_vbr_below_v0"));
+    expect(below).toHaveLength(2);
+    for (const row of below) {
+      const decision = pick(one(row));
+      expect(decision.file.username).toBe("peer-092");
+      expect(decision.pick.format.ext).toBe(".mp3");
+      expect(decision.pick.vbr).toBe(true);
+      expect(decision.pick.bitrateKbps).toBeLessThan(SCORE_WEIGHTS.bitrateVbrGoodMin);
+      expect(decision.breakdown.quality).not.toBe(SCORE_WEIGHTS.qualityGood);
+      expect(decision.breakdown.quality).toBeLessThan(SCORE_WEIGHTS.qualityAcceptable);
+    }
 
-    const syntheticCbr = {
-      label: "SYNTHETIC",
-      responses: [
-        {
-          username: "SYNTHETIC-cbr-239",
-          hasFreeUploadSlot: true,
-          queueLength: 0,
-          uploadSpeed: 1_000_000,
-          files: [
-            {
-              filename: "@@share\\SYNTHETIC\\Daft Punk - Get Lucky.mp3",
-              size: 8 * 1024 * 1024,
-              length: 360,
-              extension: "mp3",
-              bitRate: 239,
-            },
-          ],
-        },
-      ],
-    };
-    const cbr = pick(syntheticCbr);
-    expect(cbr.pick.vbr).toBeUndefined();
-    expect(cbr.breakdown.quality).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    const ogg = pick(hasTag("ogg_vbr"));
+    expect(ogg.file.username).toBe("peer-180");
+    expect(ogg.pick.format.ext).toBe(".ogg");
+    expect(ogg.pick.vbr).toBe(true);
+    expect(ogg.breakdown.quality).not.toBe(SCORE_WEIGHTS.qualityGood);
   });
 
   it("prefers a free slot over a long queue on otherwise similar radio edits", () => {

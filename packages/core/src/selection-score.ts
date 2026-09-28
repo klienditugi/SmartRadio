@@ -71,11 +71,12 @@ export const SCORE_WEIGHTS = {
   /** Bonus for prefer_mp3 / prefer_flac. auto and the _only modes add 0. */
   formatPreference: 24,
   /**
-   * 256–320 kbps CBR, reported VBR at `bitrateVbrGoodMin` or higher, and in-cap
-   * FLAC including hi-res. Hi-res gets no extra on top of this.
+   * 256–320 kbps CBR, reported MP3 VBR at `bitrateVbrGoodMin` or higher, and in-cap
+   * FLAC including hi-res. Hi-res gets no extra on top of this. VBR on other
+   * formats, such as ogg, does not enter this tier.
    */
   qualityGood: 100,
-  /** Lossy from the floor (default 192) up to 255, and VBR below `bitrateVbrGoodMin`. */
+  /** Lossy from the floor (default 192) up to 255, and MP3 VBR below `bitrateVbrGoodMin`. */
   qualityAcceptable: 28,
   /** Derived bitrate contributes this fraction of the reported lossy score, and no more. */
   qualityDerivedScale: 0.5,
@@ -120,12 +121,13 @@ export const SCORE_WEIGHTS = {
   availabilitySpeedCap: 5,
   /** Known lossy bitrates are 32–320 inclusive. 321+ and anything outside 32–500 are unknown. */
   bitratePlausibleMin: 32,
-  /** CBR (and any lossy file that is not reported VBR) enters the good tier here. */
+  /** CBR, and any lossy file that is not a reported MP3 VBR, enters the good tier here. */
   bitrateGoodMin: 256,
   bitrateGoodMax: 320,
   /**
-   * Reported VBR only (`track.vbr` from slskd `isVariableBitRate`). A missing flag
-   * is not VBR. CBR between this and `bitrateGoodMin` stays acceptable.
+   * Reported MP3 VBR only (`track.vbr` from slskd `isVariableBitRate`, extension `.mp3`).
+   * A missing flag is not VBR. The same flag on ogg or any other format does not
+   * promote the file. CBR between this and `bitrateGoodMin` stays acceptable.
    */
   bitrateVbrGoodMin: 220,
   bitratePlausibleMax: 500,
@@ -596,10 +598,10 @@ function knownLossy(kbps: number): boolean {
   return kbps >= SCORE_WEIGHTS.bitratePlausibleMin && kbps <= SCORE_WEIGHTS.bitrateGoodMax;
 }
 
-function lossyPoints(kbps: number, floor: number, vbr: boolean | undefined): number {
+function lossyPoints(kbps: number, floor: number, vbr: boolean | undefined, ext: string): number {
   const inRange = kbps <= SCORE_WEIGHTS.bitrateGoodMax;
   const cbrGood = kbps >= SCORE_WEIGHTS.bitrateGoodMin && inRange;
-  const vbrGood = vbr === true && kbps >= SCORE_WEIGHTS.bitrateVbrGoodMin && inRange;
+  const vbrGood = ext === ".mp3" && vbr === true && kbps >= SCORE_WEIGHTS.bitrateVbrGoodMin && inRange;
   if (cbrGood || vbrGood) return SCORE_WEIGHTS.qualityGood;
   if (kbps >= floor) return SCORE_WEIGHTS.qualityAcceptable;
   const span = Math.max(1, floor - SCORE_WEIGHTS.bitratePlausibleMin);
@@ -624,7 +626,7 @@ function qualityOf(track: CandidateTrack, floor: number): { points: number; sign
 
   if (track.bitrateKbps !== undefined) {
     if (!knownLossy(track.bitrateKbps)) return { points: 0, signal: { quality: "unknown" } };
-    return { points: lossyPoints(track.bitrateKbps, floor, track.vbr), signal: { quality: "reported" } };
+    return { points: lossyPoints(track.bitrateKbps, floor, track.vbr, track.format.ext), signal: { quality: "reported" } };
   }
   if (track.durationSeconds !== undefined && track.durationSeconds > 0 && track.sizeBytes > 0) {
     const derived = (track.sizeBytes * 8) / track.durationSeconds / 1000;
@@ -632,7 +634,7 @@ function qualityOf(track: CandidateTrack, floor: number): { points: number; sign
     if (knownLossy(derived)) {
       return {
         // No reported bitrate, so the VBR flag cannot promote this into the good tier.
-        points: Math.round(lossyPoints(derived, floor, undefined) * SCORE_WEIGHTS.qualityDerivedScale),
+        points: Math.round(lossyPoints(derived, floor, undefined, track.format.ext) * SCORE_WEIGHTS.qualityDerivedScale),
         signal: { quality: "derived", derivedBitrateKbps },
       };
     }
