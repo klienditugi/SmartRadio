@@ -889,7 +889,7 @@ describe("slskd search ranking", () => {
           responses: [
             {
               username: "not-a-segment",
-              files: [{ filename: "music/Album/my__macosx Get Lucky.mp3", size: 8 * MIB, extension: "mp3" }],
+              files: [{ filename: "music/my__macosx/Get Lucky.mp3", size: 8 * MIB, extension: "mp3" }],
             },
           ],
         },

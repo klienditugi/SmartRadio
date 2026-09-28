@@ -98,13 +98,36 @@ describe("ordered selector", () => {
     expect(radioRequest.breakdown.requestedVersion).toBe(1);
     expect(radioRequest.breakdown.versionPreference).toBe(0);
 
-    const albumRequest = selected([remix, album], {
+    const albumNamed = mp3("album-named", "Daft Punk - Get Lucky (Album Version).mp3");
+    const albumRequest = selected([remix, albumNamed], {
       versionPreference: "remix",
       query: { artist: "Daft Punk", title: "Get Lucky (Album Version)" },
     });
-    expect(albumRequest.pick.peer).toBe("album");
+    expect(albumRequest.pick.peer).toBe("album-named");
     expect(albumRequest.versionClass).toBe("original");
     expect(albumRequest.breakdown.requestedVersion).toBe(1);
+
+    const unmarked = selected([remix, album], {
+      versionPreference: "remix",
+      query: { artist: "Daft Punk", title: "Get Lucky (Album Version)" },
+    });
+    expect(unmarked.pick.peer).toBe("album");
+    expect(unmarked.versionClass).toBe("original");
+    expect(unmarked.breakdown.requestedVersion).toBe(0);
+  });
+
+  it("reads version class from the basename, not a folder", () => {
+    const backup = mp3("backup", "Daft punk - Get Lucky (Feat. Pharrell Williams).mp3", {
+      path: "@@share\\00_ORIGINAL_BACKUP\\Daft punk - Get Lucky (Feat. Pharrell Williams).mp3",
+    });
+    const mashupFolder = mp3("plain", "Daft Punk - Get Lucky.mp3", {
+      path: "@@share\\2021 - About And Technologic Mashup (2021)\\Daft Punk - Get Lucky.mp3",
+    });
+    expect(fileVersionClass(backup)).toBe("original");
+    expect(fileVersionClass(mashupFolder)).toBe("original");
+    const asked = scoreTrack(backup, { query: { artist: "Daft Punk", title: "Get Lucky (Original Mix)" } });
+    expect(asked.breakdown.requestedVersion).toBe(0);
+    expect(asked.breakdown.titleMatch).toBe(1);
   });
 
   it("treats mp3_only and flac_only as filters", () => {
@@ -174,6 +197,61 @@ describe("ordered selector", () => {
     expect(decision.removed.long_recording).toBe(1);
     expect(decision.removed.locked).toBe(1);
     expect(decision.removed.under_bitrate).toBe(1);
+  });
+
+  it("requires the title as a phrase and two other medley titles", () => {
+    const leadingYou = mp3("you", "Tom Petty X Daft Punk - You Get Lucky (Adam Dutch Segue).mp3");
+    const mind = mp3("mind", "Get Lucky Mind Control (HALFSTEP Mashup).mp3");
+    const forTheMusic = mp3("music", "Daft Punk - Get Lucky For The Music.mp3");
+    const skeletons = mp3("gold", "Andrew Gold - Spooky Scary Skeletons (Remixed with Daft Punk - Get Lucky).mp3");
+    const oneJoin = mp3("allan", "06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg).mp3");
+    const pantelis = mp3("pantelis", "Get Lucky (Dj Pantelis Private Mix) - Dj Pantelis Does Daft Punk.mp3");
+    const folderTitle = mp3("folder-title", "1 - remix.flac", {
+      path: "@@share\\Daft Punk\\Get Lucky (Daft Punk remix)\\1 - remix.flac",
+    });
+    for (const wrong of [leadingYou, mind, forTheMusic, skeletons]) {
+      const decision = selectTracks([wrong], { query });
+      expect(decision.outcome).toBe("no_suitable_result");
+      if (decision.outcome === "no_suitable_result") expect(decision.removed.title_mismatch).toBe(1);
+    }
+    expect(fileVersionClass(oneJoin)).toBe("remix");
+    expect(selected([oneJoin]).pick.peer).toBe("allan");
+    expect(selected([pantelis]).pick.peer).toBe("pantelis");
+    expect(selected([folderTitle]).pick.peer).toBe("folder-title");
+    expect(scoreTrack(folderTitle, { query }).breakdown.titleMatch).toBe(1);
+
+    const singleOther = mp3("single", "Get Lucky _ Contact.mp3");
+    expect(selected([singleOther]).pick.peer).toBe("single");
+    const production = mp3("hd", "Get Lucky (club mix) (24bit88.2kHz) FOR HD PRODUCTION.wav", {
+      path: "@@share\\Get Lucky (club mix) (24bit88.2kHz) FOR HD PRODUCTION.wav",
+    });
+    expect(scoreTrack(production, { query }).breakdown.titleMatch).toBe(1);
+  });
+
+  it("rejects a 105 second file when the cohort median says it is short", () => {
+    const shorts = mp3("home", "Daft Punk - Get Lucky (HOME Remix).flac", {
+      path: "@@share\\Daft Punk - Get Lucky (HOME Remix).flac",
+      durationSeconds: 105,
+      bitrateKbps: undefined,
+      bitDepth: 16,
+      sampleRateHz: 44100,
+    });
+    const longs = Array.from({ length: 6 }, (_, index) =>
+      mp3(`long-${index}`, "Daft Punk - Get Lucky (Radio Edit).flac", {
+        path: `@@share\\long-${index}\\Daft Punk - Get Lucky (Radio Edit).flac`,
+        durationSeconds: 300,
+        bitrateKbps: undefined,
+        bitDepth: 16,
+        sampleRateHz: 44100,
+      }),
+    );
+    const alone = selectTracks([shorts], { query, formatPreference: "flac_only" });
+    expect(alone.outcome).toBe("selected");
+    const cohort = selectTracks([shorts, ...longs], { query, formatPreference: "flac_only" });
+    expect(cohort.outcome).toBe("selected");
+    if (cohort.outcome !== "selected") return;
+    expect(cohort.removed.short_recording).toBe(1);
+    expect(cohort.versionClass).toBe("radio_edit");
   });
 
   it("rejects a tribute or cover and a medley, and keeps a title-first file", () => {

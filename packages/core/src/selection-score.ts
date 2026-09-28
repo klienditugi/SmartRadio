@@ -8,7 +8,8 @@
  * Rejects, before any ranking:
  *   locked, junk paths, extensions, mp3_only / flac_only,
  *   files under min_file_size_mb,
- *   wrong title, a medley that names another song, a tribute/cover basename,
+ *   wrong title (the title is a phrase, not a bag of words), a medley that names
+ *   two other songs, a tribute/cover basename,
  *   a different artist leading the basename when this artist is only in folders,
  *   stems, long-recording phrases, bitrate under 128 kbps,
  *   files over max_file_size_mb (default 30 MiB), duration, sample rate, bit depth,
@@ -29,6 +30,9 @@
  * A saved original, radio_edit, extended, or remix value moves that class to
  * the front. The rest stay in the default order. Club mix is the extended class.
  * A hybrid title keeps the most derived marker, so a club remix is a remix.
+ * Version class and an explicit version match use the basename only.
+ * A folder does not set the class. An unmarked file is original, and it is
+ * not an explicit Original Mix match.
  *
  * Acceptable quality is 192 kbps or more CBR, an MP3 VBR average around 170 kbps
  * or more, or lossless FLAC. 128–191 kbps CBR is poor. An MP3 with no usable
@@ -604,13 +608,12 @@ function versionClassFromMarks(marks: VersionMarks): VersionClass {
   return "other";
 }
 
-/** Basename class. A clean basename inherits the album folder. An unmarked file is original. */
+/**
+ * Basename only. A folder named Mashup or ORIGINAL_BACKUP does not set the class.
+ * An unmarked basename is original.
+ */
 export function fileVersionClass(track: CandidateTrack): VersionClass {
-  const base = classifyVersionText(basenameText(track));
-  if (!isCleanTitle(base)) return versionClassFromMarks(base);
-  const parent = classifyVersionText(parentText(track));
-  if (!isCleanTitle(parent)) return versionClassFromMarks(parent);
-  return "original";
+  return versionClassFromMarks(classifyVersionText(basenameText(track)));
 }
 
 /**
@@ -652,8 +655,9 @@ export function versionClassRank(versionClass: VersionClass, preference: Version
 }
 
 function mentionsTitle(text: string, titleTokens: readonly string[]): boolean {
-  const normalized = normalizeMatchText(text);
-  return titleTokens.length > 0 && hasEveryToken(normalized, titleTokens);
+  const phrase = titleTokens.join(" ");
+  if (!phrase) return false;
+  return hasPhrase(normalizeMatchText(text), phrase);
 }
 
 function medleyPieces(raw: string): string[] {
@@ -673,18 +677,19 @@ function leftoverTitleTokens(piece: string, titleTokens: readonly string[], arti
 }
 
 /**
- * Another song title joined to this one by ` _ `, ` / `, ` | `, ` + `, or the words medley / megamix.
+ * A medley names at least two other titles beside this song, joined by
+ * ` _ `, ` / `, ` | `, or ` + `, or it uses the word medley / megamix.
+ * One extra piece (an artist, or a single other title) is not enough.
  * A repeated title, a track number, the artist, a feat credit, and a version marker are not another title.
  */
 function isMedleyName(raw: string, titleTokens: readonly string[] | null, artistTokens: readonly string[]): boolean {
   if (!titleTokens || titleTokens.length === 0 || !raw.trim()) return false;
+  const namesThisSong = mentionsTitle(raw, titleTokens) || medleyPieces(raw).some((piece) => mentionsTitle(piece, titleTokens));
+  if (!namesThisSong) return false;
+  if (/\b(?:medley|megamix)\b/i.test(raw)) return true;
   const pieces = medleyPieces(raw);
-  if (pieces.length < 2) return false;
-  const others = pieces.filter((piece) => leftoverTitleTokens(piece, titleTokens, artistTokens).length > 0);
-  if (others.length === 0) return false;
-  const namesThisSong = pieces.some((piece) => mentionsTitle(piece, titleTokens));
-  const medleyWord = /\b(?:medley|megamix)\b/i.test(raw);
-  return namesThisSong || medleyWord;
+  const others = pieces.filter((piece) => leftoverTitleTokens(piece, titleTokens, artistTokens).length > 0 && !mentionsTitle(piece, titleTokens));
+  return others.length >= 2;
 }
 
 function stripTributePhrases(raw: string, artist: string): string {
@@ -696,6 +701,8 @@ function stripTributePhrases(raw: string, artist: string): string {
     new RegExp(`\\boriginally by\\s+${phrase}\\b`, "gi"),
     new RegExp(`\\bin the style of\\s+${phrase}\\b`, "gi"),
     new RegExp(`\\bmade famous by\\s+${phrase}\\b`, "gi"),
+    new RegExp(`\\bcovered by\\s+${phrase}\\b`, "gi"),
+    new RegExp(`\\bcover of\\s+${phrase}\\b`, "gi"),
   ];
   let text = raw;
   for (const pattern of patterns) text = text.replace(pattern, " ");
@@ -715,6 +722,82 @@ function differentArtistLeads(rawBase: string, artistTokens: readonly string[], 
   return true;
 }
 
+function splitOutsideBrackets(raw: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i] ?? "";
+    if ("([{".includes(ch)) depth += 1;
+    else if (")]}".includes(ch) && depth > 0) depth -= 1;
+    const dash = raw.slice(i, i + 3);
+    if (depth === 0 && /^\s[-–—]\s$/.test(dash)) {
+      parts.push(current);
+      current = "";
+      i += 2;
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+function stripBracketed(raw: string): string {
+  return raw.replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*\)/g, " ").replace(/\{[^}]*\}/g, " ");
+}
+
+/** Leftover words that may sit beside the title phrase: artists, credits, versions, track numbers, key/BPM tags. */
+function titleLeftovers(segment: string, phrase: string, artistTokens: readonly string[]): string[] {
+  const stripped = stripVersionTerms(normalizeMatchText(stripBracketed(segment)), TITLE_STRIP_PHRASES).replace(
+    new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "gi"),
+    " ",
+  );
+  const withoutCredit = stripped.replace(/\b(?:feat|ft|featuring)\b[\s\S]*$/i, " ").replace(/\s+/g, " ").trim();
+  const allowed = new Set([
+    ...artistTokens,
+    ...CREDIT_WORDS,
+    "x",
+    "vs",
+    "bpm",
+    "for",
+    "hd",
+    "production",
+    "bit",
+    "khz",
+    "hz",
+    "kbps",
+    "audio",
+  ]);
+  return significantTokens(withoutCredit).filter(
+    (token) => token.length > 0 && !allowed.has(token) && !/^\d+$/.test(token) && !/^\d+[ab]$/i.test(token),
+  );
+}
+
+function segmentCarriesTitle(segment: string, phrase: string): boolean {
+  return hasPhrase(normalizeMatchText(stripBracketed(segment)), phrase);
+}
+
+function titleSegmentIsClean(segment: string, phrase: string, artistTokens: readonly string[]): boolean {
+  return segmentCarriesTitle(segment, phrase) && titleLeftovers(segment, phrase, artistTokens).length === 0;
+}
+
+/**
+ * The title is a contiguous phrase, not a bag of words.
+ * Extra words in that basename segment must be artist names, credits, version
+ * markers, parentheticals, track numbers, or key/BPM tags. A folder supplies
+ * the title only when the basename does not carry the phrase at all.
+ */
+function titleEvidence(track: CandidateTrack, titleTokens: readonly string[] | null, artistTokens: readonly string[]): boolean {
+  if (!titleTokens || titleTokens.length === 0) return true;
+  const phrase = titleTokens.join(" ");
+  const segments = splitOutsideBrackets(rawBasename(track)).flatMap((segment) => medleyPieces(segment));
+  const carriers = segments.filter((segment) => segmentCarriesTitle(segment, phrase));
+  if (carriers.length > 0) return carriers.every((segment) => titleSegmentIsClean(segment, phrase, artistTokens));
+  if (hasPhrase(basenameText(track), phrase)) return false;
+  return track.folders.some((folder) => titleSegmentIsClean(folder, phrase, artistTokens));
+}
+
 function identityRejection(
   track: CandidateTrack,
   policy: ResolvedPolicy,
@@ -723,7 +806,7 @@ function identityRejection(
   const artists = artistTokenList(policy.query);
   const artist = typeof policy.query.artist === "string" ? policy.query.artist : "";
   const base = rawBasename(track);
-  if (titleTokens && !hasEveryToken(pathText(track), titleTokens)) return "title_mismatch";
+  if (titleTokens && !titleEvidence(track, titleTokens, artists)) return "title_mismatch";
   if (isMedleyName(base, titleTokens, artists) || isMedleyName(albumFolderRaw(track), titleTokens, artists)) {
     return "medley";
   }
@@ -843,10 +926,25 @@ function requestedVersionClass(policy: ResolvedPolicy): VersionClass | null {
   return null;
 }
 
+/**
+ * A version written in the request matches the basename only.
+ * An unmarked file stays class original and does not count as an explicit Original Mix.
+ * A folder word never satisfies the request.
+ */
 function explicitRequestMatches(track: CandidateTrack, policy: ResolvedPolicy): boolean {
   const wanted = requestedVersionClass(policy);
   if (!wanted) return false;
-  return fileVersionClass(track) === wanted;
+  const marks = classifyVersionText(basenameText(track));
+  if (isCleanTitle(marks)) return false;
+  return versionClassFromMarks(marks) === wanted;
+}
+
+/** A named request replaces the saved preference with that class. Unmarked files stay original. */
+function rankingPreference(policy: ResolvedPolicy): VersionPreference {
+  if (!requestNamesVersion(policy)) return policy.versionPreference;
+  const wanted = requestedVersionClass(policy);
+  if (wanted === "remix" || wanted === "extended" || wanted === "original" || wanted === "radio_edit") return wanted;
+  return "balanced";
 }
 
 function qualityOf(track: CandidateTrack, floor: number): { acceptable: boolean; signal: QualitySignal } {
@@ -882,12 +980,12 @@ export function scoreTrack(track: CandidateTrack, input: SelectionPolicyInput = 
   const artists = artistTokenList(policy.query);
   const versionClass = fileVersionClass(track);
   const namesVersion = requestNamesVersion(policy);
-  const activePreference = namesVersion ? "balanced" : policy.versionPreference;
+  const activePreference = rankingPreference(policy);
   const breakdown = emptyBreakdown();
   const quality = qualityOf(track, policy.bitrateFloorKbps);
 
   breakdown.requestedVersion = explicitRequestMatches(track, policy) ? 1 : 0;
-  if (titleTokens && hasEveryToken(pathText(track), titleTokens)) breakdown.titleMatch = 1;
+  if (titleTokens && titleEvidence(track, titleTokens, artists)) breakdown.titleMatch = 1;
   if (artists.length > 0 && hasEveryToken(pathText(track), artists)) breakdown.artistInPath = 1;
   breakdown.format = formatMatches(track, policy.formatPreference) ? 1 : 0;
   breakdown.quality = quality.acceptable ? 1 : 0;
@@ -902,7 +1000,7 @@ function compareSurvivors(a: CandidateTrack, b: CandidateTrack, policy: Resolved
   const bExplicit = explicitRequestMatches(b, policy) ? 1 : 0;
   if (aExplicit !== bExplicit) return bExplicit - aExplicit;
 
-  const preference = requestNamesVersion(policy) ? "balanced" : policy.versionPreference;
+  const preference = rankingPreference(policy);
   const versionGap = versionClassRank(fileVersionClass(a), preference) - versionClassRank(fileVersionClass(b), preference);
   if (versionGap !== 0) return versionGap;
 
