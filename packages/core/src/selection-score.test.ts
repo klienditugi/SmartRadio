@@ -1,3 +1,4 @@
+import { DEFAULT_BITRATE_FLOOR_KBPS, DEFAULT_PREFERRED_MAX_FILE_SIZE_MB } from "@subwave-ai/shared";
 import { describe, expect, it } from "vitest";
 import { SCORE_WEIGHTS, scoreTrack, selectTracks, type CandidateTrack } from "./index.js";
 
@@ -347,5 +348,194 @@ describe("selection score", () => {
     expect(selected([earlierPath, earlierPeer]).pick.path).toBe(earlierPath.path);
     const again = selected([first, earlierPeer]);
     expect(again).toEqual(selected([earlierPeer, first]));
+  });
+});
+
+describe("quality priority", () => {
+  const floor = DEFAULT_BITRATE_FLOOR_KBPS;
+
+  function lossy(kbps: number, extra: Partial<CandidateTrack> = {}): CandidateTrack {
+    return track({
+      peer: "q",
+      path: "@@share\\Album\\Get Lucky.mp3",
+      sizeBytes: 8 * MIB,
+      durationSeconds: 360,
+      bitrateKbps: kbps,
+      ...extra,
+    });
+  }
+
+  function qualityAt(kbps: number, extra: Partial<CandidateTrack> = {}): number {
+    return scoreTrack(lossy(kbps, extra)).breakdown.quality;
+  }
+
+  function availabilityAt(availability: NonNullable<CandidateTrack["availability"]>): number {
+    return scoreTrack(
+      track({
+        peer: "peer",
+        path: "@@share\\Album\\Get Lucky.flac",
+        sizeBytes: 20 * MIB,
+        durationSeconds: 360,
+        bitDepth: 16,
+        sampleRateHz: 44100,
+        availability,
+      }),
+    ).breakdown.availability;
+  }
+
+  function span(min: number, max: number): number {
+    return max - min;
+  }
+
+  function smallestNonZeroGap(values: readonly number[]): number {
+    const sorted = [...new Set(values)].sort((a, b) => a - b);
+    let gap = Number.POSITIVE_INFINITY;
+    for (let i = 1; i < sorted.length; i++) {
+      const step = (sorted[i] ?? 0) - (sorted[i - 1] ?? 0);
+      if (step > 0 && step < gap) gap = step;
+    }
+    return gap;
+  }
+
+  it("keeps each priority tier strictly above the ranges below it", () => {
+    const qualityGood = qualityAt(SCORE_WEIGHTS.bitrateGoodMax);
+    const qualityAcceptable = qualityAt(floor);
+    const qualityPoor = qualityAt(128);
+    const qualityMin = qualityAt(SCORE_WEIGHTS.bitratePlausibleMin);
+    expect(qualityGood).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(qualityAcceptable).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    expect(qualityPoor).toBeLessThan(0);
+    expect(qualityMin).toBeLessThan(qualityPoor);
+
+    const formatMax = scoreTrack(lossy(SCORE_WEIGHTS.bitrateGoodMax), { formatPreference: "prefer_mp3" }).breakdown.format;
+    const formatMin = scoreTrack(lossy(SCORE_WEIGHTS.bitrateGoodMax), { formatPreference: "auto" }).breakdown.format;
+
+    const gentleSize = scoreTrack(
+      track({
+        peer: "wide",
+        path: "@@share\\Album\\Get Lucky.flac",
+        sizeBytes: DEFAULT_PREFERRED_MAX_FILE_SIZE_MB * (1 + SCORE_WEIGHTS.sizeGentleRatioLimit) * MIB,
+        durationSeconds: 360,
+        bitDepth: 16,
+        sampleRateHz: 44100,
+      }),
+    ).breakdown.sizeOvershoot;
+    const sizeMin = gentleSize;
+    const sizeMax = 0;
+
+    const speedForCap = 10 ** (SCORE_WEIGHTS.availabilitySpeedCap + 4);
+    const availabilityMax = availabilityAt({ freeSlot: true, queueLength: 0, speedBps: speedForCap });
+    // Queue equal to the extreme threshold still uses the normal cap. The −60
+    // penalty applies only once the queue is over 1000. That is an abandoned
+    // peer, not a queue a normal file sits in, so it is left out of this range.
+    // Folding it in would let one outlier overturn a quality tier.
+    const availabilityMin = availabilityAt({
+      freeSlot: false,
+      queueLength: SCORE_WEIGHTS.availabilityExtremeQueueAbove,
+      speedBps: 0,
+    });
+    const extremeQueue = availabilityAt({
+      freeSlot: false,
+      queueLength: SCORE_WEIGHTS.availabilityExtremeQueueAbove + 1,
+      speedBps: 0,
+    });
+    expect(extremeQueue).toBe(-Math.abs(SCORE_WEIGHTS.availabilityNoSlot) + SCORE_WEIGHTS.availabilityExtremeQueue);
+    expect(extremeQueue).toBeLessThan(availabilityMin);
+
+    const qualityRange = span(qualityMin, qualityGood);
+    const formatRange = span(formatMin, formatMax);
+    const sizeRange = span(sizeMin, sizeMax);
+    const availabilityRange = span(availabilityMin, availabilityMax);
+    const belowQuality = formatRange + sizeRange + availabilityRange;
+
+    const tiers: { name: string; values: number[]; lower: number }[] = [
+      {
+        name: "requestedVersion",
+        values: [0, SCORE_WEIGHTS.requestedVersion],
+        lower: span(0, SCORE_WEIGHTS.versionBasename) + qualityRange + belowQuality,
+      },
+      {
+        name: "longRecording",
+        values: [0, SCORE_WEIGHTS.longRecording],
+        lower: qualityRange + belowQuality,
+      },
+      {
+        name: "versionPreference",
+        values: [0, SCORE_WEIGHTS.versionBasename],
+        lower: qualityRange + belowQuality,
+      },
+      {
+        name: "quality",
+        values: [qualityGood, qualityAcceptable, qualityPoor],
+        lower: belowQuality,
+      },
+      {
+        name: "stem",
+        values: [0, SCORE_WEIGHTS.stem],
+        lower:
+          SCORE_WEIGHTS.requestedVersion +
+          SCORE_WEIGHTS.titleMatchBasename +
+          SCORE_WEIGHTS.artistInPath +
+          SCORE_WEIGHTS.versionBasename +
+          Math.max(0, qualityGood) +
+          Math.max(0, formatMax) +
+          Math.max(0, availabilityMax),
+      },
+    ];
+
+    for (const tier of tiers) {
+      expect(smallestNonZeroGap(tier.values)).toBeGreaterThan(tier.lower);
+    }
+
+    expect(smallestNonZeroGap([0, SCORE_WEIGHTS.longRecording])).toBeGreaterThan(SCORE_WEIGHTS.versionBasename);
+
+    // Known exception. versionCleanOriginal and versionParent are interior steps.
+    // Their gaps do not clear the quality range plus format, gentle size, and a
+    // normal peer, so a clean original or a parent-folder match can lose to that
+    // full swing. The basename bonus is the step that has to dominate.
+    const versionLower = qualityRange + belowQuality;
+    for (const partial of [SCORE_WEIGHTS.versionCleanOriginal, SCORE_WEIGHTS.versionParent]) {
+      expect(partial).toBeGreaterThan(0);
+      expect(partial).toBeLessThan(SCORE_WEIGHTS.versionBasename);
+      expect(partial).toBeLessThanOrEqual(versionLower);
+    }
+  });
+
+  it("prefers a 42 MiB 16/44.1 FLAC on a queued peer over a 192 kbps MP3 on a fast free peer under prefer_mp3", () => {
+    const mp3 = lossy(floor, {
+      peer: "fast-mp3",
+      availability: { freeSlot: true, queueLength: 0, speedBps: 10 ** (SCORE_WEIGHTS.availabilitySpeedCap + 4) },
+    });
+    const flac = track({
+      peer: "queued-flac",
+      path: "@@share\\Album\\Get Lucky.flac",
+      sizeBytes: 42 * MIB,
+      durationSeconds: 360,
+      bitDepth: 16,
+      sampleRateHz: 44100,
+      availability: { freeSlot: false, queueLength: SCORE_WEIGHTS.availabilityQueueCap * SCORE_WEIGHTS.availabilityQueueStep, speedBps: 1 },
+    });
+    const policy = { formatPreference: "prefer_mp3" as const };
+    const mp3Score = scoreTrack(mp3, policy);
+    const flacScore = scoreTrack(flac, policy);
+    expect(mp3Score.breakdown.quality).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    expect(flacScore.breakdown.quality).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(mp3Score.breakdown.format).toBe(SCORE_WEIGHTS.formatPreference);
+    expect(flacScore.breakdown.format).toBe(0);
+    expect(mp3Score.breakdown.availability).toBeGreaterThan(flacScore.breakdown.availability);
+    expect(flacScore.breakdown.sizeOvershoot).toBeLessThan(0);
+    expect(selected([mp3, flac], policy).pick.peer).toBe("queued-flac");
+  });
+
+  it("scores reported VBR at the VBR threshold as good and leaves CBR below 256 acceptable", () => {
+    const vbrMin = SCORE_WEIGHTS.bitrateVbrGoodMin;
+    expect(qualityAt(vbrMin, { vbr: true })).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(qualityAt(239, { vbr: true })).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(qualityAt(240, { vbr: true })).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(qualityAt(vbrMin - 1, { vbr: true })).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    expect(qualityAt(vbrMin, { vbr: false })).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    expect(qualityAt(239)).toBe(SCORE_WEIGHTS.qualityAcceptable);
+    expect(qualityAt(SCORE_WEIGHTS.bitrateGoodMin)).toBe(SCORE_WEIGHTS.qualityGood);
+    expect(qualityAt(SCORE_WEIGHTS.bitrateGoodMin - 1)).toBe(SCORE_WEIGHTS.qualityAcceptable);
   });
 });

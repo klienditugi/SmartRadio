@@ -59,15 +59,15 @@ Every pick stores `{ breakdown, total, signals }` on the `QUEUED` → `DOWNLOADI
 
 Priority, high to low. A higher item is not outweighed by the sum of the realistic ranges below it. Hard filters remove a file before it can score.
 
-1. Correct artist and title. Title tokens are a hard filter. Basename and artist points then beat format, a gentle size gap, and a normal peer.
+1. Correct artist and title. Title tokens are a hard filter. Basename and artist points then prefer a filename match over a path-only match.
 2. Explicit requested version (+1000).
 3. Hard validity filters, including `mp3_only` and `flac_only`.
-4. Saved version preference (basename 240, clean original 160, parent folder 80).
+4. Saved version preference (basename 240, clean original 160, parent folder 80). The basename bonus clears the whole quality range plus format, gentle size, and a normal peer. The +160 and +80 steps do not.
 5. Sensible duration and long-recording avoidance (−280, and no version bonus on that file).
-6. Audio quality (good tier 64; 128 kbps is −19 at the default floor).
+6. Audio quality (good tier 100; acceptable 28; 128 kbps is −40 at the default floor; 32 kbps is −64).
 7. Saved format preference (24).
-8. File-size soft preference (42 MiB is −5).
-9. Peer availability.
+8. File-size soft preference (42 MiB is −5; the gentle curve reaches −12 at twice the preferred size).
+9. Peer availability (about 27 points from a fast free peer down to a full normal queue with no slot). Queues over 1000 are a separate −60 outlier and are not part of that range.
 10. Username, then path.
 
 | Component | Weight | What it measures |
@@ -75,18 +75,18 @@ Priority, high to low. A higher item is not outweighed by the sum of the realist
 | `requestedVersion` | +1000 | The request names a version and this file matches it. An explicit request overrides the saved preference. |
 | `titleMatch` | +36 basename, +8 path only | Title tokens sit in the basename, or only in a folder. 0 when no title was passed. |
 | `artistInPath` | +48 | Artist tokens appear in the path. 0 when no artist was passed or the path lacks them. |
-| `versionPreference` | +240 basename, +160 clean original, +80 parent, 0 for `balanced` | Saved `version_preference`, and only on a normal-length file. Ranking bonus, never a filter. |
-| `quality` | +64 for 256–320 kbps and for in-cap FLAC, including hi-res; +28 from the floor (default 192) up to 255; penalty below the floor toward −48 at 32 kbps; 0 when unknown | 256–320 kbps and standard FLAC (16/44.1 or 16/48) are the same tier. Hi-res inside the caps gets no extra. `bitRate` of 321 or more, or outside 32–500, is unknown. A derived estimate is half of the reported lossy score and is labeled `derived`. Missing fields are unknown, not bad. |
+| `versionPreference` | +240 basename, +160 clean original, +80 parent, 0 for `balanced` | Saved `version_preference`, and only on a normal-length file. Ranking bonus, never a filter. +240 clears the whole quality range plus format, gentle size, and a normal peer. +160 and +80 are a known exception: they can lose to that full swing. |
+| `quality` | +100 for 256–320 kbps CBR, for reported VBR at 220 kbps or more, and for in-cap FLAC including hi-res; +28 from the floor (default 192) up to 255; below the floor −round(64 × fraction^0.5), so 128 kbps is −40 and 32 kbps is −64; 0 when unknown | 256–320 kbps CBR and standard FLAC (16/44.1 or 16/48) are the same tier. Reported VBR (`isVariableBitRate`) at about 220 kbps or more is that same good tier; CBR from 220 to 255 stays acceptable. Hi-res inside the caps gets no extra. `bitRate` of 321 or more, or outside 32–500, is unknown. A derived estimate is half of the reported lossy score, is labeled `derived`, and is not promoted by a VBR flag. Missing fields are unknown, not bad. |
 | `format` | +24 for `prefer_mp3` or `prefer_flac`, 0 for `auto` and the `_only` modes | Separate from quality. The other format stays eligible under `prefer_*`. |
 | `sizeOvershoot` | gentle 12 points per 1.0 ratio above 30 MiB when duration is known and normal, up to ratio 1; then 48 per extra 1.0. Unknown duration, or a duration over the preferred max, uses 48 from the start. Capped at −140 | Not a cutoff. Under 30 MiB adds nothing. A normal FLAC slightly over 30 MiB is not rejected. |
 | `durationOvershoot` | −400 × overRatio × (1 + overRatio), capped at −400. A 15 min file against 720 s is −125 | Only when duration is known and above `preferred_max_duration_seconds`. |
-| `longRecording` | −280 | Basename or the immediate parent matches a long-recording phrase. Larger than the version bonus, so a Remix DJ Set does not win on a remix preference. |
+| `longRecording` | −280 | Basename or the immediate parent matches a long-recording phrase. Larger than the basename version bonus, and larger than the quality range plus format, gentle size, and a normal peer. A Remix DJ Set does not win on a remix preference. |
 | `stem` | −1600 | Instrument-part basename, or stem / stems / multitrack / acapella, when the request did not ask for that part. |
 | `availability` | +6 free slot, −4 no slot, −1 per 25 queued up to −12, −60 when the queue is over 1000, up to +5 for upload speed | Small, except an extreme queue. A queue of 8 is −1, so it loses to a much faster peer and wins when speed is equal. |
 
 A stem penalty is larger than the requested-version bonus plus every positive component, so an incidental stem stays last. If the request itself names that stem or acapella term, the stem penalty is not applied and the requested version wins. A stem file alone is still eligible. It is not a hard filter.
 
-Version terms are read from the basename. The immediate parent folder is the same list at 80 points, so album-folder text can help when the filename is a clean track number. It is weaker than the basename and can lose to a clear quality gap.
+Version terms are read from the basename. The immediate parent folder is the same list at 80 points, so album-folder text can help when the filename is a clean track number. It is weaker than the basename. The +160 clean-original bonus and the +80 parent bonus are a known exception to the priority invariant: neither clears the full quality range (good down to 32 kbps) plus format, the gentle size curve, and a normal peer. The +240 basename bonus does.
 
 | Kind | Basename phrases |
 | --- | --- |
@@ -118,7 +118,7 @@ A normal 6-minute 16/44.1 FLAC is about 42 MiB. A 320 kbps MP3 of the same song 
 
 Duration is the length signal when it is known. The size penalty stays gentle for a moderate overshoot of a normal-duration file (42 MiB is −5) and grows steeply for a large overshoot or when duration is missing. 30 MiB is not a cutoff: a good 35 MiB file beats a poor 8 MiB file, and a 34 MiB FLAC is not rejected.
 
-**Default `prefer_mp3`:** the 14 MiB 320 kbps MP3 beats the 42 MiB 16/44.1 FLAC. The MP3 scores quality 64 + format 24. The FLAC scores quality 64 + size −5. A 128 kbps MP3 does not beat either of them under `prefer_mp3`.
+**Default `prefer_mp3`:** the 14 MiB 320 kbps MP3 beats the 42 MiB 16/44.1 FLAC. The MP3 scores quality 100 + format 24. The FLAC scores quality 100 + size −5. A 192 kbps MP3 on a fast free peer does not beat that FLAC when the FLAC's peer has no free slot and a normal queue: the quality gap is larger than format plus size plus that peer gap. A 128 kbps MP3 does not beat either of them under `prefer_mp3`.
 
 **`auto`:** both format bonuses are 0, so the same pair is close and the MP3 wins by the size gap of 5.
 
@@ -132,7 +132,7 @@ From a live slskd 0.26 search for "Daft Punk Get Lucky" (251 responses, 583 file
 | --- | --- |
 | `size` | Present on all 583 files and always positive. The only universal field. |
 | `length` | Duration in seconds. On 469 of 483 audio files (97%). Missing on all `.opus` and a few mp3/flac. Range 105–635 s, median 369. 28 tracks run 8–12 min. None are 12 min or longer. |
-| `bitRate` | Only on lossy files (mp3/m4a/ogg), 282 files. Never on FLAC or WAV. Usually 128/192/320. Junk outliers include 8 and 2991. `isVariableBitRate` is set on 67. Values of 321 or more, and anything outside 32–500 kbps, are unknown. |
+| `bitRate` | Only on lossy files (mp3/m4a/ogg), 282 files. Never on FLAC or WAV. Usually 128/192/320. Junk outliers include 8 and 2991. `isVariableBitRate` is set on 67. A reported VBR file at about 220 kbps or more scores as good quality. CBR still needs 256–320 for that tier. Values of 321 or more, and anything outside 32–500 kbps, are unknown. |
 | `sampleRate` / `bitDepth` | Only on lossless, 189 files (185 of 190 FLAC, plus WAV). bitDepth is 16 on 107 and 24 on 82. sampleRate is 44.1 kHz on 117, 88.2 kHz on 55, and 96 or 192 kHz on 15. |
 | `extension` | Empty on 75%. One leading dot. One junk value (`flac@synoeastream`). The type comes from the filename when the field is empty or junk. Audio by filename: 265 mp3, 190 flac, 16 m4a, 6 ogg, 4 wav, 2 opus, plus video, lyrics, and images. |
 | `filename` | Always Windows `\` paths, 1–8 folders deep. 346 start with a share alias like `@@abcde\`. Folder names often hold the only album, artist, or quality text. |

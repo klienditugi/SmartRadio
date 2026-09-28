@@ -9,21 +9,24 @@
  * realistic ranges below it. Hard filters remove a file before it can score.
  * Stems stay last unless the request asked for that part.
  *
- *  1. correct artist/title — title tokens are a hard filter; basename/artist points
- *     then beat format, gentle size, and a normal peer
+ *  1. correct artist/title — title tokens are a hard filter
  *  2. explicit requested version (1000)
  *  3. hard filters, including mp3_only / flac_only
  *  4. saved version preference (basename 240, clean original 160, parent 80)
  *  5. duration overshoot and long-recording avoidance (−280, and no version bonus)
- *  6. audio quality (good tier 64; 128 kbps is −19 at the default floor)
+ *  6. audio quality (good tier 100; acceptable 28; 128 kbps is −40 at the default floor)
  *  7. saved format preference (24)
- *  8. file-size soft preference (unchanged gentle curve; 42 MiB is −5)
+ *  8. file-size soft preference (gentle curve; 42 MiB is −5)
  *  9. peer availability
  * 10. username, then path
  *
+ * The basename version bonus clears the whole quality range plus format, the
+ * gentle size curve, and a normal peer. The partial version bonuses (160 and 80)
+ * do not: a clean original or a parent-folder match can lose to that full swing.
  * A long-recording phrase is not a normal length, so it does not receive the
- * version bonus. −280 is larger than the basename version bonus, so a Remix DJ
- * Set cannot win on a remix preference.
+ * version bonus. −280 is larger than the basename version bonus, and larger than
+ * the quality range plus everything below quality, so a Remix DJ Set cannot win
+ * on a remix preference.
  */
 
 import {
@@ -52,32 +55,49 @@ const MIB = 1024 * 1024;
  * policy. Every other number is fixed.
  *
  * Equal-peer 6-minute files, default `prefer_mp3` / `balanced`:
- * a 14 MiB 320 kbps MP3 scores quality 64 + format 24 = 88.
- * a 42 MiB 16/44.1 FLAC scores quality 64 + size −5 = 59. The MP3 wins.
- * `auto` drops the format 24, so the MP3 wins by the size gap alone (64 vs 59).
- * `prefer_flac` adds 24 to the FLAC (83) and it wins.
+ * a 14 MiB 320 kbps MP3 scores quality 100 + format 24 = 124.
+ * a 42 MiB 16/44.1 FLAC scores quality 100 + size −5 = 95. The MP3 wins.
+ * `auto` drops the format 24, so the MP3 wins by the size gap alone (100 vs 95).
+ * `prefer_flac` adds 24 to the FLAC (119) and it wins.
+ * A 192 kbps MP3 on a fast free peer does not beat that FLAC on a queued peer
+ * with no slot: quality 100 outweighs format 24 plus the peer and size gaps.
  */
 export const SCORE_WEIGHTS = {
   requestedVersion: 1000,
-  /** Beats format + a gentle size gap + a normal peer, among files that already match the title. */
+  /** Filename contains the title tokens. Path-only matches score `titleMatchPath`. */
   titleMatchBasename: 36,
   titleMatchPath: 8,
   artistInPath: 48,
   /** Bonus for prefer_mp3 / prefer_flac. auto and the _only modes add 0. */
   formatPreference: 24,
-  /** 256–320 kbps, and in-cap FLAC including hi-res. Hi-res gets no extra on top of this. */
-  qualityGood: 64,
-  /** Lossy from the floor (default 192) up to 255. */
+  /**
+   * 256–320 kbps CBR, reported VBR at `bitrateVbrGoodMin` or higher, and in-cap
+   * FLAC including hi-res. Hi-res gets no extra on top of this.
+   */
+  qualityGood: 100,
+  /** Lossy from the floor (default 192) up to 255, and VBR below `bitrateVbrGoodMin`. */
   qualityAcceptable: 28,
   /** Derived bitrate contributes this fraction of the reported lossy score, and no more. */
   qualityDerivedScale: 0.5,
-  /** Full penalty at 32 kbps. 128 kbps against a 192 floor is −19. */
-  qualityLossyPenaltyScale: 48,
+  /**
+   * Full penalty at 32 kbps. Below the floor the penalty is
+   * −round(scale × fraction ^ power), where fraction is the distance from the
+   * floor down to 32 kbps. Power below 1 drops faster than a straight line, so
+   * 128 kbps against a 192 floor is −40 while 32 kbps is −64.
+   */
+  qualityLossyPenaltyScale: 64,
+  qualityLossyPenaltyPower: 0.5,
   /** Basename matches the saved version kind. Beats quality + format + gentle size + a normal peer. */
   versionBasename: 240,
-  /** Clean title (no version term) when the preference is original. Smaller than an explicit phrase. */
+  /**
+   * Clean title (no version term) when the preference is original, and the parent is clean too.
+   * Known exception: +160 does not clear the full quality range plus format, gentle size, and a normal peer.
+   */
   versionCleanOriginal: 160,
-  /** Immediate parent folder only. Weaker than the basename, and it can lose to a clear quality gap. */
+  /**
+   * Immediate parent folder only. Weaker than the basename. Known exception:
+   * +80 does not clear the full quality range plus format, gentle size, and a normal peer.
+   */
   versionParent: 80,
   /** Points per 1.0 overshoot ratio while duration is known and normal, up to 1.0. */
   sizeGentlePerRatio: 12,
@@ -100,8 +120,14 @@ export const SCORE_WEIGHTS = {
   availabilitySpeedCap: 5,
   /** Known lossy bitrates are 32–320 inclusive. 321+ and anything outside 32–500 are unknown. */
   bitratePlausibleMin: 32,
+  /** CBR (and any lossy file that is not reported VBR) enters the good tier here. */
   bitrateGoodMin: 256,
   bitrateGoodMax: 320,
+  /**
+   * Reported VBR only (`track.vbr` from slskd `isVariableBitRate`). A missing flag
+   * is not VBR. CBR between this and `bitrateGoodMin` stays acceptable.
+   */
+  bitrateVbrGoodMin: 220,
   bitratePlausibleMax: 500,
 } as const;
 
@@ -570,11 +596,16 @@ function knownLossy(kbps: number): boolean {
   return kbps >= SCORE_WEIGHTS.bitratePlausibleMin && kbps <= SCORE_WEIGHTS.bitrateGoodMax;
 }
 
-function lossyPoints(kbps: number, floor: number): number {
-  if (kbps >= SCORE_WEIGHTS.bitrateGoodMin && kbps <= SCORE_WEIGHTS.bitrateGoodMax) return SCORE_WEIGHTS.qualityGood;
+function lossyPoints(kbps: number, floor: number, vbr: boolean | undefined): number {
+  const inRange = kbps <= SCORE_WEIGHTS.bitrateGoodMax;
+  const cbrGood = kbps >= SCORE_WEIGHTS.bitrateGoodMin && inRange;
+  const vbrGood = vbr === true && kbps >= SCORE_WEIGHTS.bitrateVbrGoodMin && inRange;
+  if (cbrGood || vbrGood) return SCORE_WEIGHTS.qualityGood;
   if (kbps >= floor) return SCORE_WEIGHTS.qualityAcceptable;
   const span = Math.max(1, floor - SCORE_WEIGHTS.bitratePlausibleMin);
-  return -Math.round(((floor - kbps) / span) * SCORE_WEIGHTS.qualityLossyPenaltyScale);
+  const fraction = (floor - kbps) / span;
+  const shaped = Math.pow(fraction, SCORE_WEIGHTS.qualityLossyPenaltyPower);
+  return -Math.round(shaped * SCORE_WEIGHTS.qualityLossyPenaltyScale);
 }
 
 function qualityOf(track: CandidateTrack, floor: number): { points: number; signal: QualitySignal } {
@@ -593,14 +624,15 @@ function qualityOf(track: CandidateTrack, floor: number): { points: number; sign
 
   if (track.bitrateKbps !== undefined) {
     if (!knownLossy(track.bitrateKbps)) return { points: 0, signal: { quality: "unknown" } };
-    return { points: lossyPoints(track.bitrateKbps, floor), signal: { quality: "reported" } };
+    return { points: lossyPoints(track.bitrateKbps, floor, track.vbr), signal: { quality: "reported" } };
   }
   if (track.durationSeconds !== undefined && track.durationSeconds > 0 && track.sizeBytes > 0) {
     const derived = (track.sizeBytes * 8) / track.durationSeconds / 1000;
     const derivedBitrateKbps = Math.round(derived);
     if (knownLossy(derived)) {
       return {
-        points: Math.round(lossyPoints(derived, floor) * SCORE_WEIGHTS.qualityDerivedScale),
+        // No reported bitrate, so the VBR flag cannot promote this into the good tier.
+        points: Math.round(lossyPoints(derived, floor, undefined) * SCORE_WEIGHTS.qualityDerivedScale),
         signal: { quality: "derived", derivedBitrateKbps },
       };
     }

@@ -1,3 +1,4 @@
+import { SCORE_WEIGHTS } from "@subwave-ai/core";
 import { describe, expect, it } from "vitest";
 import { isSearchComplete, selectSearch, selectSearchResult } from "./select.js";
 
@@ -1389,6 +1390,8 @@ describe("slskd score adapter", () => {
     expect(decision.signals.derivedBitrateKbps).toBeGreaterThan(32);
     expect(decision.signals.derivedBitrateKbps).toBeLessThanOrEqual(320);
     expect(decision.breakdown.quality).toBeGreaterThan(0);
-    expect(decision.breakdown.quality).toBeLessThanOrEqual(Math.round(64 * 0.5));
+    expect(decision.breakdown.quality).toBeLessThanOrEqual(
+      Math.round(SCORE_WEIGHTS.qualityGood * SCORE_WEIGHTS.qualityDerivedScale),
+    );
   });
 });

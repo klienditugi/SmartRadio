@@ -34,7 +34,11 @@ export type CandidateTrack = {
   bitrateKbps?: number;
   sampleRateHz?: number;
   bitDepth?: number;
-  /** Reported VBR flag. Scoring does not guess a bitrate from it. */
+  /**
+   * Reported VBR flag (`isVariableBitRate` when the provider sent it).
+   * Absent means not VBR. Scoring does not invent the flag or a bitrate from it.
+   * A reported bitrate at or above the VBR good threshold scores as the good tier.
+   */
   vbr?: boolean;
   availability?: TrackAvailability;
   locked: boolean;

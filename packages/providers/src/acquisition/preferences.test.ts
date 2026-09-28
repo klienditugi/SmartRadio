@@ -5,6 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { SCORE_WEIGHTS } from "@subwave-ai/core";
 import { describe, expect, it } from "vitest";
 import { selectSearch, type SearchSelection, type SelectSearchOptions } from "./select.js";
 import { dryRunPreferences } from "./selector-dryrun.js";
@@ -310,7 +311,7 @@ describe("real Phase C format, quality, and peers", () => {
     const q256 = pick(hasTag("mp3_256"));
     const q192 = pick(hasTag("mp3_192", (_tags, row) => row.username === "peer-015"));
     expect(q256.breakdown.quality).toBe(q320.breakdown.quality);
-    expect(q192.breakdown.quality).toBe(28);
+    expect(q192.breakdown.quality).toBe(SCORE_WEIGHTS.qualityAcceptable);
     expect(q192.breakdown.quality).toBeLessThan(q320.breakdown.quality);
   });
 
@@ -368,7 +369,76 @@ describe("real Phase C format, quality, and peers", () => {
     });
     const vbr = pick(hasTag("mp3_vbr"));
     expect(vbr.signals.quality).toBe("reported");
-    expect(vbr.breakdown.quality).toBeLessThan(28);
+    expect(vbr.breakdown.quality).toBeLessThan(SCORE_WEIGHTS.qualityAcceptable);
+  });
+
+  it("scores a 239 kbps VBR MP3 as good; the 73 curated files have none", () => {
+    const curatedVbrHigh: { username: string; filename: string; bitRate: number }[] = [];
+    let curatedFiles = 0;
+    for (const response of curated.responses) {
+      for (const file of response.files ?? []) {
+        curatedFiles += 1;
+        const bitRate = file.bitRate;
+        if (file.isVariableBitRate !== true || typeof bitRate !== "number") continue;
+        if (bitRate === 239 || bitRate === 240) {
+          curatedVbrHigh.push({ username: response.username, filename: file.filename, bitRate });
+        }
+      }
+    }
+    expect(curatedFiles).toBe(73);
+    // None of the 73 curated files is a 239 or 240 kbps VBR row. The VBR MP3s
+    // in this extract are 189 kbps, so the good-tier case below is SYNTHETIC.
+    expect(curatedVbrHigh).toEqual([]);
+
+    const syntheticVbr = {
+      label: "SYNTHETIC",
+      responses: [
+        {
+          username: "SYNTHETIC-vbr-v0",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 1_000_000,
+          files: [
+            {
+              filename: "@@share\\SYNTHETIC\\Daft Punk - Get Lucky.mp3",
+              size: 8 * 1024 * 1024,
+              length: 360,
+              extension: "mp3",
+              bitRate: 239,
+              isVariableBitRate: true,
+            },
+          ],
+        },
+      ],
+    };
+    const vbr = pick(syntheticVbr);
+    expect(vbr.pick.vbr).toBe(true);
+    expect(vbr.pick.bitrateKbps).toBe(239);
+    expect(vbr.breakdown.quality).toBe(SCORE_WEIGHTS.qualityGood);
+
+    const syntheticCbr = {
+      label: "SYNTHETIC",
+      responses: [
+        {
+          username: "SYNTHETIC-cbr-239",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 1_000_000,
+          files: [
+            {
+              filename: "@@share\\SYNTHETIC\\Daft Punk - Get Lucky.mp3",
+              size: 8 * 1024 * 1024,
+              length: 360,
+              extension: "mp3",
+              bitRate: 239,
+            },
+          ],
+        },
+      ],
+    };
+    const cbr = pick(syntheticCbr);
+    expect(cbr.pick.vbr).toBeUndefined();
+    expect(cbr.breakdown.quality).toBe(SCORE_WEIGHTS.qualityAcceptable);
   });
 
   it("prefers a free slot over a long queue on otherwise similar radio edits", () => {
