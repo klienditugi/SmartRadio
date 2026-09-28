@@ -281,8 +281,32 @@ const OTHER_VERSION_PHRASES = [
   "multitrack",
 ] as const;
 const REMIX_WORDS = ["remix", "rmx"] as const;
+/**
+ * Derived markers. Any hit is a remix (or, for a plain club mix, extended)
+ * and clears `original` and `radio_edit`, even when the same name also says
+ * original, vocal, radio edit, or edit.
+ */
+const DERIVED_VERSION_PHRASES = [
+  ...REMIX_WORDS,
+  "bootleg",
+  "mashup",
+  "mash up",
+  "vs",
+  "mixshow",
+  "rework",
+  "re edit",
+  "reedit",
+  "mix by",
+  "mixed by",
+] as const;
 /** `<name> version` / `<name> edit` is a remix unless the name is one of these. */
 const NAMED_EDIT_EXCLUSIONS = new Set(["radio", "single", "album", "original", "extended", "inch", "12"]);
+const NAMED_PRODUCER_EDIT_SUFFIXES = new Set(["edit", "version"]);
+/**
+ * "club mix" stays extended. Any other "club" is the same conflict: never
+ * original or radio edit. "club remix" is already covered by the remix word.
+ */
+const CLUB_MARKERS = ["club"] as const;
 const BARE_MIX_EXCEPTIONS = ["radio mix", "club mix", "original mix", "extended mix"] as const;
 
 /** Removed from required title tokens so a requested version is a rank, not a filter. */
@@ -291,7 +315,8 @@ const TITLE_STRIP_PHRASES = [
   ...EXTENDED_PHRASES,
   ...ORIGINAL_PHRASES,
   ...OTHER_VERSION_PHRASES,
-  ...REMIX_WORDS,
+  ...DERIVED_VERSION_PHRASES,
+  ...CLUB_MARKERS,
 ] as const;
 
 /** Legacy request terms skipped once a version kind was recognized, so "radio edit" does not also mean every "edit". */
@@ -658,30 +683,41 @@ function sameTerm(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
 }
 
-/**
- * Version marks on already-normalized text.
- * radio edit / single edit win as radio_edit, not as a named remix.
- * "extended mix" and "club mix" are extended, not remixes, and not long recordings.
- * A bare "mix" is not a remix and is not a clean title.
- * `<name> remix`, `rmx`, and `<name> version` / `<name> edit` are remixes when the
- * name is not radio, single, album, original, or extended.
- */
-export function classifyVersionText(text: string): VersionMarks {
-  const radio_edit = hasAnyPhrase(text, RADIO_EDIT_PHRASES);
-  const extended = hasAnyPhrase(text, EXTENDED_PHRASES);
-  const original = hasAnyPhrase(text, ORIGINAL_PHRASES);
-  const remixWord = hasAnyPhrase(text, REMIX_WORDS);
+/** The token before "edit" or "version" names a producer, so this is a re-edit. */
+function hasNamedProducerEdit(text: string): boolean {
   const tokens = text ? text.split(" ") : [];
-  let named = false;
   for (let i = 0; i < tokens.length - 1; i++) {
     const name = tokens[i] ?? "";
-    const next = tokens[i + 1];
-    if (next !== "version" && next !== "edit") continue;
+    const next = tokens[i + 1] ?? "";
+    if (!NAMED_PRODUCER_EDIT_SUFFIXES.has(next)) continue;
     if (!name || NAMED_EDIT_EXCLUSIONS.has(name) || /^\d+$/.test(name)) continue;
-    named = true;
-    break;
+    return true;
   }
-  const remix = remixWord || named;
+  return false;
+}
+
+/**
+ * Version marks on already-normalized text. The most specific marker wins.
+ * A derived marker (remix, club, mix by, bootleg, mashup, "vs", mixshow,
+ * rework, or a named-producer edit) is remix or extended/club, never original
+ * or radio edit, even when the name also says original, vocal, radio edit, or edit.
+ * "original vocal" inside that title is not an original.
+ * A plain Original Mix, Album Version, Extended Mix, Radio Edit, or Club Mix
+ * with no conflicting marker keeps its class. A plain club mix stays extended.
+ * A bare "mix" is not a remix and is not a clean title.
+ */
+export function classifyVersionText(text: string): VersionMarks {
+  let radio_edit = hasAnyPhrase(text, RADIO_EDIT_PHRASES);
+  let extended = hasAnyPhrase(text, EXTENDED_PHRASES);
+  let original = hasAnyPhrase(text, ORIGINAL_PHRASES);
+  const derived = hasNamedProducerEdit(text) || hasAnyPhrase(text, DERIVED_VERSION_PHRASES);
+  const club = hasAnyPhrase(text, CLUB_MARKERS);
+  if (derived || club) {
+    radio_edit = false;
+    original = false;
+  }
+  if (club && !derived) extended = true;
+  const remix = derived;
   const bareMix = hasPhrase(text, "mix") && !hasAnyPhrase(text, BARE_MIX_EXCEPTIONS);
   const danglingEdit = hasPhrase(text, "edit") && !radio_edit && !remix && !original && !extended;
   const other = hasAnyPhrase(text, OTHER_VERSION_PHRASES) || bareMix || danglingEdit;

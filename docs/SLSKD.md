@@ -71,7 +71,7 @@ Priority, high to low. A higher item is not outweighed by the sum of the realist
 
 | Component | Weight | What it measures |
 | --- | --- | --- |
-| `requestedVersion` | +12400 | The request names a version and this file matches it. The saved preference, including the second bonus, is 0 for every file on that request. A hybrid such as "Radio Edit - X Remix" does not outrank a pure radio edit on a radio-edit request. |
+| `requestedVersion` | +12400 | The request names a version and this file matches that class. The saved preference, including the second bonus, is 0 for every file on that request. A hybrid such as "Radio Edit - X Remix" is a remix, so it does not take this bonus on a radio-edit request. |
 | `titleMatch` | +36 basename, +8 path only | Title tokens sit in the basename, or only in a folder. 0 when no title was passed. A wrong title is removed before this matters. |
 | `artistInPath` | +48 | Artist tokens appear in the path. 0 when no artist was passed or the path lacks them. |
 | `versionPreference` | +7800 basename, +5200 parent, +2600 clean original, +2600 second bonus, 0 for `balanced`, 0 when the request names a version | Saved style. The second bonus is a basename remix under `extended`, or a basename extended/club mix under `remix`. It ranks above radio edits and originals and below a parent-folder primary match. Each step clears quality from 128 kbps through good, the known-duration size penalty through the 200 MiB hard maximum, format, peer, and a mild duration overshoot. |
@@ -90,12 +90,14 @@ Version terms are read from the basename first. The immediate parent folder is t
 
 | Kind | Basename phrases |
 | --- | --- |
-| `radio_edit` | radio edit, radio version, radio mix, single edit, single version |
-| `original` | original mix, original version, original, album version. A clean title with no version term counts as original at +2600, and only when the parent is clean too. |
-| `extended` | extended, extended mix, extended version, club mix, 12" version, 12 inch |
-| `remix` | remix, rmx, `<name> remix`, `<name> version`, `<name> edit`, where the name is not radio, single, album, original, or extended |
+| `radio_edit` | radio edit, radio version, radio mix, single edit, single version. Cleared when a derived marker is also present. |
+| `original` | original mix, original version, original, album version. Cleared when a derived marker is also present. "original vocal" inside a remix or club title is not an original. A clean title with no version term counts as original at +2600, and only when the parent is clean too. |
+| `extended` | extended, extended mix, extended version, club mix, 12" version, 12 inch. A plain club mix stays here. |
+| `remix` | remix, rmx, bootleg, mashup, vs, mixshow, rework, re-edit, mix by, mixed by, `<name> remix`, `<name> version`, `<name> edit`, where the name is not radio, single, album, original, or extended |
 
-A bare `mix` is not a remix. `extended mix` and `club mix` are extended, and a normal-length Club Mix is not a long recording. Under `extended`, a named remix scores the +2600 second bonus. Under `remix`, an extended or club mix scores that same second bonus. The bonus is not applied to a long recording, a short fragment, a stem, a known bitrate under 128 kbps, or a duration overshoot that has reached −400. A mild overshoot, such as 13 minutes, keeps it. `balanced` adds no version bonus. A request that names a version adds none of these bonuses either. If the preferred version is missing, the best remaining file wins. A 70 MiB Club Mix wins under `extended` only when no normal-size club or extended file is in the set.
+The most specific marker wins. Remix, club, mix-by, bootleg, mashup, "vs", mixshow, rework, and a named-producer edit (`(97 Steps Edit)`, `(Astre Edit)`) are remix or extended/club, never original or radio edit, even when the same name also says original, vocal, radio edit, or edit. "Radio Edit - X Remix" is a remix: under `remix` it takes the basename bonus, and on a radio-edit request it is not a pure radio edit. A plain Original Mix, Album Version, Extended Mix, or Radio Edit with none of those markers keeps its class.
+
+A bare `mix` is not a remix. `extended mix` and `club mix` are extended, and a normal-length Club Mix is not a long recording. Under `extended`, a named remix scores the +2600 second bonus. Under `remix`, an extended or club mix scores that same second bonus. The bonus is not applied to a long recording, a short fragment, a stem, a known bitrate under 128 kbps, or a duration overshoot that has reached −400. A mild overshoot, such as 13 minutes, keeps it. `balanced` adds no version bonus. A request that names a version adds none of these bonuses either. If the preferred version is missing, the best remaining file wins. A 70 MiB Club Mix wins under `extended` only when no normal-size club or extended file is in the set. Mixshow is a remix marker and also a long-recording phrase, so it does not receive the saved remix bonus.
 
 ### Defaults
 

@@ -5,6 +5,7 @@ import {
 } from "@subwave-ai/shared";
 import { describe, expect, it } from "vitest";
 import { SCORE_WEIGHTS, scoreTrack, selectTracks, type CandidateTrack } from "./index.js";
+import { classifyVersionText, normalizeMatchText } from "./selection-score.js";
 
 const MIB = 1024 * 1024;
 
@@ -947,11 +948,13 @@ describe("quality priority", () => {
     const pureScore = scoreTrack(pure, radioRequest);
     const hybridScore = scoreTrack(hybrid, radioRequest);
     expect(pureScore.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
-    expect(hybridScore.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(hybridScore.breakdown.requestedVersion).toBe(0);
     expect(pureScore.breakdown.versionPreference).toBe(0);
     expect(hybridScore.breakdown.versionPreference).toBe(0);
+    expect(scoreTrack(hybrid, { versionPreference: "remix" }).breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+    expect(scoreTrack(hybrid, { versionPreference: "radio_edit" }).breakdown.versionPreference).toBe(0);
     expect(scoreTrack(hybrid, { versionPreference: "extended" }).breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionSecondary);
-    expect(hybridScore.total + SCORE_WEIGHTS.versionSecondary).toBeGreaterThan(pureScore.total);
+    expect(hybridScore.total).toBeLessThan(pureScore.total);
     expect(selected([pure, hybrid], radioRequest).pick.peer).toBe("pure-radio");
 
     const album = lossy(320, {
@@ -972,11 +975,11 @@ describe("quality priority", () => {
     const albumScore = scoreTrack(album, originalRequest);
     const remixScore = scoreTrack(remix, originalRequest);
     expect(albumScore.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
-    expect(remixScore.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(remixScore.breakdown.requestedVersion).toBe(0);
     expect(albumScore.breakdown.versionPreference).toBe(0);
     expect(remixScore.breakdown.versionPreference).toBe(0);
     expect(scoreTrack(remix, { versionPreference: "remix" }).breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
-    expect(remixScore.total + SCORE_WEIGHTS.versionBasename).toBeGreaterThan(albumScore.total);
+    expect(remixScore.total).toBeLessThan(albumScore.total);
     expect(selected([album, remix], originalRequest).pick.peer).toBe("album");
 
     const plainRemix = lossy(320, {
@@ -990,6 +993,54 @@ describe("quality priority", () => {
     expect(plainScore.breakdown.versionPreference).toBe(0);
     expect(scoreTrack(plainRemix, { versionPreference: "remix" }).breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
     expect(selected([album, plainRemix], originalRequest).pick.peer).toBe("album");
+  });
+
+  it("classifies a derived marker ahead of original and radio edit", () => {
+    const marks = (value: string) => classifyVersionText(normalizeMatchText(value));
+    expect(marks("Get Lucky (Original Mix)")).toMatchObject({ original: true, remix: false, radio_edit: false, extended: false });
+    expect(marks("Get Lucky (Album Version)")).toMatchObject({ original: true, remix: false, radio_edit: false });
+    expect(marks("Get Lucky (Extended Mix)")).toMatchObject({ extended: true, remix: false, original: false, radio_edit: false });
+    expect(marks("Get Lucky (Radio Edit)")).toMatchObject({ radio_edit: true, remix: false, original: false, extended: false });
+    expect(marks("Get Lucky (Club Mix)")).toMatchObject({ extended: true, remix: false, original: false, radio_edit: false });
+
+    const vocalClub = marks("Get lucky [dark intensity original vocal club remix edit]");
+    expect(vocalClub).toMatchObject({ remix: true, original: false, radio_edit: false });
+    const wbbl = marks("Get Lucky (Radio Edit - WBBL Remix)");
+    expect(wbbl).toMatchObject({ remix: true, radio_edit: false, original: false });
+    expect(marks("Get Lucky (Album Version Remix)")).toMatchObject({ remix: true, original: false, radio_edit: false });
+    expect(marks("Get Lucky (97 Steps Edit)")).toMatchObject({ remix: true, radio_edit: false, original: false });
+    expect(marks("Get Lucky (Astre Edit)")).toMatchObject({ remix: true, radio_edit: false, original: false });
+    expect(marks("Get Lucky (Original Club Mix)")).toMatchObject({ extended: true, original: false, radio_edit: false, remix: false });
+
+    const steps = lossy(320, {
+      peer: "steps",
+      path: "@@share\\SYNTHETIC\\Get Lucky (97 Steps Edit).mp3",
+      sizeBytes: 8 * MIB,
+      availability: { freeSlot: true, queueLength: 0, speedBps: 10 ** (SCORE_WEIGHTS.availabilitySpeedCap + 4) },
+    });
+    const astre = lossy(320, {
+      peer: "astre",
+      path: "@@share\\SYNTHETIC\\Get Lucky (Astre Edit).mp3",
+      sizeBytes: 8 * MIB,
+      availability: { freeSlot: true, queueLength: 0, speedBps: 10 ** (SCORE_WEIGHTS.availabilitySpeedCap + 4) },
+    });
+    const radio = lossy(128, {
+      peer: "real-radio",
+      path: "@@share\\Album\\Get Lucky (Radio Edit).mp3",
+      sizeBytes: 6 * MIB,
+      availability: { freeSlot: false, queueLength: 200, speedBps: 1 },
+    });
+    const radioRequest = {
+      query: { artist: "Daft Punk", title: "Get Lucky (Radio Edit)" },
+      versionPreference: "remix" as const,
+    };
+    expect(selected([steps, astre, radio], { versionPreference: "radio_edit" }).pick.peer).toBe("real-radio");
+    const requested = selected([steps, astre, radio], radioRequest);
+    expect(requested.pick.peer).toBe("real-radio");
+    expect(requested.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(scoreTrack(steps, { versionPreference: "remix" }).breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+    expect(scoreTrack(astre, { versionPreference: "radio_edit" }).breakdown.versionPreference).toBe(0);
+    expect(scoreTrack(steps, radioRequest).breakdown.requestedVersion).toBe(0);
   });
 
   it("prefers a 71 MiB Club Mix FLAC on a slower peer over a 224 MiB Club Mix FLAC on a free fast peer", () => {

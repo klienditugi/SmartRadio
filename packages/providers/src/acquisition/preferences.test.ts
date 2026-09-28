@@ -223,6 +223,69 @@ describe("real Phase C version rows", () => {
     expect(opened.breakdown.longRecording).toBe(0);
   });
 
+  it("keeps an original-vocal club remix out of the original class", () => {
+    const hybrid = tagged((_tags, row) => row.username === "peer-187");
+    const originalMix = tagged(
+      (_tags, row) => row.username === "peer-001" && row.filename.includes("(Original Mix)"),
+    );
+    expect(hybrid.responses).toHaveLength(1);
+    expect(originalMix.responses).toHaveLength(1);
+    for (const formatPreference of ["auto", "prefer_mp3", "prefer_flac", "mp3_only"] as const) {
+      const decision = pick(curated, { versionPreference: "original", formatPreference });
+      expect(decision.file.username).toBe("peer-001");
+      expect(decision.file.filename).toContain("Original Mix");
+      expect(decision.file.filename.toLowerCase()).not.toContain("original vocal");
+      expect(decision.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+    }
+    const asRemix = pick(hybrid, { versionPreference: "remix" });
+    expect(asRemix.file.username).toBe("peer-187");
+    expect(asRemix.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+    const pair = { responses: [...hybrid.responses, ...originalMix.responses] };
+    expect(pick(pair, { versionPreference: "original", formatPreference: "auto" }).file.username).toBe("peer-001");
+
+    for (const title of ["Get Lucky (Album Version)", "Get Lucky (Original Mix)"] as const) {
+      const decision = pick(curated, {
+        versionPreference: "remix",
+        formatPreference: "prefer_mp3",
+        query: { artist: "Daft Punk", title },
+      });
+      expect(decision.file.username).not.toBe("peer-187");
+      expect(decision.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+      expect(decision.breakdown.versionPreference).toBe(0);
+      expect(decision.file.filename.includes("Original Mix") || decision.file.filename.includes("Album Version")).toBe(true);
+    }
+  });
+
+  it("does not let a named producer edit beat a real radio edit", () => {
+    const pool = tagged(
+      (tags, row) =>
+        row.filename.includes("(97 Steps Edit)") ||
+        row.filename.includes("(Astre Edit)") ||
+        (tags.includes("radio_edit") && row.filename.includes("(Radio Edit)")),
+    );
+    const preferred = pick(pool, { versionPreference: "radio_edit" });
+    expect(preferred.file.filename).toContain("Radio Edit");
+    expect(preferred.file.filename).not.toContain("97 Steps");
+    expect(preferred.file.filename).not.toContain("Astre Edit");
+    expect(preferred.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+
+    const requested = pick(pool, {
+      versionPreference: "remix",
+      query: { artist: "Daft Punk", title: "Get Lucky (Radio Edit)" },
+    });
+    expect(requested.file.filename).toContain("Radio Edit");
+    expect(requested.file.filename).not.toContain("97 Steps");
+    expect(requested.file.filename).not.toContain("Astre Edit");
+    expect(requested.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(requested.breakdown.versionPreference).toBe(0);
+    expect(pick(tagged((_tags, row) => row.filename.includes("(97 Steps Edit)")), { versionPreference: "remix" }).breakdown.versionPreference).toBe(
+      SCORE_WEIGHTS.versionBasename,
+    );
+    expect(pick(tagged((_tags, row) => row.filename.includes("(Astre Edit)")), { versionPreference: "remix" }).breakdown.versionPreference).toBe(
+      SCORE_WEIGHTS.versionBasename,
+    );
+  });
+
   it("does not treat a bare mix or a Mixshow as the saved remix", () => {
     const mixshow = pick(hasTag("mixshow"), { versionPreference: "remix" });
     expect(mixshow.file.filename.toLowerCase()).toContain("mixshow");
@@ -427,14 +490,26 @@ describe("real Phase C format, quality, and peers", () => {
     expect(saved.file.username).not.toBe("peer-092");
     expect(saved.breakdown.shortRecording).toBe(0);
 
+    const cleanAlbums = tagged(
+      (tags, row) => tags.length === 1 && tags.includes("mp3_320_album") && !row.filename.toLowerCase().includes(" vs "),
+    );
+    const radios = tagged((tags, row) => tags.includes("radio_edit") && row.username === "peer-005");
     const requested = pick(
-      { responses: [...short.responses, ...fillers.responses] },
+      { responses: [...short.responses, ...cleanAlbums.responses, ...radios.responses] },
       { query: { artist: "Daft Punk", title: "Get Lucky Remix" } },
     );
     expect(requested.file.username).toBe("peer-092");
     expect(requested.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
     expect(requested.breakdown.shortRecording).toBeLessThan(0);
     expect(requested.pick.durationSeconds).toBe(105);
+    const mashup = tagged((_tags, row) => row.username === "peer-002" && row.filename.toLowerCase().includes(" vs "));
+    const overShort = pick(
+      { responses: [...short.responses, ...mashup.responses] },
+      { query: { artist: "Daft Punk", title: "Get Lucky Remix" } },
+    );
+    expect(overShort.file.username).toBe("peer-002");
+    expect(overShort.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(overShort.breakdown.shortRecording).toBe(0);
 
     const syntheticShort = {
       label: "SYNTHETIC",
@@ -608,7 +683,10 @@ describe("priority on real rows", () => {
     expect(pureRadio.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
     const hybridAlone = pick(syntheticHybrid, { versionPreference: "extended" });
     expect(hybridAlone.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionSecondary);
-    expect(pick(syntheticHybrid, radioRequest).breakdown.versionPreference).toBe(0);
+    expect(pick(syntheticHybrid, { versionPreference: "remix" }).breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+    const hybridRequested = pick(syntheticHybrid, radioRequest);
+    expect(hybridRequested.breakdown.versionPreference).toBe(0);
+    expect(hybridRequested.breakdown.requestedVersion).toBe(0);
 
     const album = tagged((_tags, row) => row.filename.includes("(Album Version)"));
     const remix = tagged((_tags, row) => row.username === "peer-005" && row.filename.includes("FAT TONY"));
@@ -685,6 +763,11 @@ describe("explicit version dry-run rows", () => {
     }
     expect(extra[0]?.filename?.toLowerCase()).toContain("radio edit");
     expect(extra[0]?.filename?.toLowerCase()).not.toContain("remix");
+    expect(extra[1]?.filename).not.toContain("original vocal");
+    expect(extra[1]?.username).not.toBe("peer-187");
+    expect(
+      (extra[1]?.filename?.includes("Original Mix") ?? false) || (extra[1]?.filename?.includes("Album Version") ?? false),
+    ).toBe(true);
   });
 });
 
