@@ -10,7 +10,8 @@
  *   files under min_file_size_mb,
  *   wrong title (the phrase must start at a boundary in the original basename;
  *   punctuation is spaces only for that comparison, and anything after the
- *   phrase is allowed), a medley (two other songs, or the whole word mashup,
+ *   phrase is allowed; a closing ) or ] , or the requested artist name, is
+ *   also a boundary), a medley (two other songs, or the whole word mashup,
  *   mash up, segue, or transition in the basename), a tribute or the word
  *   cover in the basename,
  *   a different artist leading the basename when this artist is only in folders,
@@ -731,7 +732,8 @@ const TITLE_SEPARATORS = ["_-_", " - ", " – ", " — ", "–", "—", "-"] as 
 /**
  * Where a title phrase may begin in the original basename: the start, after a
  * track number (`08 `, `08-`, `201-`, `1 - `, `10A - 117 - `), after an artist
- * separator, or after `(` / `[`. The index is into the original string.
+ * separator, after `(` / `[`, or after a closing `)` / `]` and its trailing
+ * whitespace. The index is into the original string.
  */
 function titleBoundaryIndexes(original: string): number[] {
   const starts = new Set<number>([0]);
@@ -747,6 +749,11 @@ function titleBoundaryIndexes(original: string): number[] {
   for (let i = 0; i < original.length; i++) {
     const ch = original[i] ?? "";
     if (ch === "(" || ch === "[") starts.add(i + 1);
+    if (ch === ")" || ch === "]") {
+      let next = i + 1;
+      while (next < original.length && /\s/.test(original[next] ?? "")) next += 1;
+      starts.add(next);
+    }
   }
   // The predecessor stays outside the match so `01-08_` and `10A - 117 - ` each
   // yield a boundary after the number that actually leads the following text.
@@ -768,16 +775,29 @@ function titleAtBoundary(original: string, phrase: string): boolean {
   return titleBoundaryIndexes(original).some((index) => startsWithTitlePhrase(original.slice(index), phrase));
 }
 
+/** The title phrase starts immediately after the artist in the normalized basename. */
+function titleDirectlyAfterArtist(normalizedBase: string, artistPhrase: string, titlePhrase: string): boolean {
+  if (!artistPhrase || !titlePhrase) return false;
+  const pattern = new RegExp(
+    `(?:^| )${escapeRegExp(artistPhrase)} (?=${escapeRegExp(titlePhrase)}(?: |$))`,
+    "i",
+  );
+  return pattern.test(normalizedBase);
+}
+
 /**
  * The title phrase must start at a boundary in the original basename.
  * Punctuation is normalized only for the comparison. Anything after the phrase
- * is allowed. A folder supplies the title only when the basename lacks it.
+ * is allowed. The requested artist name in the normalized basename is also a
+ * boundary when the title follows it directly. A folder supplies the title
+ * only when the basename lacks it.
  */
-function titleEvidence(track: CandidateTrack, titleTokens: readonly string[] | null, _artistTokens: readonly string[]): boolean {
+function titleEvidence(track: CandidateTrack, titleTokens: readonly string[] | null, artistTokens: readonly string[]): boolean {
   if (!titleTokens || titleTokens.length === 0) return true;
   const phrase = titleTokens.join(" ");
   const base = rawBasename(track);
   if (titleAtBoundary(base, phrase)) return true;
+  if (titleDirectlyAfterArtist(basenameText(track), artistTokens.join(" "), phrase)) return true;
   if (hasPhrase(basenameText(track), phrase)) return false;
   return track.folders.some((folder) => titleAtBoundary(folder, phrase));
 }

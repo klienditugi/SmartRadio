@@ -204,9 +204,9 @@ describe("ordered selector", () => {
     const woman = mp3("woman", "Destiny's Child X Daft Punk - Independant Woman X Get Lucky.mp3");
     const gluedMashup = mp3("glued", "Daft Punk and Someone _Other Song and Get Lucky_ Remix Mashup.mp3");
     const djEdit = mp3("dj-edit", "DJ Example Get Lucky.mp3");
-    const spacedArtist = mp3("spaced", "Daft Punk get lucky.mp3");
-    const afterBracket = mp3("bracket", "08 [Daft Punk, Pharrell Williams] Get Lucky.flac");
-    for (const wrong of [leadingYou, woman, gluedMashup, djEdit, spacedArtist, afterBracket]) {
+    const betweenArtist = mp3("between", "Daft Punk Feat. Someone Get Lucky.mp3");
+    const mojibake = mp3("mojibake", "Daft Punk Feat. Pharrell & Nile Rodgers GÇô Get Lucky (eSQUIRE Extended).mp3");
+    for (const wrong of [leadingYou, woman, gluedMashup, djEdit, betweenArtist, mojibake]) {
       const decision = selectTracks([wrong], { query });
       expect(decision.outcome).toBe("no_suitable_result");
       if (decision.outcome === "no_suitable_result") expect(decision.removed.title_mismatch).toBe(1);
@@ -227,6 +227,15 @@ describe("ordered selector", () => {
     expect(fileVersionClass(skeletons)).toBe("original");
     expect(scoreTrack(luckyMusic, { query }).breakdown.titleMatch).toBe(1);
     expect(fileVersionClass(luckyMusic)).toBe("original");
+
+    const spacedArtist = mp3("spaced", "Daft Punk get lucky.mp3");
+    const afterClose = mp3("close", "08 [Daft Punk, Pharrell Williams] Get Lucky.flac");
+    const afterParen = mp3("paren", "Artist (feat. Name) Get Lucky.mp3");
+    const tightBracket = mp3("tight", "08 [Daft Punk]Get Lucky.mp3");
+    for (const file of [spacedArtist, afterClose, afterParen, tightBracket]) {
+      expect(scoreTrack(file, { query }).breakdown.titleMatch).toBe(1);
+    }
+    expect(selected([spacedArtist]).pick.peer).toBe("spaced");
 
     const oneJoin = mp3("allan", "06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg).mp3");
     const pantelis = mp3("pantelis", "Get Lucky (Dj Pantelis Private Mix) - Dj Pantelis Does Daft Punk.mp3");
