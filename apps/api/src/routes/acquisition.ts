@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { acquisitionLiveProbeDecision, probeSlskdConnection, type SlskdProbeChecks } from "@subwave-ai/providers";
 import {
+  assertEnvPinnedUnchanged,
+  assertNoVerifyStatusKey,
+  CONFIGURED_UNVERIFIED_MESSAGE,
+  EnvPinnedError,
   SECRET_FILES,
   normalizeAcquisitionSettingsPatch,
   writeSecretFile,
@@ -8,10 +12,20 @@ import {
   type RuntimeConfig,
   type VerifyStatus,
 } from "@subwave-ai/shared";
-import { commitConfigPatch } from "../context.js";
+import { commitConfigPatch, matchingIntegrationCheck, recordIntegrationProbe } from "../context.js";
 import { requireAdmin } from "./auth.js";
 
-const VERIFY_REJECTED = "verify_status cannot be set to verified by saving settings; use test-connection";
+const VERSION_PREFERENCES = ["balanced", "radio_edit", "original", "extended", "remix"] as const;
+const FORMAT_PREFERENCES = ["auto", "prefer_mp3", "prefer_flac", "mp3_only", "flac_only"] as const;
+
+type SelectionBody = {
+  preferred_max_file_size_mb?: unknown;
+  preferred_max_duration_seconds?: unknown;
+  max_duration_seconds?: unknown;
+  version_preference?: unknown;
+  format_preference?: unknown;
+  long_recording_phrases?: unknown;
+};
 
 type SettingsBody = {
   enabled?: boolean;
@@ -19,6 +33,7 @@ type SettingsBody = {
   base_url?: string;
   verify_status?: VerifyStatus;
   paths?: { downloads?: string; library?: string };
+  selection?: SelectionBody;
   slskd_api_key?: string;
   username?: unknown;
   password?: unknown;
@@ -28,7 +43,22 @@ type SettingsBody = {
   slskd_password?: unknown;
 };
 
+const SELECTION_SOURCE_PATHS = [
+  "acquisition.selection.preferred_max_file_size_mb",
+  "acquisition.selection.preferred_max_duration_seconds",
+  "acquisition.selection.max_duration_seconds",
+  "acquisition.selection.version_preference",
+  "acquisition.selection.format_preference",
+  "acquisition.selection.max_file_size_mb",
+] as const;
+
 export function acquisitionSettingsView(config: RuntimeConfig) {
+  const selection = config.acquisition.selection;
+  const sources: Record<string, { source: string; env?: string }> = {};
+  for (const path of SELECTION_SOURCE_PATHS) {
+    const field = config.field_sources?.[path];
+    if (field) sources[path] = field.env ? { source: field.source, env: field.env } : { source: field.source };
+  }
   return {
     enabled: config.acquisition.enabled,
     provider: config.acquisition.provider,
@@ -38,10 +68,64 @@ export function acquisitionSettingsView(config: RuntimeConfig) {
       downloads: config.paths.downloads,
       library: config.paths.library,
     },
+    selection: {
+      preferred_max_file_size_mb: selection.preferred_max_file_size_mb,
+      max_file_size_mb: selection.max_file_size_mb,
+      preferred_max_duration_seconds: selection.preferred_max_duration_seconds,
+      max_duration_seconds: selection.max_duration_seconds ?? null,
+      version_preference: selection.version_preference,
+      format_preference: selection.format_preference,
+    },
+    sources,
     secrets_present: {
       slskd_api_key: Boolean(config.secrets.slskdApiKey?.trim()),
     },
   };
+}
+
+function positiveNumber(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive number`);
+  }
+  return value;
+}
+
+function enumValue<T extends string>(value: unknown, name: string, allowed: readonly T[]): T {
+  if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) {
+    throw new Error(`${name} must be one of ${allowed.join(", ")}`);
+  }
+  return value as T;
+}
+
+function selectionPatch(current: RuntimeConfig["acquisition"]["selection"], body: SelectionBody) {
+  const next: Partial<RuntimeConfig["acquisition"]["selection"]> = {};
+  if (body.preferred_max_file_size_mb !== undefined) {
+    next.preferred_max_file_size_mb = positiveNumber(body.preferred_max_file_size_mb, "preferred_max_file_size_mb");
+  }
+  if (body.preferred_max_duration_seconds !== undefined) {
+    next.preferred_max_duration_seconds = positiveNumber(body.preferred_max_duration_seconds, "preferred_max_duration_seconds");
+  }
+  if (body.max_duration_seconds !== undefined) {
+    if (body.max_duration_seconds === null) next.max_duration_seconds = null;
+    else next.max_duration_seconds = positiveNumber(body.max_duration_seconds, "max_duration_seconds");
+  }
+  if (body.version_preference !== undefined) {
+    next.version_preference = enumValue(body.version_preference, "version_preference", VERSION_PREFERENCES);
+  }
+  if (body.format_preference !== undefined) {
+    next.format_preference = enumValue(body.format_preference, "format_preference", FORMAT_PREFERENCES);
+  }
+  if (body.long_recording_phrases !== undefined) {
+    if (!Array.isArray(body.long_recording_phrases) || body.long_recording_phrases.some((item) => typeof item !== "string" || !item.trim())) {
+      throw new Error("long_recording_phrases must be an array of non-empty strings");
+    }
+    next.long_recording_phrases = body.long_recording_phrases.map((item) => item.trim());
+  }
+  const merged = { ...current, ...next };
+  if (merged.max_duration_seconds != null && merged.preferred_max_duration_seconds > merged.max_duration_seconds) {
+    throw new Error("preferred_max_duration_seconds must be <= max_duration_seconds");
+  }
+  return next;
 }
 
 function rejectsSoulseekCredentials(body: SettingsBody): boolean {
@@ -56,10 +140,10 @@ function rejectsSoulseekCredentials(body: SettingsBody): boolean {
 }
 
 function assertSettingsBody(body: SettingsBody): void {
+  assertNoVerifyStatusKey(body);
   if (rejectsSoulseekCredentials(body)) {
     throw new Error("Soulseek username and password are not stored by SmartRadio");
   }
-  if (body.verify_status === "verified") throw new Error(VERIFY_REJECTED);
   if (body.enabled !== undefined && typeof body.enabled !== "boolean") throw new Error("enabled must be a boolean");
   if (body.provider !== undefined && (typeof body.provider !== "string" || body.provider.trim().length === 0)) {
     throw new Error("provider must be a non-empty string");
@@ -69,9 +153,6 @@ function assertSettingsBody(body: SettingsBody): void {
     if (typeof body.slskd_api_key !== "string" || body.slskd_api_key.trim().length === 0) {
       throw new Error("slskd_api_key must be a non-empty string when provided");
     }
-  }
-  if (body.verify_status !== undefined && body.verify_status !== "unverified" && body.verify_status !== "needs_server_inspection") {
-    throw new Error("verify_status must be unverified or needs_server_inspection");
   }
   for (const key of ["downloads", "library"] as const) {
     const value = body.paths?.[key];
@@ -87,6 +168,7 @@ function settingsPatch(config: RuntimeConfig, body: SettingsBody): AppConfigPatc
   if (body.provider !== undefined) acquisition.provider = body.provider;
   if (body.base_url !== undefined) acquisition.base_url = body.base_url;
   if (body.verify_status !== undefined) acquisition.verify_status = body.verify_status;
+  if (body.selection) acquisition.selection = selectionPatch(config.acquisition.selection, body.selection);
   const patch: AppConfigPatch = {
     acquisition: normalizeAcquisitionSettingsPatch(config.acquisition, acquisition, {
       apiKeyChanged: Boolean(body.slskd_api_key?.trim()),
@@ -120,14 +202,33 @@ async function reportConnection(app: FastifyInstance, mode: "status" | "test"): 
     { ignoreEnabled: mode === "test" },
   );
   if (!decision.probe) {
-    if (mode === "test" && decision.state !== "disabled") {
-      commitConfigPatch(app, { acquisition: { verify_status: "unverified" } });
-    }
     return {
       ok: false,
       state: decision.state,
       probed: false,
       detail: decision.detail,
+      checks: null,
+      settings: acquisitionSettingsView(app.config),
+    };
+  }
+
+  const stored = matchingIntegrationCheck(app.config, app.db, "acquisition");
+  if (mode === "status") {
+    if (!stored) {
+      return {
+        ok: false,
+        state: "configured_unverified",
+        probed: false,
+        detail: CONFIGURED_UNVERIFIED_MESSAGE,
+        checks: null,
+        settings: acquisitionSettingsView(app.config),
+      };
+    }
+    return {
+      ok: stored.state === "ready",
+      state: stored.state,
+      probed: true,
+      detail: stored.state === "ready" ? "ready" : stored.state,
       checks: null,
       settings: acquisitionSettingsView(app.config),
     };
@@ -153,11 +254,7 @@ async function reportConnection(app: FastifyInstance, mode: "status" | "test"): 
       },
     };
   }
-  if (mode === "test") {
-    commitConfigPatch(app, {
-      acquisition: { verify_status: probe.state === "ready" ? "verified" : "unverified" },
-    });
-  }
+  recordIntegrationProbe(app, "acquisition", probe.state);
   return {
     ok: probe.state === "ready",
     state: probe.state,
@@ -185,12 +282,15 @@ export async function registerAcquisitionRoutes(app: FastifyInstance): Promise<v
       const body = (request.body ?? {}) as SettingsBody;
       try {
         assertSettingsBody(body);
+        const patch = settingsPatch(app.config, body);
+        assertEnvPinnedUnchanged(app.config, patch);
         if (body.slskd_api_key?.trim()) {
           writeSecretFile(app.config.paths.secrets_dir, SECRET_FILES.slskdApiKey, body.slskd_api_key);
         }
-        commitConfigPatch(app, settingsPatch(app.config, body));
+        commitConfigPatch(app, patch);
       } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
+        const status = err instanceof EnvPinnedError ? 409 : 400;
+        return reply.code(status).send({ error: (err as Error).message });
       }
       request.log.info(
         { provider: app.config.acquisition.provider, base_url: app.config.acquisition.base_url, enabled: app.config.acquisition.enabled },

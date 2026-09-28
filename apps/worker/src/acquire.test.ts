@@ -181,10 +181,11 @@ function harness(state: AcqState = {}) {
   };
 }
 
+const TRACK_SIZE = 8 * 1024 * 1024;
 const HIT = {
   username: "peer-a",
   id: "resp-a",
-  files: [{ filename: "\\\\music\\\\track.flac", size: 100, extension: "flac", id: 7 }],
+  files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE, extension: "flac", id: 7 }],
 };
 
 describe("A5 acquisition worker", () => {
@@ -227,7 +228,7 @@ describe("A5 acquisition worker", () => {
       {
         username: "peer-a",
         filename: "\\\\music\\\\track.flac",
-        size: 100,
+        size: TRACK_SIZE,
         state: "InProgress",
         percentComplete: 10,
       },
@@ -238,7 +239,7 @@ describe("A5 acquisition worker", () => {
       enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
     );
     expect(enq).toMatchObject({ enqueued: true });
-    expect(enqueued).toEqual([{ user: "peer-a", files: [{ filename: "\\\\music\\\\track.flac", size: 100 }] }]);
+    expect(enqueued).toEqual([{ user: "peer-a", files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE }] }]);
     expect(order).toContain("enqueue");
     expect(order).toContain("say");
     expect(say[0]?.text).toContain("REQUEST_ACCEPTED");
@@ -443,6 +444,155 @@ describe("A5 acquisition worker", () => {
       ),
     ).rejects.toThrow(/download missing/);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
+  });
+
+  it("enqueues the normal-length remix and records the score breakdown", async () => {
+    const album = "\\\\music\\\\Album\\\\Get Lucky.flac";
+    const remix = "\\\\music\\\\Remix\\\\Get Lucky (Remix).flac";
+    const responses = [
+      {
+        username: "remix-peer",
+        hasFreeUploadSlot: true,
+        queueLength: 0,
+        uploadSpeed: 9_000_000,
+        files: [
+          {
+            filename: remix,
+            size: 30_000_000,
+            extension: "flac",
+            // 48 kHz stays eligible. This case is the version penalty, not the sample-rate cap.
+            bitDepth: 24,
+            sampleRate: 48000,
+            length: 400,
+          },
+        ],
+      },
+      {
+        username: "album-peer",
+        hasFreeUploadSlot: true,
+        queueLength: 2,
+        uploadSpeed: 100_000,
+        files: [
+          {
+            filename: album,
+            size: 40_000_000,
+            extension: "flac",
+            bitDepth: 16,
+            sampleRate: 44100,
+            length: 248,
+          },
+        ],
+      },
+    ];
+
+    async function chosen(title: string) {
+      const { config, db, cleanup } = fixture();
+      cleanups.push(cleanup);
+      const { acquisition, radio, library, enqueued } = harness({ responses });
+      const request = createRequest(db, { rawQuery: `Daft Punk - ${title}` });
+      advance(db, request.id, "QUEUED", { artist: "Daft Punk", title });
+      const result = await handleDownload(
+        {
+          db,
+          config,
+          providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+          workerId: "worker-test",
+        },
+        enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
+      );
+      const accepted = listRequestEvents(db, request.id).find((event) => event.to_status === "DOWNLOADING");
+      const payload = JSON.parse(accepted?.payload_json ?? "{}") as {
+        event?: string;
+        selection_score?: { breakdown: Record<string, number>; total: number };
+      };
+      expect(payload.event).toBe("REQUEST_ACCEPTED");
+      expect(payload.selection_score?.total).toBe(
+        Object.values(payload.selection_score?.breakdown ?? {}).reduce((sum, value) => sum + value, 0),
+      );
+      expect(result).toMatchObject({ selection_score: payload.selection_score });
+      return { enqueued, score: payload.selection_score };
+    }
+
+    const plain = await chosen("Get Lucky");
+    expect(plain.enqueued).toEqual([{ user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] }]);
+    expect(plain.score?.breakdown.versionPreference).toBeGreaterThan(0);
+    expect(plain.score?.breakdown.requestedVersion).toBe(0);
+    const asked = await chosen("Get Lucky Remix");
+    expect(asked.enqueued).toEqual([{ user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] }]);
+    expect(asked.score?.breakdown.requestedVersion).toBeGreaterThan(0);
+  });
+
+  it("fails QUEUED with no_suitable_result when filters remove every candidate and does not enqueue", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const mib = 1024 * 1024;
+    const { acquisition, radio, library, order, say, enqueued } = harness({
+      responses: [
+        {
+          username: "peer",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 1_000_000,
+          files: [
+            { filename: "\\\\music\\\\notes.txt", size: 1000, extension: "txt" },
+            { filename: "\\\\music\\\\huge.flac", size: 400 * mib, extension: "flac", bitDepth: 16, sampleRate: 44100 },
+            { filename: "\\\\music\\\\hires.flac", size: 40 * mib, extension: "flac", bitDepth: 24, sampleRate: 192000 },
+            { filename: "\\\\music\\\\deep.flac", size: 40 * mib, extension: "flac", bitDepth: 32, sampleRate: 44100 },
+            {
+              filename: "\\\\music\\\\locked.flac",
+              size: 40 * mib,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+              isLocked: true,
+            },
+          ],
+          lockedFiles: [
+            { filename: "\\\\music\\\\album.flac", size: 40 * mib, extension: "flac", bitDepth: 16, sampleRate: 44100 },
+          ],
+        },
+      ],
+    });
+    const request = createRequest(db, { rawQuery: "Daft Punk - Get Lucky" });
+    advance(db, request.id, "QUEUED", { artist: "Daft Punk", title: "Get Lucky" });
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    await expect(
+      handleDownload(
+        {
+          db,
+          config,
+          providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+          workerId: "worker-test",
+        },
+        job,
+      ),
+    ).rejects.toThrow(/no_suitable_result/);
+    const row = getRequest(db, request.id);
+    expect(row?.status).toBe("FAILED");
+    expect(row?.error).toBe(
+      "no_suitable_result: locked=2, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=3, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, long_recording=0, under_bitrate=0, short_recording=0",
+    );
+    const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
+    expect(failed?.from_status).toBe("QUEUED");
+    expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({
+      outcome: "no_suitable_result",
+      removed: {
+        locked: 2,
+        junk: 0,
+        extensions: 1,
+        format_preference: 0,
+        min_file_size: 0,
+        max_file_size: 0,
+        max_duration: 0,
+        max_sample_rate: 0,
+        max_bit_depth: 0,
+        title_mismatch: 3,
+      },
+    });
+    expect(enqueued).toEqual([]);
+    expect(say).toEqual([]);
+    expect(order).toEqual(["get-search"]);
+    expect(listJobsForRequest(db, request.id).filter((item) => item.type === "download")).toHaveLength(1);
   });
 
   it("surfaces acquire_unavailable without calling the provider", async () => {

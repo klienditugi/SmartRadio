@@ -1,0 +1,1335 @@
+{
+  "id": "00000000-0000-4000-8000-000000000001",
+  "searchText": "Daft Punk Get Lucky",
+  "state": "Completed, ResponseLimitReached",
+  "isComplete": true,
+  "responseCount": 251,
+  "fileCount": 583,
+  "lockedFileCount": 33,
+  "startedAt": "2026-09-26T15:08:54.5862317Z",
+  "endedAt": "2026-09-26T15:09:02.9191823Z",
+  "token": 0,
+  "responses": [
+    {
+      "username": "peer-002",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 1,
+      "uploadSpeed": 3012674,
+      "fileCount": 4,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share002\\root01\\Daft Punk vs Georgio Schultz & The Cube Guys\\Unknown Album\\Get Lucky For The Music (ATK 2024) - 11A - 126.mp3",
+          "length": 363,
+          "size": 14533708,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share002\\root01\\Daft Punk vs Georgio Schultz & The Cube Guys\\Unknown Album\\Get Lucky Music (Abel The Kid 2013) - 11A - 126.mp3",
+          "length": 363,
+          "size": 14531633,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share002\\root01\\Daft Punk feat. Pharrell\\Revibe\\Get Lucky (Audio Jacker Discotron Remix) - 11A - 128.mp3",
+          "length": 453,
+          "size": 18145795,
+          "isLocked": false
+        },
+        {
+          "bitRate": 257,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share002\\root01\\Daft Punk\\Random Access Memories\\08 08 - Get lucky.m4a",
+          "length": 369,
+          "size": 13031459,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-004",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 9,
+      "uploadSpeed": 1132322,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share004\\root02\\Daft Punk\\2013 - Random Access Memories\\08. Get Lucky (feat. Pharrell Williams and Nile Rodgers).mp3",
+          "length": 365,
+          "size": 14637777,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-005",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 731003,
+      "fileCount": 4,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share006\\``Billboard Hot 100\\dir01\\014.  Daft Punk - Get Lucky.mp3",
+          "length": 366,
+          "size": 14761094,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share005\\dir02\\Daft Punk ft. Pharrell Williams and Nile Rodgers - Get Lucky (FAT TONY Remix) (Clean).mp3",
+          "length": 293,
+          "size": 11742155,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share005\\dir02\\26. Daft Punk - Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers).mp3",
+          "length": 248,
+          "size": 10020605,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share005\\dir02\\50. Daft Punk - Get Lucky (Radio Edit).mp3",
+          "length": 248,
+          "size": 10052200,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-009",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 84,
+      "uploadSpeed": 791780,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share010\\root03\\Daft Punk\\Random Access Memories\\Get Lucky (Feat. Pharrell Williams).mp3",
+          "length": 369,
+          "size": 14815073,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-040",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 187,
+      "uploadSpeed": 1997952,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 256,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share042\\root04\\dir03\\Daft Punk  Random Access Memories 2013\\08. Get Lucky (feat. Pharrell Williams and Nile Rodgers).mp3",
+          "length": 365,
+          "size": 11724800,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-163",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1023776,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 256,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share111\\dir04\\dir05\\Daft Punk Feat. Pharrell Williams - Get Lucky.mp3",
+          "length": 282,
+          "size": 9039044,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-015",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 10230611,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 192,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share016\\root05\\Daft Punk\\Random Access Memories\\08 - Get lucky.mp3",
+          "length": 365,
+          "size": 8780113,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-069",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 414158,
+      "fileCount": 4,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 192,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share071\\root06\\dir06\\dir07\\Get Lucky - Daft Punk Feat. Pharrell Williams.mp3",
+          "length": 368,
+          "size": 8883902,
+          "isLocked": false
+        },
+        {
+          "bitRate": 192,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share071\\root07\\dir08\\dir09\\Get Lucky - Daft Punk ft. Pharrell Williams.mp3",
+          "length": 247,
+          "size": 6083336,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share071\\root08\\dir10\\dir11\\Get Lucky - Daft Punk Feat. Pharrell Williams (Extended Studio Version).mp3",
+          "size": 11360885,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share071\\root06\\dir12\\dir13\\Get Lucky - Daft Punk Feat. Pharrell Williams (Extended Studio Version).mp3",
+          "size": 11360885,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share071\\root38\\dir04\\Get Lucky Feat. Pharrell Williams (Radio Edit) - Daft Punk.mp3",
+          "length": 247,
+          "size": 9937057,
+          "isLocked": false
+        },
+        {
+          "bitRate": 128,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share071\\root38\\dir05\\Get Lucky (Dj Pantelis Private Mix) - Dj Pantelis Does Daft Punk.mp3",
+          "length": 286,
+          "size": 4607109,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-018",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 57,
+      "uploadSpeed": 1963510,
+      "fileCount": 2,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 128,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share019\\dir14\\dir15\\Daughter - Get Lucky (Daft Punk cover).mp3",
+          "length": 294,
+          "size": 4717747,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share019\\root09\\Daft Punk\\[2013.05] Random Access Memories [FLAC]\\08 - Get Lucky.flac",
+          "length": 369,
+          "sampleRate": 44100,
+          "size": 43588731,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-025",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 124,
+      "uploadSpeed": 841872,
+      "fileCount": 3,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 128,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share026\\root10\\dir16\\dir17\\Daft Punk -  Get Lucky (DIY Acapella).mp3",
+          "length": 288,
+          "size": 4608314,
+          "isLocked": false
+        },
+        {
+          "bitRate": 128,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share026\\root10\\dir16\\dir17\\Daft Punk - Get Lucky (Album Version).mp3",
+          "length": 366,
+          "size": 5857856,
+          "isLocked": false
+        },
+        {
+          "bitRate": 128,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share026\\root10\\dir16\\dir17\\Daft Punk - Get Lucky (Official Audio) ft. Pharrell Williams.mp3",
+          "length": 247,
+          "size": 3967844,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-200",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 32,
+      "uploadSpeed": 852171,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 96,
+          "code": 1,
+          "extension": "",
+          "filename": "root11\\dir18\\dir19\\Daft Punk - Get Lucky (PulpFusion Mix).mp3",
+          "isVariableBitRate": false,
+          "length": 262,
+          "size": 3152604,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-010",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 1,
+      "uploadSpeed": 1315221,
+      "fileCount": 6,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 8,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share011\\root12\\Rock Band 4 DLC\\Daft Punk ft. Pharrell Williams - Get Lucky\\song.ogg",
+          "length": 252,
+          "size": 244375,
+          "isLocked": false
+        },
+        {
+          "bitRate": 273,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share011\\root12\\Rock Band 4 DLC\\Daft Punk ft. Pharrell Williams - Get Lucky\\drums.ogg",
+          "length": 252,
+          "size": 8602873,
+          "isLocked": false
+        },
+        {
+          "bitRate": 196,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share011\\root12\\Rock Band 4 DLC\\Daft Punk ft. Pharrell Williams - Get Lucky\\guitar.ogg",
+          "length": 252,
+          "size": 6193611,
+          "isLocked": false
+        },
+        {
+          "bitRate": 105,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share011\\root12\\Rock Band 4 DLC\\Daft Punk ft. Pharrell Williams - Get Lucky\\rhythm.ogg",
+          "length": 252,
+          "size": 3315792,
+          "isLocked": false
+        },
+        {
+          "bitRate": 154,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share011\\root12\\Rock Band 4 DLC\\Daft Punk ft. Pharrell Williams - Get Lucky\\vocals.ogg",
+          "length": 252,
+          "size": 4842538,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share011\\root12\\Rock Band 4 DLC\\Daft Punk ft. Pharrell Williams - Get Lucky\\album.jpg",
+          "size": 232871,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-129",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 62,
+      "uploadSpeed": 807732,
+      "fileCount": 2,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 2919,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share102\\root13\\Daft Punk\\Random Access Memories\\08 Daft Punk - Get Lucky (feat. Pharrell Williams & Nile Rodgers).m4a",
+          "length": 369,
+          "size": 135425296,
+          "isLocked": false
+        },
+        {
+          "bitRate": 2991,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share102\\root13\\Daft Punk\\Random Access Memories\\15 Daft Punk - Get Lucky (Daft Punk remix) (feat. Paul Williams).m4a",
+          "length": 634,
+          "size": 237909947,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-092",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 5420990,
+      "fileCount": 3,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 189,
+          "code": 1,
+          "extension": "mp3",
+          "filename": "root14\\dir20\\dir21\\Daft Punk - Get Lucky Remix.mp3",
+          "isVariableBitRate": true,
+          "length": 105,
+          "size": 2479797,
+          "isLocked": false
+        },
+        {
+          "bitRate": 189,
+          "code": 1,
+          "extension": "mp3",
+          "filename": "root15\\dir22\\dir23\\HOME_The Atlantic Tapes_18_Daft Punk - Get Lucky Remix.mp3",
+          "isVariableBitRate": true,
+          "length": 105,
+          "size": 2479797,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "flac",
+          "filename": "root15\\Daft Punk\\Get Lucky (Daft Punk remix)\\Daft Punk_Get Lucky (Daft Punk remix)_01_Get Lucky (Daft Punk remix).flac",
+          "length": 632,
+          "sampleRate": 44100,
+          "size": 74460238,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "flac",
+          "filename": "root40\\Daft Punk\\Get Lucky\\Daft Punk_Get Lucky_02_Get Lucky (radio edit).flac",
+          "length": 248,
+          "sampleRate": 44100,
+          "size": 29599502,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-003",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 21,
+      "uploadSpeed": 762101,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share003\\root16\\Daft Punk\\Random Access Memories\\08 Get Lucky.flac",
+          "length": 369,
+          "sampleRate": 44100,
+          "size": 43918231,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-006",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 68,
+      "uploadSpeed": 1675764,
+      "fileCount": 4,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share007\\root17\\Albums\\Daft Punk - Random Access Memories\\8 Get Lucky (feat. Pharrell Williams & Nile Rodgers).flac",
+          "length": 369,
+          "sampleRate": 44100,
+          "size": 43836844,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share007\\root17\\EP & Singles\\Daft Punk - Get Lucky\\1 Get Lucky (Daft Punk Remix) (feat. Pharrell Williams & Nile Rodgers).flac",
+          "length": 632,
+          "sampleRate": 44100,
+          "size": 74765255,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share007\\root17\\EP & Singles\\Daft Punk - Get Lucky (Radio Edit)\\cover.jpg",
+          "size": 118483,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share007\\root17\\EP & Singles\\Daft Punk - Get Lucky\\cover.jpg",
+          "size": 132122,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-011",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 161,
+      "uploadSpeed": 1309518,
+      "fileCount": 7,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share012\\root18\\Rarities\\Random Access Memories\\08 - Get Lucky.flac",
+          "length": 369,
+          "sampleRate": 44100,
+          "size": 43588734,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 24,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share012\\root18\\Random Access Memories (10th Anniversary Edition) (2023) [24Bit-88.2kHz] FLAC\\CD 1\\08. Get Lucky (feat. Pharrell Williams and Nile Rodgers).flac",
+          "length": 369,
+          "sampleRate": 88200,
+          "size": 133551878,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 24,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share012\\root19\\Daft Punk\\Random Access Memories [Drumless Edition] - 24BIT-88KHZ-WEB-FLAC-2023\\08-daft_punk-get_lucky_(feat._pharrell_williams_and_nile_rodgers).flac",
+          "length": 369,
+          "sampleRate": 88200,
+          "size": 118477806,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 24,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share012\\root19\\Daft Punk\\Random Access Memories [Limited Box Set Edition]\\08 - Get Lucky.flac",
+          "length": 369,
+          "sampleRate": 88200,
+          "size": 133380003,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 24,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share012\\root19\\Daft Punk\\Random Access Memories [Limited Box Set Edition]\\15 - Get Lucky (Club Mix).flac",
+          "length": 634,
+          "sampleRate": 88200,
+          "size": 234682700,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 24,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share012\\root20\\DAFT_PUNK_SILVER\\SILVER\\Get Lucky (club mix) (24bit88.2kHz) FOR HD PRODUCTION.wav",
+          "length": 634,
+          "sampleRate": 88200,
+          "size": 336054272,
+          "isLocked": false
+        },
+        {
+          "bitDepth": 24,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share012\\root20\\DAFT_PUNK_SILVER\\SILVER\\8 Get Lucky [ 88 24 ].wav",
+          "length": 369,
+          "sampleRate": 88200,
+          "size": 195731096,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-042",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 37,
+      "uploadSpeed": 85892,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share045\\root21\\[Columbia]\\[88883716862] Daft Punk ‎– Random Access Memories\\Random Access Memories - 08 - Daft Punk - Get Lucky.flac",
+          "size": 71119360,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-068",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1171649,
+      "fileCount": 2,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share070\\root22\\VA - Hi-Res Masters\\VA - Hi-Res Masters - 2010s (FLAC Songs) [PMEDIA] ⭐️\\21. Daft Punk feat. Pharrell Williams - Get Lucky.flac",
+          "size": 133511328,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share070\\root22\\Daft Punk\\Get Lucky (Daft Punk remix) (2013)\\Daft Punk - Get Lucky (Daft Punk remix) - 01 - Get Lucky (Daft Punk remix).mp3",
+          "length": 632,
+          "size": 25464544,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-049",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 1754,
+      "uploadSpeed": 651993,
+      "fileCount": 3,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share052\\root23\\DAFT PUNK\\DAFT PUNK - COLLECTION\\Daft Punk - Get Lucky (Extended Studio Version).mp3",
+          "length": 283,
+          "size": 11328406,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share052\\root23\\DAFT PUNK\\DAFT PUNK - COLLECTION\\Daft Punk - Get Lucky (97 Steps Edit).mp3",
+          "length": 248,
+          "size": 9928664,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share052\\root23\\DAFT PUNK\\DAFT PUNK - COLLECTION\\Daft Punk - Get Lucky (Astre Edit)(with Pharrell Williams).mp3",
+          "length": 207,
+          "size": 8286467,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-086",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 2096519,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 24,
+          "code": 1,
+          "extension": "flac",
+          "filename": "dir24\\Daft Punk - Random Access Memories (2013) [FLAC] {24bit 88.2kHz Limited Box Set Edition} (USB Drive)\\15 - Get Lucky (Club Mix).flac",
+          "length": 634,
+          "sampleRate": 88200,
+          "size": 234682700,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-001",
+      "token": 13,
+      "hasFreeUploadSlot": false,
+      "queueLength": 973,
+      "uploadSpeed": 781747,
+      "fileCount": 8,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share001\\root24\\dir25\\dir26\\Daft Punk Feat. Pharrell - Get Lucky (Select Mix Remix).mp3",
+          "length": 291,
+          "size": 11706847,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share001\\root24\\dir25\\dir26\\Daft Punk ft. Pharrell Williams & Nile Rodgers - Get Lucky (Select Mix Remix).mp3",
+          "length": 291,
+          "size": 11706847,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share001\\root24\\dir25\\dir26\\Daft Punk ft. Pharrell Williams & Nile Rodgers - Get Lucky (Radio Edit).mp3",
+          "length": 248,
+          "size": 10005754,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share001\\root24\\dir25\\dir26\\Daft Punk ft. Pharrell Williams & Nile Rodgers - Get Lucky (Original Mix).mp3",
+          "length": 369,
+          "size": 14842606,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share001\\root24\\dir25\\dir26\\Daft Punk ft Pharrell Williams - Get Lucky (Hype Intro) (X-Mix).mp3",
+          "length": 297,
+          "size": 14137099,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share001\\root24\\dir25\\dir26\\Daft Punk ft. Pharrell Williams - Get Lucky (Kenwork 10th Anniversary Mix).mp3",
+          "length": 354,
+          "size": 14560096,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share001\\root24\\dir25\\dir26\\Destiny's Child X Daft Punk X Jet Boot Jack - Independant Woman X Get Lucky (Mixshow House Edit (QM))[Clean].mp3",
+          "length": 183,
+          "size": 7341157,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share001\\root24\\dir25\\dir26\\Daft Punk ft Pharrell Williams & Nile Rodgers - Get Lucky (10s).mp3",
+          "length": 247,
+          "size": 10004789,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-187",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 1,
+      "uploadSpeed": 1787970,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share074\\root25\\dir27\\dir28\\Daft Punk feat. Pharrell Williams - Get lucky [dark intensity original vocal club remix edit].mp3",
+          "length": 279,
+          "size": 11185936,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-151",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 772037,
+      "fileCount": 6,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share107\\root26\\Daft Punk - Get Lucky (Fabian Special Disco Mix)\\Daft Punk - Get Lucky (Fabian Special Disco Mix)\\Get Lucky (Fabian Special Disco Mix) (Mixshow).mp3",
+          "length": 265,
+          "size": 11037121,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share107\\root26\\Daft Punk - Get Lucky (Fabian Special Disco Mix)\\Daft Punk - Get Lucky (Fabian Special Disco Mix)\\Get Lucky (Fabian Special Disco Mix) (Mixshow).mxm",
+          "size": 63290,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share107\\root26\\Daft Punk - Get Lucky (Fabian Special Disco Mix)\\__MACOSX\\._Daft Punk - Get Lucky (Fabian Special Disco Mix)",
+          "size": 178,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share107\\root27\\__MACOSX\\Daft Punk - Get Lucky (Fabian Special Disco Mix)\\._.DS_Store",
+          "size": 120,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share107\\root28\\++DISCO ALBUMS\\Daft Punk - Get Lucky\\Daft Punk - Get Lucky Stereo Medics [Hands Up] Remix.mp3",
+          "size": 1399,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "",
+          "filename": "@@share107\\root27\\__MACOSX\\Daft Punk - Get Lucky (Fabian Special Disco Mix)\\._Get Lucky (Fabian Special Disco Mix) (Mixshow).mp3",
+          "size": 300,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share107\\root43\\Mike And Tess\\mikeandtess - Daft Punk & Dimitri From Paris - get lucky ( mikeandtess edit 4 mix).mp3",
+          "length": 348,
+          "size": 13967576,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-033",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1713970,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share035\\root29\\NOW That's What I Call Music! 85 (2013)\\CD1\\01. Daft Punk Feat. Pharrell Williams - Get Lucky.flac",
+          "length": 249,
+          "sampleRate": 44100,
+          "size": 31387214,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-180",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 3764295,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 96,
+          "code": 1,
+          "extension": "ogg",
+          "filename": "root11\\Daft Punk\\Get Lucky (Daft Punk Remix) (feat. Pharrell Williams & Nile Rodgers)\\01 - Get Lucky - Daft Punk Remix.ogg",
+          "isVariableBitRate": true,
+          "length": 632,
+          "size": 7444665,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-202",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1702997,
+      "fileCount": 2,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "code": 1,
+          "extension": "opus",
+          "filename": "root30\\Daft Punk\\Daft Punk - Random Access Memories (2013)\\08. Daft Punk - Get Lucky (feat. Pharrell Williams and Nile Rodgers).opus",
+          "size": 3074365,
+          "isLocked": false
+        },
+        {
+          "code": 1,
+          "extension": "opus",
+          "filename": "root30\\Daft Punk\\Daft Punk - Random Access Memories (Drumless Edition) (2023)\\08. Daft Punk - Get Lucky (Drumless Edition) (ft. Pharrell Williams and Nile Rodgers).opus",
+          "size": 3181900,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-035",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 121,
+      "uploadSpeed": 797579,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 137,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share037\\root31\\Drumless Tracks (audio)\\Daft Punk - Random Access Memories (Drumless Edition)\\Daft Punk - Get Lucky (Drumless Edition) (Audio) ft. Pharrell Williams, Nile Rodgers.m4a",
+          "length": 370,
+          "size": 6382654,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-096",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 207961,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 240,
+          "code": 1,
+          "extension": "mp3",
+          "filename": "root32\\Various Artists\\Bravo Hits 82\\102_daft_punk_feat.pharrell_williams-get_lucky.mp3",
+          "isVariableBitRate": true,
+          "length": 249,
+          "size": 7547994,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-222",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 3038700,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 239,
+          "code": 1,
+          "extension": "mp3",
+          "filename": "root33\\Daft Punk\\Random Access Memories\\8. Get Lucky.mp3",
+          "isVariableBitRate": true,
+          "length": 369,
+          "size": 11087776,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-192",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 100,
+      "uploadSpeed": 937373,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "root34\\Kishi Bashi\\Humans vs Robots - An Orchestral Tribute to Daft Punk (2021)\\Nu Deco Ensemble - Humans vs Robots - An Orchestral Tribute to Daft Punk - 04 Giorgio by Moroder _ Get Lucky _ Contact.flac",
+          "length": 574,
+          "sampleRate": 44100,
+          "size": 63384273,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-056",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1181875,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "root35\\Daft Punk Tribute HALFSTEP Mashup Pack\\DF Mashup\\Get Lucky Mind Control (HALFSTEP Mashup).mp3",
+          "isVariableBitRate": false,
+          "length": 185,
+          "size": 9212041,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-013",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 799414,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 240,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share014\\root36\\Daft Punk\\Daughter - Get Lucky (Daft Punk Cover) (Pretty Pink Edit).mp3",
+          "length": 349,
+          "size": 10505510,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-097",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1009505,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share090\\root37\\Daughter - Get Lucky (Originally by Daft Punk feat. Pharrell Williams).mp3",
+          "length": 293,
+          "size": 11848875,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-084",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 2020943,
+      "fileCount": 2,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 192,
+          "code": 1,
+          "extension": "",
+          "filename": "root39\\Andrew Gold - Spooky Scary Skeletons (Remixed with Daft Punk - Get Lucky).mp3",
+          "isVariableBitRate": false,
+          "length": 170,
+          "size": 4090197,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-205",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1580209,
+      "fileCount": 3,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "flac",
+          "filename": "root41\\Daft Punk\\Get Lucky\\Daft Punk_Get Lucky_02_Get Lucky (album version).flac",
+          "length": 618,
+          "sampleRate": 44100,
+          "size": 73267121,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-105",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 42,
+      "uploadSpeed": 1808848,
+      "fileCount": 8,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "root42\\Daft Punk\\Get Lucky (Daft Punk remix)\\1 - ゲット・ラッキ — Remix.flac",
+          "length": 632,
+          "sampleRate": 44100,
+          "size": 75059270,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-155",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 14545370,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "mp3",
+          "filename": "root44\\Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers] - Daft Punk Pharrell Williams Nile Rodgers - Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers].mp3",
+          "isVariableBitRate": false,
+          "length": 248,
+          "size": 9995447,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-198",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 4917764,
+      "fileCount": 1,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitDepth": 16,
+          "code": 1,
+          "extension": "",
+          "filename": "root45\\HOME\\user\\18 - Daft Punk - Get Lucky (HOME Remix).flac",
+          "length": 105,
+          "sampleRate": 44100,
+          "size": 11735314,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-137",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 4139304,
+      "fileCount": 2,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "root46\\Daft Punk\\2021 - About And Technologic Mashup (2021)\\06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg)[Clean].mp3",
+          "isVariableBitRate": false,
+          "length": 227,
+          "size": 9581047,
+          "isLocked": false
+        },
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "root46\\Daft Punk\\2021 - About And Technologic Mashup (2021)\\19. Tom Petty X Daft Punk - You Get Lucky (Adam Dutch Segue).mp3",
+          "isVariableBitRate": false,
+          "length": 343,
+          "size": 14237811,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    },
+    {
+      "username": "peer-112",
+      "token": 13,
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1576475,
+      "fileCount": 9,
+      "lockedFileCount": 0,
+      "files": [
+        {
+          "bitRate": 320,
+          "code": 1,
+          "extension": "",
+          "filename": "@@share096\\00_ORIGINAL_BACKUP\\dir06\\Daft punk - Get Lucky (Feat. Pharrell Williams).mp3",
+          "length": 369,
+          "size": 14805885,
+          "isLocked": false
+        }
+      ],
+      "lockedFiles": []
+    }
+  ],
+  "_fixture": {
+    "source": "REAL slskd 0.26.0 search 'Daft Punk Get Lucky', A6 Phase C, 2026-09-26; curated subset; usernames and @@share aliases replaced; paths, sizes and metadata unchanged. Top-level counts refer to the full search.",
+    "sanitization_note": "Usernames replaced (peer-NNN), share aliases replaced (@@shareNNN). Every folder above the artist/album level replaced with neutral rootNN tokens, and any remaining personal (non artist/album/release) folder replaced with dirNN. Basenames, sizes and all metadata unchanged.",
+    "curated_addition": "Two real VBR V0-level MP3 rows (peer-096 240 kbps, peer-222 239 kbps) added from the same search on 2026-09-27, cleaned the same way (upper folders to root32/root33).",
+    "curated_addition_2": "Two real rows added from the same search on 2026-09-28 for the artist/title filter: peer-192's Nu Deco Ensemble orchestral tribute medley FLAC (574 s, 60.4 MiB; different artist, several titles in one basename) and peer-056's HALFSTEP mashup-pack MP3 from a 'Daft Punk Tribute' folder. Cleaned the same way (upper folders to root34/root35).",
+    "curated_addition_3": "Ten real rows added from the same search on 2026-09-28 as must-pass or must-reject cases for the artist/title filter (Daughter covers, title-first and remixer-first names, underscore names that repeat the title, a non-Latin basename under a titled folder, a repeated-title name, a 'Does Daft Punk' remix, and an other-song mashup). Cleaned the same way (upper folders to root36-root44, personal folders to dir04/dir05).",
+    "curated_addition_4": "Four real rows added on 2026-09-28: the 105 s HOME Remix FLAC fragment (must be rejected by the relative short check), two files from an 'About And Technologic Mashup (2021)' folder (a Dj Allan bootleg that must pass, and 'Tom Petty X Daft Punk - You Get Lucky' that must fail the title check), and a plain single under a '00_ORIGINAL_BACKUP' folder (a folder word must not set the version class). Cleaned the same way (root45, root46, dir06)."
+  }
+}

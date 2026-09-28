@@ -12,8 +12,9 @@ import {
   isSearchComplete,
   isTransferErrored,
   isTransferSucceeded,
+  observedTransferId,
   resolveDownloadedFile,
-  selectSearchResult,
+  selectSearch,
   type AcquisitionProvider,
   type SelectedSearchFile,
 } from "@subwave-ai/providers";
@@ -31,18 +32,25 @@ type DownloadPayload = {
   user?: string;
   files?: Array<{ filename: string; size: number }>;
   enqueued?: boolean;
+  /** Transfer id from the enqueue response, when that body included exactly one. */
+  transferId?: string;
 };
 
 function acquisitionUnavailable(provider: AcquisitionProvider): boolean {
   return provider.kind === "unverified" || provider.verifyStatus !== "verified";
 }
 
-function fail(ctx: Parameters<JobHandler>[0], requestId: string, message: string): never {
+function fail(
+  ctx: Parameters<JobHandler>[0],
+  requestId: string,
+  message: string,
+  detail?: Record<string, unknown>,
+): never {
   transitionRequest(ctx.db, {
     requestId,
     to: "FAILED",
     actor: ctx.workerId,
-    payload: { error: message },
+    payload: { error: message, ...detail },
     patch: { error: message },
   });
   throw new Error(message);
@@ -141,6 +149,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
 
   const payload = parsePayload(job.payload_json);
   let selected = selectedFromPayload(payload);
+  let selectionScore: { breakdown: Record<string, number>; total: number; signals: unknown } | undefined;
 
   // --- Phase 1: poll search + select + enqueue (QUEUED) ---
   if (request.status === "QUEUED" && !payload.enqueued) {
@@ -156,16 +165,50 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         scheduleDownload(ctx, request.id, payload);
         return { waiting: true, reason: "search_incomplete", searchId: payload.searchId };
       }
-      selected = selectSearchResult(searchPayload, {
+      const selection = ctx.config.acquisition.selection;
+      const decision = selectSearch(searchPayload, {
         allowedExtensions: ctx.config.files.allowed_extensions,
+        minFileSizeMb: selection.min_file_size_mb,
+        maxFileSizeMb: selection.max_file_size_mb,
+        maxDurationSeconds: selection.max_duration_seconds,
+        maxSampleRate: selection.max_sample_rate,
+        maxBitDepth: selection.max_bit_depth,
+        preferredMaxFileSizeMb: selection.preferred_max_file_size_mb,
+        preferredMaxDurationSeconds: selection.preferred_max_duration_seconds,
+        versionPreference: selection.version_preference,
+        formatPreference: selection.format_preference,
+        bitrateFloorKbps: selection.bitrate_floor_kbps,
+        shortRecordingFraction: selection.short_recording_fraction,
+        shortRecordingMinSamples: selection.short_recording_min_samples,
+        shortRecordingFloorSeconds: selection.short_recording_floor_seconds,
+        shortRecordingPenalty: selection.short_recording_penalty,
+        versionPenaltyTerms: selection.version_penalty_terms,
+        instrumentPartBasenames: selection.instrument_part_basenames,
+        longRecordingPhrases: selection.long_recording_phrases,
+        query: {
+          artist: request.artist ?? undefined,
+          title: request.title ?? undefined,
+        },
       });
-      if (!selected) {
+      if (decision.outcome === "selected") {
+        selected = decision.file;
+        selectionScore = {
+          breakdown: decision.breakdown,
+          total: decision.total,
+          signals: decision.signals,
+        };
+      } else if (decision.outcome === "no_suitable_result") {
+        // QUEUED → FAILED. Filters already removed every candidate; do not enqueue.
+        fail(ctx, request.id, decision.reason, { outcome: "no_suitable_result", removed: decision.removed });
+      } else {
+        // No response rows, or rows with nothing the filters could consider.
         fail(ctx, request.id, "no usable search result");
       }
     }
 
     const files = [{ filename: selected.filename, size: selected.size }];
-    await ctx.providers.acquisition.enqueueDownload(selected.username, files);
+    const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(selected.username, files);
+    const transferId = observedTransferId(enqueuedBody, { filename: selected.filename, size: selected.size });
     // REQUEST_ACCEPTED only after enqueue succeeds (A4).
     await ctx.providers.radio.say({
       text: requestAcceptedContext(ctx.db, request),
@@ -175,7 +218,11 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       requestId: request.id,
       to: "DOWNLOADING",
       actor: ctx.workerId,
-      payload: { event: "REQUEST_ACCEPTED", selected },
+      payload: {
+        event: "REQUEST_ACCEPTED",
+        selected,
+        ...(selectionScore ? { selection_score: selectionScore } : {}),
+      },
     });
     const existing = listAcquisitionItems(ctx.db, request.id);
     const itemId =
@@ -198,8 +245,9 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       user: selected.username,
       files,
       enqueued: true,
+      ...(transferId ? { transferId } : {}),
     });
-    return { enqueued: true, selected };
+    return { enqueued: true, selected, ...(selectionScore ? { selection_score: selectionScore } : {}) };
   }
 
   // --- Phase 2: poll transfers until correlated Completed+Succeeded + file exists ---
@@ -223,11 +271,13 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   }
 
   const snapshot = await ctx.providers.acquisition.listDownloads();
+  // Search hits have no id. Correlate on username + the original filename + size.
+  // `transferId` is set only when the enqueue body included one real transfer id.
   const transfer = findCorrelatedTransfer(snapshot, {
     username: selected.username,
     filename: selected.filename,
     size: selected.size,
-    id: selected.fileId,
+    ...(payload.transferId ? { id: payload.transferId } : {}),
   });
 
   const existing = listAcquisitionItems(ctx.db, request.id);

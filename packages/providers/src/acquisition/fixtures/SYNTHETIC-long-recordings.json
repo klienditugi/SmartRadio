@@ -1,0 +1,128 @@
+{
+  "label": "SYNTHETIC",
+  "note": "SYNTHETIC. Not from the Phase C search. The curated extract has no hour-long DJ set, continuous mix, radio show, podcast, full album, concert, or locked file. These rows exist only so those cases can be tested.",
+  "responses": [
+    {
+      "username": "SYNTHETIC-dj-set",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@shareSYN\\SYNTHETIC DJ Set\\Get Lucky (Remix DJ Set).mp3",
+          "size": 20971520,
+          "length": 600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-continuous-60",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@shareSYN\\SYNTHETIC continuous mix\\Get Lucky Continuous Mix.mp3",
+          "size": 83886080,
+          "length": 3600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-continuous-15",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@shareSYN\\SYNTHETIC continuous mix\\Get Lucky Continuous Mix.mp3",
+          "size": 31457280,
+          "length": 900,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-radio-show",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@shareSYN\\SYNTHETIC Radio Show Episode 4\\Get Lucky.mp3",
+          "size": 20971520,
+          "length": 600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-podcast",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 1600000,
+      "files": [
+        {
+          "filename": "@@shareSYN\\SYNTHETIC podcast\\Get Lucky.mp3",
+          "size": 20971520,
+          "length": 500,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-full-album",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@shareSYN\\SYNTHETIC full album\\Get Lucky.mp3",
+          "size": 20971520,
+          "length": 600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-concert",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [
+        {
+          "filename": "@@shareSYN\\SYNTHETIC concert\\Get Lucky.mp3",
+          "size": 20971520,
+          "length": 600,
+          "extension": "",
+          "bitRate": 320
+        }
+      ]
+    },
+    {
+      "username": "SYNTHETIC-locked",
+      "hasFreeUploadSlot": true,
+      "queueLength": 0,
+      "uploadSpeed": 9000000,
+      "files": [],
+      "lockedFiles": [
+        {
+          "filename": "@@shareSYN\\SYNTHETIC locked\\Get Lucky.mp3",
+          "size": 14680064,
+          "length": 369,
+          "extension": "",
+          "bitRate": 320,
+          "isLocked": false
+        }
+      ]
+    }
+  ]
+}

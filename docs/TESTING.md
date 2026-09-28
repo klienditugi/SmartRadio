@@ -30,7 +30,7 @@ Happy-path ingest does **not** require SmartRadio to trigger a Navidrome scan (N
 ## Install / ops scripts
 
 ```bash
-bash -n install.sh update.sh uninstall.sh backup.sh restore.sh doctor.sh scripts/ops-common.sh
+bash -n install.sh update.sh uninstall.sh backup.sh restore.sh doctor.sh scripts/ops-common.sh deploy/slskd/install-slskd.sh
 pnpm test   # includes scripts/ops-scripts.test.ts
 ./doctor.sh # when the API is not running, health is expected to FAIL
 ```

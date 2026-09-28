@@ -44,42 +44,117 @@ policy:
   blocked_artists: []
   blocked_terms: []
 
-# External Ollama only. Never install/update/pull models from this app.
+# Optional at boot. Empty ${OLLAMA_BASE_URL} or ${OLLAMA_MODEL} is unset (`not_configured`).
+# External Ollama only. Never install/update/pull models from this app. No default model name.
 # Live example (not a default): http://100.119.17.28:11434 v0.34.0. Do not hard-code qwen3:8b.
+# verify_status in yaml or env is deprecated and ignored. Test connection stores the result.
+# Filling in the URL does not verify. Blank URL or model is not_configured.
 llm:
   provider: ollama
   base_url: "${OLLAMA_BASE_URL}"
   model: "${OLLAMA_MODEL}"
   timeout_ms: 120000
-  verify_status: verified
 
+# Optional at boot. Empty ${NAVIDROME_URL} / ${NAVIDROME_USER} (or a missing
+# secrets/navidrome_password) is `not_configured`. Do not invent a host.
+# Passive on the happy path: startScan is ops-only. ~1min scanner picks up /music/library.
+# verify_status in this file is deprecated and ignored. Test connection is the only verification.
 library:
   provider: navidrome
   base_url: "${NAVIDROME_URL}"
   username: "${NAVIDROME_USER}"
   client_name: "subwave-ai"
   api_version: "1.16.1"
-  verify_status: verified
-  # Passive on the happy path: startScan is ops-only. ~1min scanner picks up /music/library.
 
+# Optional at boot. Empty ${SUBWAVE_RADIO_URL} / ${SUBWAVE_RADIO_ADMIN_USER}
+# (or a missing secrets/subwave_admin_password) is `not_configured`.
 # Opaque base URL (live example already includes `/api`: http://127.0.0.1:7700/api).
 # Playback: GET /dj/search, then POST /dj/queue-track {id,title} (artist/album optional; HTTP 409 = never-play).
 # Notify: POST /dj/say {text, mode:styled, kind:dj-speak|link} with the same admin Basic auth.
 # REQUEST_ACCEPTED only after a transfer is enqueued. TRACK_READY after search shows a string id, then say, then queue.
 # Do not use public POST /request for announcements. URL and admin password come from this file and secrets/.
+# verify_status in yaml or env is deprecated and ignored. Test connection stores the result.
 radio:
   provider: subwave
   base_url: "${SUBWAVE_RADIO_URL}"
   admin_user: "${SUBWAVE_RADIO_ADMIN_USER}"
-  verify_status: verified
 
-# Optional. enabled: false, a non-slskd provider, a missing URL/key, or verify_status other than
-# verified → doctor.acquire_unavailable. Landing dir is config-only (live example: /music/downloads).
-# A6: verify_status becomes verified only after admin test-connection (read-only
-# GET /api/v0/application and GET /api/v0/server). Saving the URL and API key does not verify.
+# Optional. enabled: false, a non-slskd provider, or a missing URL/key → doctor.acquire_unavailable.
+# A stored test-connection is the only way to verify. Yaml verify_status is ignored.
+# An install verified the old way (verify_status in this file) shows configured_unverified until
+# test-connection is run again. Landing dir is config-only (live example: /music/downloads).
+# Test connection is read-only GET /api/v0/application and GET /api/v0/server.
 # Soulseek username/password are not stored here. API key: secrets/slskd_api_key.
 acquisition:
   enabled: false
   provider: slskd
   base_url: "${SLSKD_URL}"
-  verify_status: unverified
+  # Search-hit pick (worker, deterministic, no LLM). See docs/SLSKD.md.
+  # Sizes are MiB (1 MiB = 1,048,576 bytes). The _mb key names stay as they are.
+  # max_file_size_mb is a hard reject. Default 30. There is no size curve.
+  # An older example used 200. Existing installs should set max_file_size_mb to 30.
+  # Doctor warns when the value is above 30. The warning is not an error.
+  # preferred_max_file_size_mb and preferred_max_duration_seconds are kept so older
+  # files still load. The selector does not use them.
+  # max_duration_seconds (default 1200) is a hard cap. Null disables it.
+  # version_preference: balanced | radio_edit | original | extended | remix.
+  # Default balanced: remix, club, and extended first, then album or original, then radio edit.
+  # format_preference: auto | prefer_mp3 | prefer_flac | mp3_only | flac_only.
+  # Default prefer_mp3. mp3_only and flac_only are hard filters.
+  # Old keys extended_version_bonus and lossless_preference are ignored. Doctor names the replacements.
+  # Optional env: SLSKD_MAX_FILE_SIZE_MB, SLSKD_MIN_FILE_SIZE_MB,
+  # SLSKD_PREFERRED_MAX_FILE_SIZE_MB, SLSKD_MAX_DURATION_SECONDS,
+  # SLSKD_PREFERRED_MAX_DURATION_SECONDS, SLSKD_VERSION_PREFERENCE,
+  # SLSKD_FORMAT_PREFERENCE, SLSKD_MAX_SAMPLE_RATE, SLSKD_MAX_BIT_DEPTH.
+  selection:
+    max_file_size_mb: 30
+    min_file_size_mb: 1
+    preferred_max_file_size_mb: 30
+    max_duration_seconds: 1200
+    preferred_max_duration_seconds: 720
+    version_preference: balanced
+    format_preference: prefer_mp3
+    bitrate_floor_kbps: 192
+    # Short tracks are rejected: below 0.6 of the search median (needs 5 known lengths) or below 90s.
+    # short_recording_penalty 0 turns that reject off. The number is not a score.
+    short_recording_fraction: 0.6
+    short_recording_min_samples: 5
+    short_recording_floor_seconds: 90
+    short_recording_penalty: -1900
+    max_sample_rate: 48000
+    max_bit_depth: 24
+    version_penalty_terms:
+      - remix
+      - live
+      - edit
+      - extended
+      - radio edit
+      - instrumental
+      - karaoke
+      - cover
+      - acapella
+      - a cappella
+      - acappella
+      - stem
+      - stems
+      - multitrack
+      - demo
+    instrument_part_basenames:
+      - drums
+      - drum
+      - bass
+      - guitar
+      - guitars
+      - vocals
+      - vocal
+      - vox
+      - keys
+      - piano
+      - synth
+      - backing
+      - click
+      - rhythm
+      - lead
+      - song
+      - crowd
+      - preview

@@ -16,7 +16,7 @@ sudo ./install.sh
 
 `install.sh` checks OS/arch/resources, creates persistent directories, writes `.env` / `config/subwave.yaml` / `secrets/` from **your** answers (no hard-coded production IPs, credentials, or model names), installs Node dependencies, builds the web UI, and installs systemd units **or** Compose.
 
-Ollama is **external**. The installer never installs, updates, pulls, or otherwise manages Ollama or any LLM weights.
+Ollama is **external**. The installer never installs, updates, pulls, or otherwise manages Ollama or any LLM weights. Navidrome, SUB/WAVE, and Ollama URL/user/password/model values may be left empty on first boot. Empty is the same as unset. The API starts and reports those integrations as `not_configured` until the setup wizard or `.env` fills them in. `unreachable` is a later live-probe result, not a missing setting.
 
 After install it prints the web UI URL (API + UI on the same origin when `apps/web/dist` exists).
 
@@ -32,7 +32,8 @@ Documented so operators can fill yaml/env on an Oracle aarch64 Linux VM. **Do no
 | Ollama | `OLLAMA_BASE_URL=http://100.119.17.28:11434` (v0.34.0 over Tailscale). Set `OLLAMA_MODEL` yourself — do not hard-code `qwen3:8b` even if that tag exists. |
 | Downloads / landing | `SUBWAVE_DOWNLOADS_DIR=/music/downloads` (acquisition landing/staging) |
 | Library | `SUBWAVE_LIBRARY_DIR=/music/library` (final library; Navidrome discovers files here) |
-| Acquisition | **No daemon on Oracle today.** Leave slskd disabled, or URL/key unset, or `verify_status: unverified`. `verified` is set only by admin test-connection. Doctor reports `acquire_unavailable`. |
+| LLM / library / radio | A blank config does not call Ollama, Navidrome, or SUB/WAVE (`not_configured`). `verified` is a stored test-connection result, never a yaml or env `verify_status`. A filled config without a matching `ready` row is `configured_unverified`: “configured but unverified, run test connection” in `GET /api/v1/doctor` (printed by `./doctor.sh`). |
+| Acquisition | **No daemon on Oracle today.** Leave slskd disabled or the URL/key unset. `verified` is a stored test-connection result. An install whose yaml said `verified` shows `configured_unverified` until test-connection is run again. Doctor reports `acquire_unavailable` until then. |
 
 Navidrome is **passive** on the happy path: once a validated track is in `/music/library`, the existing ~1 minute scanner indexes it. Do not configure SmartRadio as if it must call `startScan` for production ingest. Admin scan remains optional ops.
 
@@ -61,7 +62,7 @@ sudo ./install.sh --non-interactive
 | Script | Purpose |
 | --- | --- |
 | `./install.sh` | First install |
-| `./update.sh` | `git pull`, `pnpm install`, rebuild UI, restart this project's services |
+| `sudo ./update.sh` | On a host: `git pull`, `pnpm install`, rebuild UI, restart this project's services. Not a manual git pull plus restart. |
 | `./uninstall.sh` | Stop this project's units/compose. `--purge --force` deletes clone data/secrets/.env only |
 | `./backup.sh` | Archive config, secrets, SQLite. `--include-library` adds music (large) |
 | `./restore.sh [--force] backup.tar.gz` | Extract into the `subwave-ai` clone |
@@ -89,7 +90,11 @@ Relative `./data/downloads` and `./data/library` in the example yaml are **local
 
 ## Optional external slskd
 
-SmartRadio does not install or contain slskd. `./install.sh` and the app image do not start it. A portable compose example and `deploy/slskd/install-slskd.sh` are in `deploy/slskd/` (see `docs/SLSKD.md`). Completed downloads must be the directory SmartRadio uses as `paths.downloads`. Incomplete downloads stay on a different directory. slskd must not write the library directory. Soulseek username and password are slskd secrets in that example's `.env`, not SmartRadio settings. After it is up, set `SLSKD_URL` and paste the API key in the setup UI (`secrets/slskd_api_key`), then run **Test connection**.
+SmartRadio does not install or contain slskd. `./install.sh` and the app image do not start it. The deployment definition is `deploy/slskd/` (`slskd/slskd:0.26.0`, `install-slskd.sh`; see `docs/SLSKD.md`). `deploy/examples/slskd/` only points there. Completed downloads must be the directory SmartRadio uses as `paths.downloads`. Incomplete downloads stay on a different directory. slskd must not write the library directory. Soulseek username and password are slskd secrets in that example's `.env`, not SmartRadio settings.
+
+Same host: `SLSKD_URL=http://127.0.0.1:5030` when the API is bound to loopback, and SmartRadio's downloads path is the same host path as `SLSKD_DOWNLOADS_DIR`. Remote slskd: `SLSKD_URL` is the HTTP base this host can reach, the API key is pasted into the setup UI (`secrets/slskd_api_key`), and completed files must be readable at `paths.downloads`. Those values stay in `.env` and the setup UI.
+
+After install, and again after `sudo ./update.sh`, run **Test connection** in the setup wizard or Settings. It is read-only. `verified` is stored only when it reports Ready (see `docs/SLSKD.md`). Restart the worker after that. `./update.sh` does not mark acquisition verified.
 
 ## Health
 

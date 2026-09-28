@@ -2,7 +2,7 @@
 
 This directory is a portable example for running upstream [slskd](https://github.com/slskd/slskd) next to SmartRadio. `./install.sh`, `deploy/docker-compose.yml`, and the SmartRadio image do not start it and do not copy it into the app image.
 
-No host, cloud, or architecture is required. Docker selects `linux/amd64` or `linux/arm64` from the official manifest (`slskd/slskd`, or `ghcr.io/slskd/slskd` if you set `SLSKD_IMAGE`).
+No host or cloud is required. The image is pinned to `slskd/slskd:0.26.0`. Docker selects `linux/amd64` or `linux/arm64` from that manifest. Set `SLSKD_IMAGE` to override the tag or registry (for example `ghcr.io/slskd/slskd:0.26.0`).
 
 Soulseek username and password are **slskd** secrets. They live only in `deploy/slskd/.env`, which is gitignored. `.env.example` has empty placeholders. SmartRadio never stores them.
 
@@ -16,7 +16,7 @@ Soulseek username and password are **slskd** secrets. They live only in `deploy/
 
 There is no library volume. Do not add the SmartRadio library as a download path, an incomplete path, or a share.
 
-First-host path examples (comments only, not defaults): completed downloads `/music/downloads`, library `/music/library`.
+Comments in `.env.example` mention `/music/downloads` and `/music/library` only as the live-layout examples already in `docs/DEPLOY.md`. They are not defaults.
 
 Relative paths in `.env` are relative to this directory. `./downloads` is only a local placeholder. Point `SLSKD_DOWNLOADS_DIR` at the directory SmartRadio already uses.
 
@@ -45,7 +45,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5030/health
 
 `/health` is slskd's own check. It is not SmartRadio's Test connection.
 
-Set `SLSKD_HTTP_BIND=0.0.0.0` only when something off this host, including a SmartRadio container, must reach the API. Then use a URL that container can route, not a hard-coded address.
+Set `SLSKD_HTTP_BIND=0.0.0.0` only when something off this host, including a SmartRadio container, must reach the API. Then set `SLSKD_URL` to an address that process can route. Do not put a host name or address into application code.
 
 ## Start
 
@@ -64,18 +64,27 @@ Equivalent, after `.env` is filled:
 docker compose -f deploy/slskd/docker-compose.yml --env-file deploy/slskd/.env up -d
 ```
 
-## Phase B/C handoff
+## Same host or a remote slskd
 
-This package only gets slskd running. It does not search or enqueue downloads.
+This package only gets slskd running. It does not search or enqueue downloads. SmartRadio's URL, API key, and downloads path are configuration. See `docs/SLSKD.md` for how a Ready **Test connection** stores `verified`.
 
-When the container is up, the owner configures SmartRadio and runs **Test connection**:
+**Same host.** Leave `SLSKD_HTTP_BIND` at `127.0.0.1`. In SmartRadio's `.env`, set `SLSKD_URL` to `http://127.0.0.1:5030` (or the `SLSKD_HTTP_PORT` you set). No `/api/v0` suffix. `SLSKD_URL` overrides `acquisition.base_url` when the process starts. Set Downloads to the same host path as `SLSKD_DOWNLOADS_DIR`.
 
-1. In SmartRadio's `.env`, set `SLSKD_URL` to the HTTP base, for example `http://127.0.0.1:5030` when both run on the host. No `/api/v0` suffix is required. `SLSKD_URL` overrides `acquisition.base_url` when the process starts.
-2. Open the setup wizard or Settings. Enable acquisition and set the provider to `slskd`.
+**Remote slskd.** Set `SLSKD_HTTP_BIND` so the SmartRadio host can open the API, and set `SLSKD_URL` to that HTTP base. Paste the API key into the setup UI on the SmartRadio host. Point `SLSKD_DOWNLOADS_DIR` at this machine's view of the completed files and SmartRadio `paths.downloads` (`SUBWAVE_DOWNLOADS_DIR`) at the other machine's view of the same files. The path strings can differ. Do not mount the library.
+
+If SmartRadio itself runs in Docker, `SLSKD_URL` is an address that container can route. `127.0.0.1` inside the container is not this host.
+
+## After install and after upgrade
+
+When the container is up, configure SmartRadio and run **Test connection** in the setup wizard or Settings:
+
+1. Set `SLSKD_URL` and the downloads path for the layout above. Leave the library path as SmartRadio's library.
+2. Enable acquisition and set the provider to `slskd`.
 3. Paste `SLSKD_API_KEY` from `deploy/slskd/.env` into the API key field. The UI writes `secrets/slskd_api_key` and does not display the saved value. Leave Soulseek username and password out of SmartRadio.
-4. Set the downloads directory to the same host path as `SLSKD_DOWNLOADS_DIR`. The library directory stays SmartRadio's library.
-5. Save, then **Test connection**. That action is read-only (`GET /api/v0/application` and `GET /api/v0/server` with `X-API-Key`). Saving the form does not mark acquisition verified. `verified` is stored only when the probe is Ready: reachable, authentication ok, application `version` present, Soulseek connected and logged in.
-6. Restart the SmartRadio worker after a successful test so it reloads that config.
+4. Save, then **Test connection**. That action is read-only (`GET /api/v0/application` and `GET /api/v0/server` with `X-API-Key`). Saving the form does not store `verified`. `verified` is stored only when the probe reports Ready. Yaml or env `verify_status` is ignored. The stored row is described in `docs/SLSKD.md`.
+5. Restart the SmartRadio worker after a successful test so it reloads that config.
+
+Do the same after a SmartRadio upgrade. On a host, upgrade with `sudo ./update.sh`. That pulls, reinstalls dependencies, rebuilds the UI, and restarts this project's services. A manual `git pull` and a service restart is not the update path. `./update.sh` does not call slskd and does not store `verified`. Run **Test connection** again, and restart the worker after it reports Ready, even if `update.sh` already restarted the worker.
 
 ## Stop without deleting music
 

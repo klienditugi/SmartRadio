@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertTransition, assertCancellable } from "@subwave-ai/core";
-import type { JobStatus, JobType, RequestStatus, UserRole, VerifyStatus } from "@subwave-ai/shared";
+import { omitVerifyStatusKeys, type JobStatus, type JobType, type RequestStatus, type UserRole, type VerifyStatus } from "@subwave-ai/shared";
 import type { Db } from "./client.js";
 
 export type UserRow = {
@@ -414,6 +414,53 @@ export function updateProviderHealth(db: Db, id: string, health: unknown): void 
   );
 }
 
+export type IntegrationCheck = {
+  integration: string;
+  state: string;
+  fingerprint: string;
+  testedAt: number;
+};
+
+type IntegrationCheckRow = {
+  integration: string;
+  state: string;
+  fingerprint: string;
+  tested_at: number;
+};
+
+function mapIntegrationCheck(row: IntegrationCheckRow): IntegrationCheck {
+  return {
+    integration: row.integration,
+    state: row.state,
+    fingerprint: row.fingerprint,
+    testedAt: row.tested_at,
+  };
+}
+
+export function upsertIntegrationCheck(
+  db: Db,
+  input: { integration: string; state: string; fingerprint: string; testedAt: number },
+): void {
+  db.prepare(
+    `INSERT INTO integration_checks (integration, state, fingerprint, tested_at)
+     VALUES (@integration, @state, @fingerprint, @tested_at)
+     ON CONFLICT(integration) DO UPDATE SET
+       state = excluded.state,
+       fingerprint = excluded.fingerprint,
+       tested_at = excluded.tested_at`,
+  ).run({
+    integration: input.integration,
+    state: input.state,
+    fingerprint: input.fingerprint,
+    tested_at: input.testedAt,
+  });
+}
+
+export function listIntegrationChecks(db: Db): IntegrationCheck[] {
+  const rows = db.prepare("SELECT integration, state, fingerprint, tested_at FROM integration_checks ORDER BY integration").all() as IntegrationCheckRow[];
+  return rows.map(mapIntegrationCheck);
+}
+
 export function getSetting(db: Db, key: string): unknown {
   const row = db.prepare("SELECT value_json FROM settings WHERE key = ?").get(key) as { value_json: string } | undefined;
   return row ? JSON.parse(row.value_json) : undefined;
@@ -429,7 +476,10 @@ export function putSetting(db: Db, key: string, value: unknown, updatedBy?: stri
 export function listSettings(db: Db): Record<string, unknown> {
   const rows = db.prepare("SELECT key, value_json FROM settings").all() as { key: string; value_json: string }[];
   const out: Record<string, unknown> = {};
-  for (const row of rows) out[row.key] = JSON.parse(row.value_json);
+  for (const row of rows) {
+    if (row.key === "verify_status") continue;
+    out[row.key] = omitVerifyStatusKeys(JSON.parse(row.value_json));
+  }
   return out;
 }
 

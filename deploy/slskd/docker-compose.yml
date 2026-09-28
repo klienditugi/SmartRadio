@@ -1,20 +1,20 @@
 # Optional slskd, run beside SmartRadio. Not built into the SmartRadio image
 # and not started by deploy/docker-compose.yml or ./install.sh.
 #
-# Official multi-arch image: linux/amd64 and linux/arm64 (also linux/arm/v7).
-# Docker picks the host architecture. Switch registry with SLSKD_IMAGE
-# (ghcr.io/slskd/slskd is the same upstream image).
+# Official multi-arch image, pinned to the tag checked with this example.
+# linux/amd64 and linux/arm64. Docker picks the host architecture.
+# Override with SLSKD_IMAGE (for example ghcr.io/slskd/slskd:0.26.0).
 #
 # Volumes are completed downloads, a separate incomplete directory, and
 # persistent config/state (/app). There is no library volume.
-# First-host path examples, comments only: completed downloads /music/downloads,
-# library /music/library. Do not mount or write the library.
+# docs/DEPLOY.md live-layout examples, comments only: /music/downloads and
+# /music/library. They are not defaults. Do not mount or write the library.
 
 name: smartradio-slskd
 
 services:
   slskd:
-    image: ${SLSKD_IMAGE:-slskd/slskd:latest}
+    image: ${SLSKD_IMAGE:-slskd/slskd:0.26.0}
     # Docker user: so the process is not root. Do not also set PUID/PGID.
     user: "${SLSKD_UID:?set SLSKD_UID}:${SLSKD_GID:?set SLSKD_GID}"
     environment:

@@ -8,6 +8,11 @@ export {
   PROVIDER_KINDS,
   VERIFY_STATUSES,
   ACQUISITION_CONNECTION_STATES,
+  INTEGRATION_CONNECTION_STATES,
+  NAVIDROME_NOT_CONFIGURED,
+  SUBWAVE_RADIO_NOT_CONFIGURED,
+  ollamaNotConfiguredDetail,
+  describeIntegration,
   USER_ROLES,
 } from "./status.js";
 export type {
@@ -17,6 +22,8 @@ export type {
   ProviderKind,
   VerifyStatus,
   AcquisitionConnectionState,
+  IntegrationConnectionState,
+  IntegrationReport,
   UserRole,
 } from "./status.js";
 
@@ -37,6 +44,37 @@ export type { LoadedSecrets } from "./secrets.js";
 export {
   stationPolicySchema,
   appConfigSchema,
+  DEFAULT_MAX_FILE_SIZE_MB,
+  DEFAULT_MIN_FILE_SIZE_MB,
+  DEFAULT_PREFERRED_MAX_FILE_SIZE_MB,
+  DEFAULT_MAX_SAMPLE_RATE,
+  DEFAULT_MAX_BIT_DEPTH,
+  DEFAULT_MAX_DURATION_SECONDS,
+  DEFAULT_PREFERRED_MAX_DURATION_SECONDS,
+  VERSION_PREFERENCES,
+  DEFAULT_VERSION_PREFERENCE,
+  FORMAT_PREFERENCES,
+  DEFAULT_FORMAT_PREFERENCE,
+  DEFAULT_BITRATE_FLOOR_KBPS,
+  DEFAULT_SHORT_RECORDING_FRACTION,
+  DEFAULT_SHORT_RECORDING_MIN_SAMPLES,
+  DEFAULT_SHORT_RECORDING_FLOOR_SECONDS,
+  DEFAULT_SHORT_RECORDING_PENALTY,
+  DEFAULT_VERSION_PENALTY_TERMS,
+  DEFAULT_INSTRUMENT_PART_BASENAMES,
+  DEFAULT_EXTENDED_VERSION_TERMS,
+  DEFAULT_LONG_RECORDING_PHRASES,
+  CONFIGURED_UNVERIFIED_MESSAGE,
+  warnDeprecatedVerifyStatus,
+  resetDeprecatedVerifyStatusWarning,
+  selectionDeprecationNotes,
+  warnDeprecatedSelection,
+  resetDeprecatedSelectionWarning,
+  readVerifyStatusExplicit,
+  integrationIsConfigured,
+  isConfiguredUnverified,
+  assertSettingsDoNotVerify,
+  clearIntegrationVerifyOnChange,
   interpolateEnv,
   applyEnvOverrides,
   parseAppConfig,
@@ -47,5 +85,40 @@ export {
   mergeAppConfigPatch,
   normalizeAcquisitionSettingsPatch,
   writableConfigPath,
+  isOllamaConfigured,
+  isNavidromeConfigured,
+  isSubwaveRadioConfigured,
+  integrationStatus,
 } from "./config.js";
-export type { StationPolicy, AppConfig, RuntimeConfig, LoadConfigOptions, AppConfigPatch } from "./config.js";
+export type {
+  StationPolicy,
+  AppConfig,
+  RuntimeConfig,
+  LoadConfigOptions,
+  AcquisitionSettingsPatch,
+  AppConfigPatch,
+  CoreIntegration,
+  VerifyStatusExplicit,
+  IntegrationStatusMap,
+  VersionPreference,
+  FormatPreference,
+} from "./config.js";
+
+export { assertEnvPinnedUnchanged, EnvPinnedError, fieldSourcesFor } from "./field-source.js";
+export type { FieldSource, FieldSources, SettingSource } from "./field-source.js";
+
+export {
+  VERIFY_STATUS_WRITE_REJECTED,
+  VerifyStatusWriteError,
+  assertNoVerifyStatusKey,
+  containsVerifyStatusKey,
+  omitVerifyStatusKeys,
+} from "./verify-status-write.js";
+
+export {
+  INTEGRATION_NAMES,
+  integrationConfigFingerprint,
+  findMatchingIntegrationCheck,
+  applyStoredVerification,
+} from "./verification.js";
+export type { IntegrationName, StoredIntegrationCheck } from "./verification.js";

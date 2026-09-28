@@ -1,7 +1,10 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listJobs } from "@subwave-ai/db";
+import { loadConfig, resetDeprecatedSelectionWarning } from "@subwave-ai/shared";
 import { buildApp } from "./app.js";
 import { testConfig, testDb } from "./test-harness.js";
 
@@ -212,12 +215,9 @@ describe("A6 acquisition settings", () => {
     });
     expect(status.statusCode).toBe(200);
     expect(status.json().probed).toBe(true);
-    expect(status.json().state).toBe("soulseek_not_connected");
+    expect(status.json().state).toBe("ready");
     expect(status.json().settings.verify_status).toBe("verified");
-    expect(calls).toEqual([
-      "GET http://slskd.example/api/v0/application",
-      "GET http://slskd.example/api/v0/server",
-    ]);
+    expect(calls).toEqual([]);
   });
 
   it("reports disabled and not_configured from config without probing", async () => {
@@ -354,13 +354,320 @@ describe("A6 acquisition settings", () => {
       throw new Error(`boom ${API_KEY}`);
     });
     const down = await ctx.app.inject({
-      method: "GET",
-      url: "/api/v1/acquisition/status",
+      method: "POST",
+      url: "/api/v1/acquisition/test-connection",
       headers: ctx.headers,
     });
     expect(down.json().state).toBe("unreachable");
     expect(down.json().probed).toBe(true);
     expect(JSON.stringify(down.json())).not.toContain(API_KEY);
     expect(ctx.logs.join("")).not.toContain(API_KEY);
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("status must not probe");
+    });
+    const stored = await ctx.app.inject({
+      method: "GET",
+      url: "/api/v1/acquisition/status",
+      headers: ctx.headers,
+    });
+    expect(stored.json().state).toBe("unreachable");
+    expect(stored.json().settings.verify_status).toBe("unverified");
+  });
+
+  it("reads and writes selector policy, reports sources, and keeps an ignored preferred size", async () => {
+    const ctx = await adminApp();
+    fixtures.push(ctx.cleanup);
+    const before = await ctx.app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers: ctx.headers });
+    expect(before.statusCode).toBe(200);
+    expect(before.json().selection).toMatchObject({
+      preferred_max_file_size_mb: 30,
+      max_file_size_mb: 30,
+      preferred_max_duration_seconds: 720,
+      max_duration_seconds: 1200,
+      version_preference: "balanced",
+      format_preference: "prefer_mp3",
+    });
+    expect(before.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({ source: "default" });
+    expect(before.json().sources["acquisition.selection.max_duration_seconds"]).toEqual({ source: "default" });
+    expect(JSON.stringify(before.json())).not.toContain(API_KEY);
+
+    const saved = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: {
+        selection: {
+          preferred_max_file_size_mb: 20,
+          preferred_max_duration_seconds: 600,
+          max_duration_seconds: 900,
+          version_preference: "radio_edit",
+          format_preference: "flac_only",
+        },
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().selection).toMatchObject({
+      preferred_max_file_size_mb: 20,
+      preferred_max_duration_seconds: 600,
+      max_duration_seconds: 900,
+      version_preference: "radio_edit",
+      format_preference: "flac_only",
+    });
+    expect(saved.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({ source: "yaml" });
+    expect(ctx.app.config.acquisition.selection.format_preference).toBe("flac_only");
+    expect(saved.json().sources["acquisition.selection.version_preference"]).toEqual({ source: "yaml" });
+    expect(saved.json().sources["acquisition.selection.format_preference"]).toEqual({ source: "yaml" });
+
+    const invalid = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { version_preference: "hip-hop", format_preference: "wav" } },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error).toMatch(/version_preference/);
+    expect(ctx.app.config.acquisition.selection.version_preference).toBe("radio_edit");
+
+    const ignoredPreferred = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { preferred_max_file_size_mb: 250 } },
+    });
+    expect(ignoredPreferred.statusCode).toBe(200);
+    expect(ignoredPreferred.json().selection.preferred_max_file_size_mb).toBe(250);
+    expect(ctx.app.config.acquisition.selection.preferred_max_file_size_mb).toBe(250);
+
+    const tooLong = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { preferred_max_duration_seconds: 1000, max_duration_seconds: 900 } },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error).toMatch(/preferred_max_duration_seconds/);
+
+    const disabled = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { max_duration_seconds: null, preferred_max_duration_seconds: 900 } },
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json().selection.max_duration_seconds).toBeNull();
+    expect(disabled.json().selection.preferred_max_duration_seconds).toBe(900);
+  });
+
+  it("keeps an env-pinned preferred file size read-only", async () => {
+    const previous = process.env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB;
+    process.env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB = "28";
+    const ctx = await adminApp();
+    fixtures.push(() => {
+      ctx.cleanup();
+      if (previous === undefined) delete process.env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB;
+      else process.env.SLSKD_PREFERRED_MAX_FILE_SIZE_MB = previous;
+    });
+    const got = await ctx.app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers: ctx.headers });
+    expect(got.json().selection.preferred_max_file_size_mb).toBe(28);
+    expect(got.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({
+      source: "env",
+      env: "SLSKD_PREFERRED_MAX_FILE_SIZE_MB",
+    });
+    const rejected = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { preferred_max_file_size_mb: 20 } },
+    });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json().error).toContain("SLSKD_PREFERRED_MAX_FILE_SIZE_MB");
+    expect(ctx.app.config.acquisition.selection.preferred_max_file_size_mb).toBe(28);
+    const same = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { preferred_max_file_size_mb: 28, version_preference: "remix" } },
+    });
+    expect(same.statusCode).toBe(200);
+    expect(same.json().selection.version_preference).toBe("remix");
+    expect(same.json().selection.preferred_max_file_size_mb).toBe(28);
+  });
+
+  it("keeps an env-pinned version preference read-only and rejects an invalid format", async () => {
+    const previous = process.env.SLSKD_VERSION_PREFERENCE;
+    process.env.SLSKD_VERSION_PREFERENCE = "original";
+    const ctx = await adminApp();
+    fixtures.push(() => {
+      ctx.cleanup();
+      if (previous === undefined) delete process.env.SLSKD_VERSION_PREFERENCE;
+      else process.env.SLSKD_VERSION_PREFERENCE = previous;
+    });
+    const got = await ctx.app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers: ctx.headers });
+    expect(got.json().selection.version_preference).toBe("original");
+    expect(got.json().sources["acquisition.selection.version_preference"]).toEqual({
+      source: "env",
+      env: "SLSKD_VERSION_PREFERENCE",
+    });
+    expect(got.json().selection.format_preference).toBe("prefer_mp3");
+    expect(got.json().sources["acquisition.selection.format_preference"]).toEqual({ source: "default" });
+    const rejected = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { version_preference: "remix" } },
+    });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json().error).toContain("SLSKD_VERSION_PREFERENCE");
+    expect(ctx.app.config.acquisition.selection.version_preference).toBe("original");
+    const badFormat = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers: ctx.headers,
+      payload: { selection: { format_preference: "lossy" } },
+    });
+    expect(badFormat.statusCode).toBe(400);
+    expect(badFormat.json().error).toMatch(/format_preference/);
+  });
+
+  it("doctor warns that deprecated selector keys are ignored and does not translate them", async () => {
+    resetDeprecatedSelectionWarning();
+    const dir = mkdtempSync(path.join(os.tmpdir(), "subwave-api-deprecation-"));
+    const secrets = path.join(dir, "secrets");
+    mkdirSync(secrets);
+    writeFileSync(path.join(secrets, "admin_password"), "test-admin-password");
+    writeFileSync(path.join(secrets, "session_secret"), "test-session-secret");
+    const cfgPath = path.join(dir, "subwave.yaml");
+    writeFileSync(
+      cfgPath,
+      `
+server:
+  host: "127.0.0.1"
+  port: 8788
+database:
+  path: ":memory:"
+paths:
+  secrets_dir: "${secrets}"
+  downloads: "${path.join(dir, "downloads")}"
+  staging: "${path.join(dir, "staging")}"
+  library: "${path.join(dir, "library")}"
+acquisition:
+  provider: slskd
+  base_url: ""
+  selection:
+    extended_version_bonus: false
+    lossless_preference: 0
+`,
+    );
+    const previousVersion = process.env.SLSKD_EXTENDED_VERSION_BONUS;
+    const previousFormat = process.env.SLSKD_LOSSLESS_PREFERENCE;
+    process.env.SLSKD_EXTENDED_VERSION_BONUS = "true";
+    process.env.SLSKD_LOSSLESS_PREFERENCE = "36";
+    const config = loadConfig({ configPath: cfgPath });
+    const db = testDb(config);
+    const app = await buildApp({ config, db, serveWeb: false, logger: false });
+    fixtures.push(() => {
+      void app.close();
+      if (previousVersion === undefined) delete process.env.SLSKD_EXTENDED_VERSION_BONUS;
+      else process.env.SLSKD_EXTENDED_VERSION_BONUS = previousVersion;
+      if (previousFormat === undefined) delete process.env.SLSKD_LOSSLESS_PREFERENCE;
+      else process.env.SLSKD_LOSSLESS_PREFERENCE = previousFormat;
+      rmSync(dir, { recursive: true, force: true });
+    });
+    expect(config.acquisition.selection.version_preference).toBe("balanced");
+    expect(config.acquisition.selection.format_preference).toBe("prefer_mp3");
+    const doctor = await app.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(doctor.statusCode).toBe(200);
+    const notes = doctor.json().notes.join("\n");
+    expect(notes).toContain("extended_version_bonus is deprecated and ignored");
+    expect(notes).toContain("acquisition.selection.version_preference");
+    expect(notes).toContain("SLSKD_VERSION_PREFERENCE");
+    expect(notes).toContain("lossless_preference is deprecated and ignored");
+    expect(notes).toContain("acquisition.selection.format_preference");
+    expect(notes).toContain("SLSKD_LOSSLESS_PREFERENCE is deprecated and ignored");
+    expect(notes).toContain("SLSKD_FORMAT_PREFERENCE");
+    expect(notes).toContain("Selection sizes are MiB (1 MiB = 1,048,576 bytes)");
+    expect(notes).toContain("preferred_max_file_size_mb");
+    expect(notes).toContain("min_file_size_mb");
+    expect(notes).toContain("max_file_size_mb");
+    expect(notes).not.toContain("recommended web-radio value is 30");
+    const deprecation = (doctor.json().notes as string[]).filter((note) => note.includes("deprecated and ignored")).join("\n");
+    expect(deprecation).not.toMatch(/password|api_key|secret|true|false|\b36\b|\b0\b/i);
+  });
+
+  it("doctor warns when max_file_size_mb is above 30 and a hard max of 25 still loads", async () => {
+    resetDeprecatedSelectionWarning();
+    const dir = mkdtempSync(path.join(os.tmpdir(), "subwave-api-size-"));
+    const secrets = path.join(dir, "secrets");
+    mkdirSync(secrets);
+    writeFileSync(path.join(secrets, "admin_password"), "test-admin-password");
+    writeFileSync(path.join(secrets, "session_secret"), "test-session-secret");
+    const cfgPath = path.join(dir, "subwave.yaml");
+    const yaml = (max: number) => `
+server:
+  host: "127.0.0.1"
+  port: 8788
+database:
+  path: ":memory:"
+paths:
+  secrets_dir: "${secrets}"
+  downloads: "${path.join(dir, "downloads")}"
+  staging: "${path.join(dir, "staging")}"
+  library: "${path.join(dir, "library")}"
+acquisition:
+  provider: slskd
+  base_url: ""
+  selection:
+    max_file_size_mb: ${max}
+    preferred_max_file_size_mb: 30
+`;
+    writeFileSync(cfgPath, yaml(200));
+    const warned = loadConfig({ configPath: cfgPath, env: {} });
+    const warnedDb = testDb(warned);
+    const warnedApp = await buildApp({ config: warned, db: warnedDb, serveWeb: false, logger: false });
+    const doctor = await warnedApp.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(doctor.statusCode).toBe(200);
+    expect(doctor.json().ok).toBe(true);
+    const notes = (doctor.json().notes as string[]).join("\n");
+    expect(notes).toContain("max_file_size_mb is above 30");
+    expect(notes).toContain("recommended web-radio value is 30");
+    expect(doctor.json().acquire_unavailable).toBe(true);
+    await warnedApp.close();
+
+    resetDeprecatedSelectionWarning();
+    writeFileSync(cfgPath, yaml(25));
+    const tight = loadConfig({ configPath: cfgPath, env: {} });
+    expect(tight.acquisition.selection.max_file_size_mb).toBe(25);
+    expect(tight.acquisition.selection.preferred_max_file_size_mb).toBe(30);
+    const tightDb = testDb(tight);
+    const app = await buildApp({ config: tight, db: tightDb, serveWeb: false, logger: false });
+    fixtures.push(() => {
+      void app.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    const quiet = await app.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(quiet.statusCode).toBe(200);
+    expect(quiet.json().ok).toBe(true);
+    expect((quiet.json().notes as string[]).join("\n")).not.toContain("recommended web-radio value is 30");
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "admin", password: "test-admin-password" },
+    });
+    expect(login.statusCode).toBe(200);
+    const headers = { authorization: `Bearer ${(login.json() as { token: string }).token}` };
+    const settings = await app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers });
+    expect(settings.statusCode).toBe(200);
+    expect(settings.json().selection.max_file_size_mb).toBe(25);
+    expect(settings.json().selection.preferred_max_file_size_mb).toBe(30);
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers,
+      payload: { selection: { version_preference: "remix" } },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().selection.max_file_size_mb).toBe(25);
+    expect(saved.json().selection.preferred_max_file_size_mb).toBe(30);
+    expect(saved.json().selection.version_preference).toBe("remix");
   });
 });

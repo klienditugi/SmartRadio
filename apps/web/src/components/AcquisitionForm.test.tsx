@@ -107,6 +107,21 @@ describe("AcquisitionForm", () => {
     expect(calls.some((call) => /searches|transfers/.test(call.url))).toBe(false);
   });
 
+  it("shows an env-pinned slskd URL as read-only", async () => {
+    installFetch([]);
+    render(
+      <AcquisitionForm
+        mode="settings"
+        sources={{ "acquisition.base_url": { source: "env", env: "SLSKD_URL" } }}
+      />,
+    );
+    const url = (await screen.findByLabelText("slskd URL")) as HTMLInputElement;
+    expect(url.readOnly).toBe(true);
+    expect(url.value).toBe("http://slskd.example:5030");
+    expect(screen.getByText("set by SLSKD_URL in .env")).toBeTruthy();
+    expect(document.body.textContent).not.toContain(LEAKED);
+  });
+
   it("keeps an unknown provider selectable and can switch to slskd", async () => {
     const calls: Call[] = [];
     installFetch(calls, "not_configured", "future-daemon");
@@ -141,5 +156,59 @@ describe("AcquisitionForm", () => {
     expect(calls.map((call) => call.url).every((url) => url.includes("/api/v1/acquisition/"))).toBe(true);
     expect((screen.getByLabelText("slskd API key") as HTMLInputElement).value).toBe("");
     expect(document.body.textContent).not.toContain(LEAKED);
+  });
+
+  it("edits selector policy, shows the source, and hides the unused preferred fields", async () => {
+    const calls: Call[] = [];
+    installFetch(calls);
+    render(
+      <AcquisitionForm
+        mode="settings"
+        sources={{
+          "acquisition.selection.preferred_max_file_size_mb": { source: "default" },
+          "acquisition.selection.version_preference": { source: "yaml" },
+          "acquisition.selection.preferred_max_duration_seconds": { source: "default" },
+          "acquisition.selection.max_duration_seconds": {
+            source: "env",
+            env: "SLSKD_MAX_DURATION_SECONDS",
+          },
+          "acquisition.selection.format_preference": {
+            source: "env",
+            env: "SLSKD_FORMAT_PREFERENCE",
+          },
+        }}
+      />,
+    );
+    await screen.findByLabelText("Version preference");
+    expect(screen.queryByLabelText("Preferred max file size (MiB)")).toBeNull();
+    expect(screen.queryByLabelText("Preferred max duration (seconds)")).toBeNull();
+    expect(document.body.textContent).toContain("1 MiB = 1,048,576 bytes");
+    expect(screen.getByText("source: yaml")).toBeTruthy();
+    const hard = screen.getByLabelText("Hard max duration (seconds)") as HTMLInputElement;
+    expect(hard.readOnly).toBe(true);
+    expect(screen.getByText("set by SLSKD_MAX_DURATION_SECONDS in .env")).toBeTruthy();
+    const version = screen.getByLabelText("Version preference") as HTMLSelectElement;
+    const format = screen.getByLabelText("Format preference") as HTMLSelectElement;
+    expect(version.value).toBe("balanced");
+    expect(version.disabled).toBe(false);
+    expect(format.value).toBe("prefer_mp3");
+    expect(format.disabled).toBe(true);
+    expect(screen.getByText("set by SLSKD_FORMAT_PREFERENCE in .env")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Prefer extended mixes and remixes" })).toBeNull();
+    expect(screen.queryByLabelText("Lossless preference")).toBeNull();
+    expect(screen.getByRole("option", { name: "Radio edit" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "MP3 only" })).toBeTruthy();
+
+    fireEvent.change(version, { target: { value: "radio_edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save acquisition" }));
+    await screen.findByText(/Saved\. A filled-in form is not a connection/);
+    const put = calls.find((call) => call.method === "PUT");
+    expect(put?.body?.selection).toMatchObject({
+      preferred_max_file_size_mb: 30,
+      preferred_max_duration_seconds: 720,
+      max_duration_seconds: 1200,
+      version_preference: "radio_edit",
+      format_preference: "prefer_mp3",
+    });
   });
 });

@@ -1,5 +1,5 @@
-import type { VerifyStatus } from "@subwave-ai/shared";
-import { defaultFetch, joinUrl, readJson, type FetchLike, type ProviderHealth } from "../http.js";
+import { CONFIGURED_UNVERIFIED_MESSAGE, SUBWAVE_RADIO_NOT_CONFIGURED, type VerifyStatus } from "@subwave-ai/shared";
+import { defaultFetch, joinUrl, NotConfiguredError, ProviderHttpError, readJson, type FetchLike, type ProviderHealth } from "../http.js";
 import { SAY_TEXT_MAX_CHARS, type RadioProvider, type SayKind, type SayRequest, type SayResult } from "../types.js";
 
 export type SubWaveProviderOptions = {
@@ -63,41 +63,72 @@ function parseSayResult(body: unknown): SayResult {
 export class SubWaveProvider implements RadioProvider {
   readonly kind = "subwave" as const;
   readonly verifyStatus: VerifyStatus;
+  private readonly configured: boolean;
   private readonly baseUrl: string;
   private readonly adminUser: string;
   private readonly adminPassword: string;
   private readonly fetchImpl: FetchLike;
 
   constructor(opts: SubWaveProviderOptions) {
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
-    this.adminUser = opts.adminUser;
+    this.baseUrl = opts.baseUrl.trim().replace(/\/+$/, "");
+    this.adminUser = opts.adminUser.trim();
     this.adminPassword = opts.adminPassword;
+    this.configured = Boolean(this.baseUrl && this.adminUser && opts.adminPassword.trim());
     this.fetchImpl = opts.fetch ?? defaultFetch();
-    this.verifyStatus = opts.verifyStatus ?? "verified";
+    this.verifyStatus = opts.verifyStatus ?? "unverified";
+  }
+
+  private assertConfigured(): void {
+    if (!this.configured) throw new NotConfiguredError(SUBWAVE_RADIO_NOT_CONFIGURED);
   }
 
   private basicAuth(): string {
     return `Basic ${Buffer.from(`${this.adminUser}:${this.adminPassword}`).toString("base64")}`;
   }
 
+  private refuseUnverified(): void {
+    if (this.verifyStatus !== "unverified") return;
+    if (this.configured) throw new Error(CONFIGURED_UNVERIFIED_MESSAGE);
+    throw new Error("unverified radio adapter: live endpoints not called");
+  }
+
   private async getPublic(pathname: string): Promise<unknown> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified radio adapter: live endpoints not called");
-    }
+    this.assertConfigured();
+    this.refuseUnverified();
     const res = await this.fetchImpl(joinUrl(this.baseUrl, pathname), { method: "GET" });
     return readJson(res);
   }
 
   async health(): Promise<ProviderHealth> {
     const checked_at = new Date().toISOString();
+    if (!this.configured) {
+      return {
+        ok: false,
+        state: "not_configured",
+        verifyStatus: this.verifyStatus,
+        detail: SUBWAVE_RADIO_NOT_CONFIGURED,
+        checked_at,
+      };
+    }
     if (this.verifyStatus === "unverified") {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: "unverified adapter; not calling live endpoints", checked_at };
+      return {
+        ok: false,
+        verifyStatus: this.verifyStatus,
+        detail: CONFIGURED_UNVERIFIED_MESSAGE,
+        checked_at,
+      };
     }
     try {
       await this.getPublic("/health");
-      return { ok: true, verifyStatus: this.verifyStatus, detail: "GET /health", checked_at };
+      return { ok: true, state: "reachable", verifyStatus: this.verifyStatus, detail: "GET /health", checked_at };
     } catch (err) {
-      return { ok: false, verifyStatus: this.verifyStatus, detail: (err as Error).message, checked_at };
+      if (err instanceof NotConfiguredError) {
+        return { ok: false, state: "not_configured", verifyStatus: this.verifyStatus, detail: err.message, checked_at };
+      }
+      if (err instanceof ProviderHttpError) {
+        return { ok: false, state: "reachable", verifyStatus: this.verifyStatus, detail: err.message, checked_at };
+      }
+      return { ok: false, state: "unreachable", verifyStatus: this.verifyStatus, detail: (err as Error).message, checked_at };
     }
   }
 
@@ -110,9 +141,8 @@ export class SubWaveProvider implements RadioProvider {
   }
 
   async djSearch(query: string, opts?: { limit?: number; offset?: number }): Promise<unknown> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified radio adapter: live endpoints not called");
-    }
+    this.assertConfigured();
+    this.refuseUnverified();
     const url = new URL(joinUrl(this.baseUrl, "/dj/search"));
     url.searchParams.set("q", query);
     if (opts?.limit !== undefined) url.searchParams.set("limit", String(opts.limit));
@@ -125,9 +155,8 @@ export class SubWaveProvider implements RadioProvider {
   }
 
   async queueTrack(track: { id: string; title: string; artist?: string; album?: string }): Promise<unknown> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified radio adapter: live endpoints not called");
-    }
+    this.assertConfigured();
+    this.refuseUnverified();
     const payload: { id: string; title: string; artist?: string; album?: string } = {
       id: track.id,
       title: track.title,
@@ -149,9 +178,8 @@ export class SubWaveProvider implements RadioProvider {
   }
 
   async say(input: SayRequest): Promise<SayResult> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified radio adapter: live endpoints not called");
-    }
+    this.assertConfigured();
+    this.refuseUnverified();
     const text = clampSayText(input.text);
     const kind = resolveSayKind(input.kind);
     const payload: { text: string; mode: "styled"; kind: SayKind; sfx?: unknown } = {
@@ -172,9 +200,8 @@ export class SubWaveProvider implements RadioProvider {
   }
 
   async refreshPlaylist(): Promise<unknown> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified radio adapter: live endpoints not called");
-    }
+    this.assertConfigured();
+    this.refuseUnverified();
     const res = await this.fetchImpl(joinUrl(this.baseUrl, "/dj/refresh-playlist"), {
       method: "POST",
       headers: { authorization: this.basicAuth() },
@@ -183,9 +210,8 @@ export class SubWaveProvider implements RadioProvider {
   }
 
   async publicRequest(body: { text: string; name?: string }): Promise<unknown> {
-    if (this.verifyStatus === "unverified") {
-      throw new Error("unverified radio adapter: live endpoints not called");
-    }
+    this.assertConfigured();
+    this.refuseUnverified();
     const res = await this.fetchImpl(joinUrl(this.baseUrl, "/request"), {
       method: "POST",
       headers: { "content-type": "application/json" },

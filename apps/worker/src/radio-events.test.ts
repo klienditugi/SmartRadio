@@ -262,6 +262,8 @@ describe("A4 radio events", () => {
     await expect(
       handleDownload({ ...ctx, providers: { ...ctx.providers, acquisition: emptySearch } }, polled),
     ).rejects.toThrow(/no usable search result/);
+    expect(getRequest(db, request.id)?.error).toBe("no usable search result");
+    expect(getRequest(db, request.id)?.error).not.toContain("no_suitable_result");
     expect(say).toEqual([]);
     expect(order).toEqual(["get-search", "get-responses"]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");

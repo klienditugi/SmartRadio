@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Optional slskd installer. Not part of SmartRadio's ./install.sh or app image.
+# Image comes from SLSKD_IMAGE in .env (example pins slskd/slskd:0.26.0).
+# Compose falls back to that same tag. Override the variable to change it.
 # Generates an API key when missing, creates host directories, then
 # `docker compose up` unless --prepare-only is set.
 # Does not write the library, does not chmod music world-writable, and
@@ -284,15 +286,21 @@ print_next() {
   http_bind="${http_bind:-127.0.0.1}"
   cat <<EOF
 
-Phase B/C handoff (no search or download from this script):
+After install (no search or download from this script):
   1. Confirm ports. API ${http_port} (bind ${http_bind}), optional HTTPS 5031, Soulseek listen 50300.
-  2. In SmartRadio's .env set SLSKD_URL=http://127.0.0.1:${http_port} when slskd is on this host.
-     Use a host address the API can reach if SmartRadio itself runs in Docker.
+  2. Same host, loopback bind: set SmartRadio SLSKD_URL=http://127.0.0.1:${http_port}.
+     Remote slskd, or SmartRadio in Docker: set SLSKD_URL to the HTTP base that process can reach.
+     Set Downloads to the same files as SLSKD_DOWNLOADS_DIR. Path strings can differ across hosts.
+     Do not point slskd at the library.
   3. Open the setup wizard or Settings. Enable acquisition, provider slskd.
      Paste SLSKD_API_KEY from ${ENV_FILE}. The UI writes secrets/slskd_api_key and does not show it again.
-     Set Downloads to the same host path as SLSKD_DOWNLOADS_DIR. Leave the library path as SmartRadio's library.
-  4. Save, then Test connection. verified is stored only when that probe is Ready.
+  4. Save, then Test connection. It is read-only. verified is stored only when the probe reports Ready.
   5. Restart the SmartRadio worker after a successful test.
+
+After a SmartRadio upgrade on the host, run: sudo ./update.sh
+That is the update path. Do not git pull and restart the service by hand.
+Then run Test connection again and restart the worker after it reports Ready.
+update.sh does not mark acquisition verified.
 
 Stop slskd without deleting music:
   ${ROOT}/install-slskd.sh --down

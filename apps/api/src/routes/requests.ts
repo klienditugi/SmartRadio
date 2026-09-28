@@ -13,8 +13,24 @@ import {
   listRequestEvents,
   listRequests,
   transitionRequest,
+  type RequestEventRow,
 } from "@subwave-ai/db";
 import { requireAdmin, requireUser } from "./auth.js";
+
+/** Newest non-secret selector breakdown stored on a request event, if the pick recorded one. */
+export function selectionScoreFromEvents(events: readonly RequestEventRow[]): unknown {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const raw = events[i]?.payload_json;
+    if (!raw) continue;
+    try {
+      const payload = JSON.parse(raw) as { selection_score?: unknown };
+      if (payload.selection_score && typeof payload.selection_score === "object") return payload.selection_score;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
 export async function registerRequestRoutes(app: FastifyInstance): Promise<void> {
   app.post(
@@ -51,9 +67,11 @@ export async function registerRequestRoutes(app: FastifyInstance): Promise<void>
     const { id } = request.params as { id: string };
     const row = getRequest(app.db, id);
     if (!row) return reply.code(404).send({ error: "not found" });
+    const events = listRequestEvents(app.db, id);
     return {
       request: row,
-      events: listRequestEvents(app.db, id),
+      events,
+      selection_score: selectionScoreFromEvents(events),
       jobs: listJobsForRequest(app.db, id),
       acquisitions: listAcquisitionItems(app.db, id),
       matches: listLibraryMatches(app.db, id),
