@@ -384,7 +384,7 @@ describe("A6 acquisition settings", () => {
       max_file_size_mb: 200,
       preferred_max_duration_seconds: 720,
       max_duration_seconds: 1200,
-      version_preference: "balanced",
+      version_preference: "extended",
       format_preference: "prefer_mp3",
     });
     expect(before.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({ source: "default" });
@@ -573,7 +573,7 @@ acquisition:
       else process.env.SLSKD_LOSSLESS_PREFERENCE = previousFormat;
       rmSync(dir, { recursive: true, force: true });
     });
-    expect(config.acquisition.selection.version_preference).toBe("balanced");
+    expect(config.acquisition.selection.version_preference).toBe("extended");
     expect(config.acquisition.selection.format_preference).toBe("prefer_mp3");
     const doctor = await app.inject({ method: "GET", url: "/api/v1/doctor" });
     expect(doctor.statusCode).toBe(200);

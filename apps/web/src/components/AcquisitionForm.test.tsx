@@ -188,7 +188,7 @@ describe("AcquisitionForm", () => {
     expect(screen.getByText("set by SLSKD_MAX_DURATION_SECONDS in .env")).toBeTruthy();
     const version = screen.getByLabelText("Version preference") as HTMLSelectElement;
     const format = screen.getByLabelText("Format preference") as HTMLSelectElement;
-    expect(version.value).toBe("balanced");
+    expect(version.value).toBe("extended");
     expect(version.disabled).toBe(false);
     expect(format.value).toBe("prefer_mp3");
     expect(format.disabled).toBe(true);

@@ -19,7 +19,7 @@ const SELECTION_DEFAULTS: AcquisitionSelectionSettings = {
   max_file_size_mb: 200,
   preferred_max_duration_seconds: 720,
   max_duration_seconds: 1200,
-  version_preference: "balanced",
+  version_preference: "extended",
   format_preference: "prefer_mp3",
 };
 

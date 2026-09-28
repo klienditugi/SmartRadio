@@ -156,25 +156,25 @@ describe("real Phase C version rows", () => {
   it("ranks radio edit, original, extended, and remix, and falls back when the preferred version is missing", () => {
     const radio = pick(cast, { versionPreference: "radio_edit" });
     expect(tagsOf(radio.file)).toContain("radio_edit");
-    expect(radio.breakdown.versionPreference).toBe(240);
+    expect(radio.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
     expect(radio.file.username).toBe("peer-005");
 
     const original = pick(cast, { versionPreference: "original" });
     expect(tagsOf(original.file)).toContain("original_mix");
-    expect(original.breakdown.versionPreference).toBe(240);
+    expect(original.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
     const explicitOriginal = pick(hasTag("original_mix", (tags) => tags.includes("mix_word_other")), { versionPreference: "original" });
     expect(explicitOriginal.file.filename).toContain("Original Mix");
-    expect(explicitOriginal.breakdown.versionPreference).toBe(240);
+    expect(explicitOriginal.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
     const clean = pick(hasTag("mp3_320_album", (tags) => tags.length === 1), { versionPreference: "original" });
-    expect(clean.breakdown.versionPreference).toBe(160);
+    expect(clean.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionCleanOriginal);
 
     const extended = pick(cast, { versionPreference: "extended" });
     expect(tagsOf(extended.file)).toContain("extended");
-    expect(extended.breakdown.versionPreference).toBe(240);
+    expect(extended.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
     expect(extended.breakdown.longRecording).toBe(0);
 
     const remix = pick(cast, { versionPreference: "remix" });
-    expect(remix.breakdown.versionPreference).toBe(240);
+    expect(remix.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
     expect(remix.file.filename.toLowerCase()).toContain("remix");
     expect(tagsOf(remix.file)).not.toContain("mixshow");
 
@@ -208,7 +208,7 @@ describe("real Phase C version rows", () => {
     for (const versionPreference of VERSIONS) {
       const text = versionPreference === "extended" ? "radio edit" : "extended mix";
       const decision = pick(people, { versionPreference, query: { ...SONG, text } });
-      expect(decision.breakdown.requestedVersion).toBe(1000);
+      expect(decision.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
       expect(decision.file.filename.toLowerCase()).toContain(text === "radio edit" ? "radio edit" : "extended");
     }
   });
@@ -219,7 +219,7 @@ describe("real Phase C version rows", () => {
     expect(blocked).toMatchObject({ outcome: "no_suitable_result", removed: { max_file_size: 3, max_sample_rate: 0 } });
     const opened = pick(clubs, { versionPreference: "extended", maxSampleRate: 192_000, maxFileSizeMb: null });
     expect(tagsOf(opened.file)).toContain("club_mix");
-    expect(opened.breakdown.versionPreference).toBe(240);
+    expect(opened.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
     expect(opened.breakdown.longRecording).toBe(0);
   });
 
@@ -227,7 +227,7 @@ describe("real Phase C version rows", () => {
     const mixshow = pick(hasTag("mixshow"), { versionPreference: "remix" });
     expect(mixshow.file.filename.toLowerCase()).toContain("mixshow");
     expect(mixshow.breakdown.versionPreference).toBe(0);
-    expect(mixshow.breakdown.longRecording).toBe(-280);
+    expect(mixshow.breakdown.longRecording).toBe(SCORE_WEIGHTS.longRecording);
     const against = pick(
       tagged((tags) => tags.includes("mixshow") || (tags.includes("mp3_320_album") && tags.length === 1)),
       { versionPreference: "remix" },
@@ -247,9 +247,9 @@ describe("real Phase C version rows", () => {
       { versionPreference: "remix" },
     );
     expect(tagsOf(decision.file)).toContain("mp3_320_album");
-    expect(pick(hasTag("stem_ogg"), { versionPreference: "remix" }).breakdown.stem).toBe(-1600);
+    expect(pick(hasTag("stem_ogg"), { versionPreference: "remix" }).breakdown.stem).toBe(SCORE_WEIGHTS.stem);
     const acapella = pick(tagged((tags, row) => tags.includes("mp3_128") && row.filename.includes("Acapella")));
-    expect(acapella.breakdown.stem).toBe(-1600);
+    expect(acapella.breakdown.stem).toBe(SCORE_WEIGHTS.stem);
   });
 
   it("treats a CD1 folder as a normal track", () => {
@@ -332,7 +332,7 @@ describe("real Phase C format, quality, and peers", () => {
     expect(visible.breakdown.quality).toBe(0);
     const againstAlbum = pick(
       tagged((tags) => tags.includes("bitrate_junk") || (tags.includes("mp3_320_album") && tags.length === 1)),
-      { maxFileSizeMb: null },
+      { maxFileSizeMb: null, versionPreference: "balanced" },
     );
     expect(tagsOf(againstAlbum.file)).toEqual(expect.arrayContaining(["mp3_320_album"]));
   });
@@ -363,7 +363,7 @@ describe("real Phase C format, quality, and peers", () => {
     expect(tagsOf(opus.file)).toContain("opus");
     expect(opus.signals).toEqual({ quality: "unknown" });
     const noLength = pick(hasTag("extended", (tags) => tags.includes("mp3_no_length")), { versionPreference: "extended" });
-    expect(noLength.breakdown.versionPreference).toBe(240);
+    expect(noLength.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
     expect(noLength.signals.quality).toBe("unknown");
     expect(tagsOf(pick(hasTag("m4a", (_tags, row) => row.filename.includes("08 08"))).file)).toContain("m4a");
     expect(run(hasTag("wav"))).toMatchObject({
@@ -406,6 +406,17 @@ describe("real Phase C format, quality, and peers", () => {
     expect(ogg.pick.format.ext).toBe(".ogg");
     expect(ogg.pick.vbr).toBe(true);
     expect(ogg.breakdown.quality).not.toBe(SCORE_WEIGHTS.qualityGood);
+  });
+
+  it("keeps radio edits and originals behind extended and remix in every format", () => {
+    const fun = (filename: string) => /club mix|extended|remix|rmx/i.test(filename);
+    for (const versionPreference of ["extended", "remix"] as const) {
+      for (const formatPreference of FORMATS) {
+        const decision = pick(curated, { versionPreference, formatPreference });
+        expect(fun(decision.file.filename), `${versionPreference} + ${formatPreference}: ${decision.file.filename}`).toBe(true);
+        expect(decision.breakdown.versionPreference).toBeGreaterThan(0);
+      }
+    }
   });
 
   it("penalizes the real 105 s remix and a SYNTHETIC short FLAC", () => {
@@ -467,7 +478,9 @@ describe("real Phase C format, quality, and peers", () => {
 
     const queued = pick(hasTag("peer_long_queue"));
     expect(queued.breakdown.availability).toBeLessThanOrEqual(-60);
-    const against = pick(tagged((tags) => tags.includes("peer_long_queue") || (tags.includes("mp3_320_album") && tags.length === 1)));
+    const against = pick(tagged((tags) => tags.includes("peer_long_queue") || (tags.includes("mp3_320_album") && tags.length === 1)), {
+      versionPreference: "balanced",
+    });
     expect(tagsOf(against.file)).toContain("mp3_320_album");
   });
 
@@ -487,7 +500,7 @@ describe("SYNTHETIC long recordings", () => {
     const djOnly = pick(withSynthetic({ responses: [] }, ["SYNTHETIC-dj-set"]), { versionPreference: "remix" });
     expect(djOnly.file.username).toContain("SYNTHETIC");
     expect(djOnly.breakdown.versionPreference).toBe(0);
-    expect(djOnly.breakdown.longRecording).toBe(-280);
+    expect(djOnly.breakdown.longRecording).toBe(SCORE_WEIGHTS.longRecording);
 
     expect(pick(withSynthetic(album, ["SYNTHETIC-continuous-60"]), { versionPreference: "remix" }).file.username).not.toContain("SYNTHETIC");
     expect(run(withSynthetic({ responses: [] }, ["SYNTHETIC-continuous-60"]), { versionPreference: "remix" })).toMatchObject({
@@ -498,17 +511,17 @@ describe("SYNTHETIC long recordings", () => {
     expect(pick(withSynthetic(album, ["SYNTHETIC-continuous-15"]), { versionPreference: "extended" }).file.username).not.toContain("SYNTHETIC");
     const quarter = pick(withSynthetic({ responses: [] }, ["SYNTHETIC-continuous-15"]), { versionPreference: "extended" });
     expect(quarter.breakdown.versionPreference).toBe(0);
-    expect(quarter.breakdown.longRecording).toBe(-280);
+    expect(quarter.breakdown.longRecording).toBe(SCORE_WEIGHTS.longRecording);
     expect(quarter.breakdown.durationOvershoot).toBeLessThan(0);
 
     expect(pick(withSynthetic(hasTag("radio_edit"), ["SYNTHETIC-radio-show"]), { versionPreference: "radio_edit" }).file.username).toBe("peer-005");
-    expect(pick(withSynthetic({ responses: [] }, ["SYNTHETIC-radio-show"]), { versionPreference: "radio_edit" }).breakdown.longRecording).toBe(-280);
+    expect(pick(withSynthetic({ responses: [] }, ["SYNTHETIC-radio-show"]), { versionPreference: "radio_edit" }).breakdown.longRecording).toBe(SCORE_WEIGHTS.longRecording);
     expect(pick(withSynthetic(album, ["SYNTHETIC-podcast"]), { versionPreference: "remix" }).file.username).not.toContain("SYNTHETIC");
-    expect(pick(withSynthetic({ responses: [] }, ["SYNTHETIC-podcast"])).breakdown.longRecording).toBe(-280);
+    expect(pick(withSynthetic({ responses: [] }, ["SYNTHETIC-podcast"])).breakdown.longRecording).toBe(SCORE_WEIGHTS.longRecording);
     expect(pick(withSynthetic(album, ["SYNTHETIC-full-album"]), { versionPreference: "extended" }).file.username).not.toContain("SYNTHETIC");
-    expect(pick(withSynthetic({ responses: [] }, ["SYNTHETIC-full-album"])).breakdown.longRecording).toBe(-280);
+    expect(pick(withSynthetic({ responses: [] }, ["SYNTHETIC-full-album"])).breakdown.longRecording).toBe(SCORE_WEIGHTS.longRecording);
     expect(pick(withSynthetic(album, ["SYNTHETIC-concert"]), { versionPreference: "remix" }).file.username).not.toContain("SYNTHETIC");
-    expect(pick(withSynthetic({ responses: [] }, ["SYNTHETIC-concert"])).breakdown.longRecording).toBe(-280);
+    expect(pick(withSynthetic({ responses: [] }, ["SYNTHETIC-concert"])).breakdown.longRecording).toBe(SCORE_WEIGHTS.longRecording);
   });
 
   it("counts a SYNTHETIC lockedFiles row and does not select it", () => {
@@ -526,7 +539,10 @@ describe("priority on real rows", () => {
     const weakRemix = tagged((tags) => tags.includes("ogg_remix"));
     const strongClean = hasTag("mp3_320_album", (_tags, row) => row.username === "peer-005" && row.filename.includes("014."));
     const remixSet = { responses: [...strongClean.responses, ...weakRemix.responses] };
-    expect(pick(remixSet, { versionPreference: "remix", formatPreference: "prefer_mp3" }).file.filename.toLowerCase()).toContain("remix");
+    const oggRemix = pick(remixSet, { versionPreference: "remix", formatPreference: "prefer_mp3" });
+    expect(oggRemix.file.filename.toLowerCase()).not.toContain("remix");
+    expect(tagsOf(oggRemix.file)).toContain("mp3_320_album");
+    expect(pick(weakRemix, { versionPreference: "remix" }).breakdown.versionPreference).toBe(0);
 
     const show = hasTag("mixshow", (tags) => tags.length === 1 || tags.includes("mixshow"));
     const normal = hasTag("mp3_320_album", (tags) => tags.length === 1);

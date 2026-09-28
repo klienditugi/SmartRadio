@@ -44,11 +44,11 @@ export const DEFAULT_PREFERRED_MAX_DURATION_SECONDS = 720;
 
 /**
  * Saved version taste. A ranking bonus only, never a filter.
- * Owner decision: the default is `balanced` (no version-type bonus).
+ * Owner decision: the default is `extended` (club and extended mixes outrank radio edits).
  */
 export const VERSION_PREFERENCES = ["balanced", "radio_edit", "original", "extended", "remix"] as const;
 export type VersionPreference = (typeof VERSION_PREFERENCES)[number];
-export const DEFAULT_VERSION_PREFERENCE: VersionPreference = "balanced";
+export const DEFAULT_VERSION_PREFERENCE: VersionPreference = "extended";
 
 /**
  * Saved format taste, separate from the quality tier.
@@ -75,7 +75,7 @@ export const DEFAULT_SHORT_RECORDING_MIN_SAMPLES = 5;
 export const DEFAULT_SHORT_RECORDING_FLOOR_SECONDS = 90;
 
 /** Soft short-track penalty reaches this (negative) value. Same scale as a long recording. */
-export const DEFAULT_SHORT_RECORDING_PENALTY = -280;
+export const DEFAULT_SHORT_RECORDING_PENALTY = -400;
 
 /**
  * Basename / parent-folder words that rank below a clean match.
@@ -181,7 +181,7 @@ const acquisitionSelectionSchema = z
      */
     preferred_max_duration_seconds: z.number().positive().default(DEFAULT_PREFERRED_MAX_DURATION_SECONDS),
     /**
-     * Ranking bonus for a normal-length version kind. Default `balanced` (owner decision): no bonus.
+     * Ranking bonus for a version kind. Default `extended` (owner decision).
      * Never a filter. An explicit version in the request outranks this.
      */
     version_preference: z.enum(VERSION_PREFERENCES).default(DEFAULT_VERSION_PREFERENCE),

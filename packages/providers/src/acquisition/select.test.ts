@@ -193,22 +193,28 @@ const phaseOpts = {
 };
 
 describe("slskd search ranking", () => {
-  it("picks the 320 kbps MP3 by default and the club remix when remix is preferred", () => {
+  it("picks the club remix by default and still picks it when remix is preferred", () => {
     const first = selectSearch(PHASE_C, phaseOpts);
     const second = selectSearch(PHASE_C, phaseOpts);
     expect(first).toEqual(second);
     expect(first.outcome).toBe("selected");
     if (first.outcome !== "selected") return;
-    expect(first.file).toEqual({
+    expect(first.file).toMatchObject({ username: "remix-fast", filename: REMIX, extension: ".flac" });
+    expect(first.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionSecondary);
+    expect(first.total).toBe(Object.values(first.breakdown).reduce((sum, value) => sum + value, 0));
+
+    const balanced = selectSearch(PHASE_C, { ...phaseOpts, versionPreference: "balanced" });
+    expect(balanced.outcome).toBe("selected");
+    if (balanced.outcome !== "selected") return;
+    expect(balanced.file).toEqual({
       username: "slot-album",
       filename: MP3,
       size: 8 * MIB,
       extension: ".mp3",
       bitRate: 320,
     });
-    expect(first.breakdown.versionPreference).toBe(0);
-    expect(first.breakdown.format).toBeGreaterThan(0);
-    expect(first.total).toBe(Object.values(first.breakdown).reduce((sum, value) => sum + value, 0));
+    expect(balanced.breakdown.versionPreference).toBe(0);
+    expect(balanced.breakdown.format).toBeGreaterThan(0);
 
     const remix = selectSearch(PHASE_C, { ...phaseOpts, versionPreference: "remix" });
     expect(remix.outcome).toBe("selected");

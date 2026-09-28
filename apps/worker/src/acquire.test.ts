@@ -515,7 +515,7 @@ describe("A5 acquisition worker", () => {
 
     const plain = await chosen("Get Lucky");
     expect(plain.enqueued).toEqual([{ user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] }]);
-    expect(plain.score?.breakdown.versionPreference).toBe(0);
+    expect(plain.score?.breakdown.versionPreference).toBeGreaterThan(0);
     expect(plain.score?.breakdown.requestedVersion).toBe(0);
     const asked = await chosen("Get Lucky Remix");
     expect(asked.enqueued).toEqual([{ user: "remix-peer", files: [{ filename: remix, size: 30_000_000 }] }]);

@@ -10,26 +10,28 @@
  * Stems stay last unless the request asked for that part.
  *
  *  1. correct artist/title — title tokens are a hard filter
- *  2. explicit requested version (1000)
- *  3. hard filters, including mp3_only / flac_only
- *  4. saved version preference (basename 240, clean original 160, parent 80)
- *  5. duration policy: overshoot, long-recording (−280), and short-recording (up to −280)
- *  6. audio quality (good tier 100; acceptable 28; 128 kbps is −40 at the default floor)
- *  7. saved format preference (24)
- *  8. file-size soft preference when duration is known and normal (capped at −12)
- *  9. peer availability
- * 10. username, then path
+ *  2. explicit requested version
+ *  3. saved version preference (basename, parent, clean original, and the fun-style second bonus)
+ *  4. avoid bad results: long recording, short recording, a large duration overshoot,
+ *     a stem, and a known bitrate under 128 kbps. Those files get no version bonus.
+ *  5. audio quality (acceptable is enough; good is better, but both sit below version)
+ *  6. saved format preference
+ *  7. file-size soft preference when duration is known and normal (capped at −12)
+ *  8. peer availability
+ *  9. username, then path
  *
- * The basename version bonus clears the whole quality range plus format, the
- * known-duration size cap, and a normal peer. The partial version bonuses (160 and 80)
- * do not: a clean original or a parent-folder match can lose to that full swing.
- * A long-recording phrase is not a normal length, so it does not receive the
- * version bonus. −280 is larger than the basename version bonus, and larger than
- * the quality range plus everything below quality, so a Remix DJ Set cannot win
- * on a remix preference. A known short duration scales toward the same −280.
- * When duration is known and the file is not long or overshooting, size stops at
- * −12, strictly below the format bonus. Unknown duration, or a long or
- * overshooting file, keeps the steep size curve as part of the duration tier.
+ * Every scored tier clears the sum of the tiers below it, except the known-duration
+ * size cap. That cap stays at −12 so it cannot beat format, and it is smaller than
+ * the normal peer span, so a peer swing can outweigh size alone. Format is large
+ * enough to clear size and peer together. Queues over 1000 (−60) are an abandoned
+ * peer and are not part of the peer span.
+ *
+ * A mild duration overshoot (a 13-minute extended mix under the 20-minute hard cap)
+ * still keeps the version bonus. The version steps clear that penalty plus quality,
+ * format, size, and peer. An overshoot as large as the long-recording penalty does
+ * not keep the bonus. Under `extended`, a named remix gets the second bonus. Under
+ * `remix`, an extended or club mix gets it. That second bonus clears the lower
+ * range and stays below a parent-folder primary match.
  */
 
 import {
@@ -61,30 +63,30 @@ const MIB = 1024 * 1024;
  * Named component weights. Version and format preferences are the configurable
  * policy. Every other number is fixed.
  *
- * Equal-peer 6-minute files, default `prefer_mp3` / `balanced`:
- * a 14 MiB 320 kbps MP3 scores quality 100 + format 24 = 124.
- * a 42 MiB 16/44.1 FLAC scores quality 100 + size −5 = 95. The MP3 wins.
- * `auto` drops the format 24, so the MP3 wins by the size gap alone (100 vs 95).
- * `prefer_flac` adds 24 to the FLAC (119) and it wins.
- * A 192 kbps MP3 on a fast free peer does not beat that FLAC on a queued peer
- * with no slot: quality 100 outweighs format 24 plus the peer and size gaps.
+ * Equal-peer 6-minute files, default `prefer_mp3` / `extended`:
+ * a 14 MiB 320 kbps MP3 scores quality 160 + format 48 when it is not the preferred style.
+ * a 42 MiB 16/44.1 FLAC scores quality 160 + size −5. Format decides inside one style.
+ * A preferred club or extended version outranks a radio edit or original of any fidelity.
  */
 export const SCORE_WEIGHTS = {
-  requestedVersion: 1000,
+  requestedVersion: 3200,
   /** Filename contains the title tokens. Path-only matches score `titleMatchPath`. */
   titleMatchBasename: 36,
   titleMatchPath: 8,
   artistInPath: 48,
-  /** Bonus for prefer_mp3 / prefer_flac. auto and the _only modes add 0. */
-  formatPreference: 24,
+  /**
+   * Bonus for prefer_mp3 / prefer_flac. auto and the _only modes add 0.
+   * Clears known-duration size plus a normal peer. The _only modes are filters.
+   */
+  formatPreference: 48,
   /**
    * 256–320 kbps CBR, reported MP3 VBR at `bitrateVbrGoodMin` or higher, and in-cap
    * FLAC including hi-res. Hi-res gets no extra on top of this. VBR on other
    * formats, such as ogg, does not enter this tier.
    */
-  qualityGood: 100,
+  qualityGood: 160,
   /** Lossy from the floor (default 192) up to 255, and MP3 VBR below `bitrateVbrGoodMin`. */
-  qualityAcceptable: 28,
+  qualityAcceptable: 64,
   /** Derived bitrate contributes this fraction of the reported lossy score, and no more. */
   qualityDerivedScale: 0.5,
   /**
@@ -95,18 +97,27 @@ export const SCORE_WEIGHTS = {
    */
   qualityLossyPenaltyScale: 64,
   qualityLossyPenaltyPower: 0.5,
-  /** Basename matches the saved version kind. Beats quality + format + gentle size + a normal peer. */
-  versionBasename: 240,
+  /**
+   * Basename matches the saved version kind. Clears quality, format, known-duration
+   * size, a normal peer, and a mild duration overshoot, and clears the parent step
+   * by that same amount.
+   */
+  versionBasename: 2280,
   /**
    * Clean title (no version term) when the preference is original, and the parent is clean too.
-   * Known exception: +160 does not clear the full quality range plus format, gentle size, and a normal peer.
+   * Same height as the fun-style second bonus. Each clears the lower range on its own.
    */
-  versionCleanOriginal: 160,
+  versionCleanOriginal: 760,
   /**
-   * Immediate parent folder only. Weaker than the basename. Known exception:
-   * +80 does not clear the full quality range plus format, gentle size, and a normal peer.
+   * Immediate parent folder only. Weaker than the basename and stronger than the
+   * fun-style second bonus, each by more than quality + format + size + peer + a mild overshoot.
    */
-  versionParent: 80,
+  versionParent: 1520,
+  /**
+   * Under `extended`, a basename remix. Under `remix`, a basename extended or club mix.
+   * Above radio edits and originals. Below a parent-folder primary match.
+   */
+  versionSecondary: 760,
   /**
    * Points per 1.0 overshoot ratio while duration is known and the file is not long
    * or overshooting. The penalty stops at this value so it stays strictly below the
@@ -124,11 +135,11 @@ export const SCORE_WEIGHTS = {
   /** Coefficient for duration overshoot. 15 min against a 12 min preferred max is −125. */
   durationPenaltyScale: 400,
   durationPenaltyCap: 400,
-  longRecording: -280,
+  longRecording: -400,
   /** Default ceiling for `shortRecording`. Config `short_recording_penalty` overrides it. */
   shortRecording: DEFAULT_SHORT_RECORDING_PENALTY,
   /** Larger than requestedVersion plus every positive component, so a stem stays last. */
-  stem: -1600,
+  stem: -6400,
   availabilityFreeSlot: 6,
   availabilityNoSlot: -4,
   availabilityExtremeQueue: -60,
@@ -137,6 +148,8 @@ export const SCORE_WEIGHTS = {
   availabilityQueueCap: 12,
   availabilitySpeedCap: 5,
   /** Known lossy bitrates are 32–320 inclusive. 321+ and anything outside 32–500 are unknown. */
+  /** A known lossy rate below this gets no version-preference bonus. 128 itself still can. */
+  bitrateVersionMin: 128,
   bitratePlausibleMin: 32,
   /** CBR, and any lossy file that is not a reported MP3 VBR, enters the good tier here. */
   bitrateGoodMin: 256,
@@ -758,20 +771,33 @@ function durationOvershoot(track: CandidateTrack, policy: ResolvedPolicy): numbe
   return -Math.min(SCORE_WEIGHTS.durationPenaltyCap, penalty);
 }
 
-/**
- * Normal length is required for the version bonus.
- * A long-recording phrase is never normal, even when the reported duration is short.
- * Otherwise a known duration at or under the preferred max is normal. A missing
- * duration is normal when there is no long-recording phrase and the size is at
- * or under the preferred max.
- */
-function lengthIsNormal(track: CandidateTrack, policy: ResolvedPolicy): boolean {
-  if (matchesLongRecording(track, policy.longRecordingPhrases)) return false;
-  if (track.durationSeconds !== undefined && policy.preferredMaxDurationSeconds !== null) {
-    return track.durationSeconds <= policy.preferredMaxDurationSeconds;
+function reportedOrDerivedKbps(track: CandidateTrack): number | undefined {
+  if (track.format.lossless) return undefined;
+  if (track.bitrateKbps !== undefined && knownLossy(track.bitrateKbps)) return track.bitrateKbps;
+  if (track.durationSeconds !== undefined && track.durationSeconds > 0 && track.sizeBytes > 0) {
+    const derived = Math.round((track.sizeBytes * 8) / track.durationSeconds / 1000);
+    if (knownLossy(derived)) return derived;
   }
-  if (policy.preferredMaxFileSizeMb === null) return true;
-  return track.sizeBytes / MIB <= policy.preferredMaxFileSizeMb;
+  return undefined;
+}
+
+/**
+ * Bad results get no saved-version bonus. A mild duration overshoot still can:
+ * the file keeps the bonus until the overshoot is as large as `longRecording`.
+ */
+function versionBonusBlocked(
+  track: CandidateTrack,
+  policy: ResolvedPolicy,
+  cohort: readonly number[],
+  stem: boolean,
+): boolean {
+  if (stem) return true;
+  if (matchesLongRecording(track, policy.longRecordingPhrases)) return true;
+  if (shortRecordingPoints(track, policy, cohort) < 0) return true;
+  const kbps = reportedOrDerivedKbps(track);
+  if (kbps !== undefined && kbps < SCORE_WEIGHTS.bitrateVersionMin) return true;
+  if (durationOvershoot(track, policy) <= SCORE_WEIGHTS.longRecording) return true;
+  return false;
 }
 
 function availabilityScore(track: CandidateTrack): number {
@@ -792,15 +818,22 @@ function availabilityScore(track: CandidateTrack): number {
   return score;
 }
 
-function versionPreferencePoints(track: CandidateTrack, policy: ResolvedPolicy): number {
+function versionPreferencePoints(
+  track: CandidateTrack,
+  policy: ResolvedPolicy,
+  cohort: readonly number[],
+  stem: boolean,
+): number {
   if (policy.versionPreference === "balanced") return 0;
-  if (!lengthIsNormal(track, policy)) return 0;
+  if (versionBonusBlocked(track, policy, cohort, stem)) return 0;
   const base = classifyVersionText(basenameText(track));
   const parent = classifyVersionText(parentText(track));
   const preference = policy.versionPreference;
   if (marksMatch(base, preference)) return SCORE_WEIGHTS.versionBasename;
   if (preference === "original" && isCleanTitle(base) && isCleanTitle(parent)) return SCORE_WEIGHTS.versionCleanOriginal;
   if (marksMatch(parent, preference)) return SCORE_WEIGHTS.versionParent;
+  if (preference === "extended" && base.remix) return SCORE_WEIGHTS.versionSecondary;
+  if (preference === "remix" && base.extended) return SCORE_WEIGHTS.versionSecondary;
   return 0;
 }
 
@@ -865,12 +898,14 @@ export function scoreTrack(track: CandidateTrack, input: SelectionPolicyInput = 
 
   const quality = qualityOf(track, policy.bitrateFloorKbps);
   breakdown.quality = quality.points;
-  breakdown.versionPreference = versionPreferencePoints(track, policy);
+  const cohort = input.cohortDurationSeconds ?? [];
+  const stem = incidentalStem(track, policy, titleTokens, asked);
+  breakdown.versionPreference = versionPreferencePoints(track, policy, cohort, stem);
   breakdown.sizeOvershoot = sizeOvershoot(track, policy);
   breakdown.durationOvershoot = durationOvershoot(track, policy);
   if (matchesLongRecording(track, policy.longRecordingPhrases)) breakdown.longRecording = SCORE_WEIGHTS.longRecording;
-  breakdown.shortRecording = shortRecordingPoints(track, policy, input.cohortDurationSeconds ?? []);
-  if (incidentalStem(track, policy, titleTokens, asked)) breakdown.stem = SCORE_WEIGHTS.stem;
+  breakdown.shortRecording = shortRecordingPoints(track, policy, cohort);
+  if (stem) breakdown.stem = SCORE_WEIGHTS.stem;
   breakdown.availability = availabilityScore(track);
 
   const total = SCORE_COMPONENTS.reduce((sum, key) => sum + breakdown[key], 0);

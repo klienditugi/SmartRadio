@@ -441,7 +441,7 @@ acquisition:
         selection: { extended_version_bonus: false, lossless_preference: 36 },
       },
     });
-    expect(onlyOld.acquisition.selection.version_preference).toBe("balanced");
+    expect(onlyOld.acquisition.selection.version_preference).toBe("extended");
     expect(onlyOld.acquisition.selection.format_preference).toBe("prefer_mp3");
 
     const envOnly = applyEnvOverrides(structuredClone(exampleYamlObject), {
@@ -489,7 +489,7 @@ acquisition:
       configPath: cfgPath,
       env: { ...process.env, SLSKD_EXTENDED_VERSION_BONUS: "false", SLSKD_LOSSLESS_PREFERENCE: "12" },
     });
-    expect(loaded.acquisition.selection.version_preference).toBe("balanced");
+    expect(loaded.acquisition.selection.version_preference).toBe("extended");
     expect(loaded.acquisition.selection.format_preference).toBe("prefer_mp3");
     const doctorNotes = (loaded.deprecation_notes ?? []).join("\n");
     expect(doctorNotes).toContain("version_preference");
