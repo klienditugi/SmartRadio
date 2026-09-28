@@ -112,6 +112,182 @@ export function dryRunExplicitRequests(payload: unknown): Array<DryRunRow & { qu
   });
 }
 
+const MIB = 1024 * 1024;
+
+function ownerFile(input: {
+  username: string;
+  filename: string;
+  sizeMb: number;
+  ext: "mp3" | "flac";
+  bitRate?: number;
+  freeSlot?: boolean;
+  queueLength?: number;
+  uploadSpeed?: number;
+}) {
+  return {
+    username: input.username,
+    hasFreeUploadSlot: input.freeSlot ?? true,
+    queueLength: input.queueLength ?? 0,
+    uploadSpeed: input.uploadSpeed ?? 1_000_000,
+    files: [
+      {
+        filename: input.filename,
+        size: Math.round(input.sizeMb * MIB),
+        extension: input.ext,
+        length: 360,
+        ...(input.bitRate !== undefined ? { bitRate: input.bitRate } : {}),
+        ...(input.ext === "flac" ? { bitDepth: 16, sampleRate: 44100 } : {}),
+      },
+    ],
+  };
+}
+
+/**
+ * Synthetic owner examples. Not part of the 5×5 grid. Each row is one comparison
+ * the size policy has to get right.
+ */
+export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
+  const fast = 10 ** 9;
+  const cases: Array<{
+    scenario: string;
+    versionPreference: DryRunRow["versionPreference"];
+    formatPreference: DryRunRow["formatPreference"];
+    maxFileSizeMb?: number | null;
+    responses: ReturnType<typeof ownerFile>[];
+  }> = [
+    {
+      scenario: "original + prefer_flac: 14.2 MB album MP3 vs 69.9 MB album FLAC",
+      versionPreference: "original",
+      formatPreference: "prefer_flac",
+      responses: [
+        ownerFile({
+          username: "album-mp3",
+          filename: "@@share\\Album\\Get Lucky (Album Version).mp3",
+          sizeMb: 14.2,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "album-flac",
+          filename: "@@share\\Album\\Get Lucky (Album Version).flac",
+          sizeMb: 69.9,
+          ext: "flac",
+        }),
+      ],
+    },
+    {
+      scenario: "extended + prefer_flac: 25 MB Club Mix MP3 vs 71.1 MB Club Mix FLAC",
+      versionPreference: "extended",
+      formatPreference: "prefer_flac",
+      responses: [
+        ownerFile({
+          username: "club-mp3",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Club Mix).mp3",
+          sizeMb: 25,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "club-flac",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Club Mix).flac",
+          sizeMb: 71.1,
+          ext: "flac",
+          freeSlot: true,
+          queueLength: 0,
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+    {
+      scenario: "extended: only Club Mix is a 70 MB FLAC vs a 10 MB Radio Edit MP3",
+      versionPreference: "extended",
+      formatPreference: "prefer_mp3",
+      responses: [
+        ownerFile({
+          username: "only-club",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Club Mix).flac",
+          sizeMb: 70,
+          ext: "flac",
+          freeSlot: false,
+          queueLength: 300,
+          uploadSpeed: 1,
+        }),
+        ownerFile({
+          username: "radio-mp3",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit).mp3",
+          sizeMb: 10,
+          ext: "mp3",
+          bitRate: 320,
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+    {
+      scenario: "extended: 40 MB Club Mix vs 10 MB Radio Edit",
+      versionPreference: "extended",
+      formatPreference: "prefer_mp3",
+      responses: [
+        ownerFile({
+          username: "mid-club",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Club Mix).flac",
+          sizeMb: 40,
+          ext: "flac",
+        }),
+        ownerFile({
+          username: "small-radio",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit).mp3",
+          sizeMb: 10,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+      ],
+    },
+    {
+      scenario: "flac_only, caps raised: 71 MB slower FLAC vs 224 MB free fast FLAC",
+      versionPreference: "extended",
+      formatPreference: "flac_only",
+      maxFileSizeMb: null,
+      responses: [
+        ownerFile({
+          username: "small-flac",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Club Mix).flac",
+          sizeMb: 71,
+          ext: "flac",
+          freeSlot: false,
+          queueLength: 300,
+          uploadSpeed: 1,
+        }),
+        ownerFile({
+          username: "hires-flac",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Club Mix).flac",
+          sizeMb: 224,
+          ext: "flac",
+          freeSlot: true,
+          queueLength: 0,
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+  ];
+  return cases.map((item) => {
+    const row = rowFromDecision(
+      item.versionPreference,
+      item.formatPreference,
+      selectSearch(
+        { responses: item.responses },
+        {
+          allowedExtensions: AUDIO,
+          query: { artist: "Daft Punk", title: "Get Lucky" },
+          versionPreference: item.versionPreference,
+          formatPreference: item.formatPreference,
+          ...(item.maxFileSizeMb !== undefined ? { maxFileSizeMb: item.maxFileSizeMb } : {}),
+        },
+      ),
+    );
+    return { ...row, scenario: item.scenario };
+  });
+}
+
 function invokedDirectly(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
@@ -141,6 +317,9 @@ if (invokedDirectly()) {
     console.log(JSON.stringify(row));
   }
   for (const row of dryRunExplicitRequests(payload)) {
+    console.log(JSON.stringify(row));
+  }
+  for (const row of dryRunOwnerExamples()) {
     console.log(JSON.stringify(row));
   }
 }

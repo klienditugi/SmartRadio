@@ -11,35 +11,42 @@
  *
  *  1. correct artist/title — title tokens are a hard filter
  *  2. explicit requested version
- *  3. saved version preference (basename, parent, clean original, and the fun-style second bonus)
+ *  3. saved version preference (basename, parent, clean original, and the fun-style second bonus).
+ *     Off for every file when the request names a version.
  *  4. avoid bad results: long recording, short recording, a large duration overshoot,
  *     a stem, and a known bitrate under 128 kbps. Those files get no version bonus.
- *  5. audio quality (acceptable is enough; good is better, but both sit below version)
- *  6. saved format preference
- *  7. file-size soft preference when duration is known and normal
- *  8. peer availability
- *  9. username, then path
+ *  5. reaching acceptable quality — the below-floor penalty
+ *  6. file size, for a known normal duration. Web radio, not an archive.
+ *  7. extra fidelity — good versus acceptable. Below size.
+ *  8. saved format preference. Below size. It does not override a real size gap.
+ *  9. peer availability
+ * 10. username, then path
  *
- * Every scored tier clears the sum of the tiers below it. Known-duration size is
- * the exception at small ratios: the penalty is logarithmic, so a tiny size gap
- * does not beat a peer. Once the two files differ by 2.38×, the penalty
- * difference exceeds the normal peer span. The cap itself is larger than that
- * span and still strictly below the format gap, so format clears the worst
- * normal-duration size penalty plus a normal peer. Queues over 1000 (−60) are
- * an abandoned peer and are not part of the peer span.
+ * Known-duration size is 0 through the preferred size (30 MiB). It is gentle up to
+ * 1.5× that target, so a clearly better version can still win around 35–45 MiB.
+ * From 2× the target (60 MiB) the penalty exceeds extra fidelity, format, and the
+ * full normal peer span, so a 60–70 MiB FLAC loses to an acceptable normal-size
+ * MP3 of the same version. The curve keeps growing through the hard maximum.
+ * Past that maximum the file is filtered; if the cap is raised, a larger file
+ * still loses to a smaller one of the same style and format. Unknown duration,
+ * a long-recording phrase, or a duration past the preferred max uses a steeper
+ * curve and counts in the bad-result tier.
+ *
+ * Version steps clear the known-duration penalty through the default hard maximum,
+ * plus acceptable-quality, fidelity, format, peer, and a mild duration overshoot.
+ * A 70 MiB Club Mix wins under `extended` only when no normal-size club or
+ * extended file is present.
  *
  * When the request names a version, the saved preference is off for every file,
- * including the fun-style second bonus. Rank on the requested-version match, then
- * the lower tiers. A hybrid such as "Radio Edit - X Remix" does not collect a
- * remix bonus on a radio-edit request.
+ * including the fun-style second bonus. A hybrid such as "Radio Edit - X Remix"
+ * does not collect a remix bonus on a radio-edit request.
  *
  * A mild duration overshoot (a 13-minute extended mix under the 20-minute hard cap)
- * still keeps the version bonus. The version steps clear that penalty plus quality,
- * format, size, and peer. The bonus stops when the overshoot reaches the duration
- * penalty cap, which is separate from the long-recording phrase penalty. Under
- * `extended`, a named remix gets the second bonus. Under `remix`, an extended or
- * club mix gets it. That second bonus clears the lower range and stays below a
- * parent-folder primary match.
+ * still keeps the version bonus. The bonus stops when the overshoot reaches the
+ * duration penalty cap, which is separate from the long-recording phrase penalty.
+ * Under `extended`, a named remix gets the second bonus. Under `remix`, an
+ * extended or club mix gets it. Queues over 1000 (−60) are an abandoned peer and
+ * are not part of the peer span.
  */
 
 import {
@@ -71,84 +78,93 @@ const MIB = 1024 * 1024;
  * Named component weights. Version and format preferences are the configurable
  * policy. Every other number is fixed.
  *
- * Equal-peer 6-minute files, default `prefer_mp3` / `extended`:
- * a 14 MiB 320 kbps MP3 scores quality 320 + format 112 when it is not the preferred style.
- * a 42 MiB 16/44.1 FLAC scores quality 320 + size −11. Format decides inside one style.
- * A preferred club or extended version outranks a radio edit or original of any fidelity.
+ * Equal-peer files, default `prefer_mp3` / `extended`:
+ * a 14 MiB 320 kbps MP3 is the normal target (size 0, quality good, format bonus).
+ * a 42 MiB FLAC of the same version pays a size penalty larger than the format bonus,
+ * so prefer_flac does not take it. A preferred club or extended version still
+ * outranks a radio edit, including a large FLAC when that is the only preferred file.
  */
 export const SCORE_WEIGHTS = {
-  requestedVersion: 5800,
+  requestedVersion: 12400,
   /** Filename contains the title tokens. Path-only matches score `titleMatchPath`. */
   titleMatchBasename: 36,
   titleMatchPath: 8,
   artistInPath: 48,
   /**
    * Bonus for prefer_mp3 / prefer_flac. auto and the _only modes add 0.
-   * Clears the known-duration size cap plus a normal peer. The _only modes are filters.
+   * Clears a normal peer. It does not clear a real size gap. The _only modes are filters.
    */
-  formatPreference: 112,
+  formatPreference: 48,
   /**
    * 256–320 kbps CBR, reported MP3 VBR at `bitrateVbrGoodMin` or higher, and in-cap
    * FLAC including hi-res. Hi-res gets no extra on top of this. VBR on other
-   * formats, such as ogg, does not enter this tier.
+   * formats, such as ogg, does not enter this tier. The step above acceptable
+   * is extra fidelity and sits below file size.
    */
-  qualityGood: 320,
+  qualityGood: 160,
   /** Lossy from the floor (default 192) up to 255, and MP3 VBR below `bitrateVbrGoodMin`. */
-  qualityAcceptable: 80,
+  qualityAcceptable: 40,
   /** Derived bitrate contributes this fraction of the reported lossy score, and no more. */
   qualityDerivedScale: 0.5,
   /**
-   * Full penalty at 32 kbps. Below the floor the penalty is
-   * −round(scale × fraction ^ power), where fraction is the distance from the
-   * floor down to 32 kbps. Power below 1 drops faster than a straight line, so
-   * 128 kbps against a 192 floor is −162 while 32 kbps is −256.
+   * Added to every below-floor score so missing acceptable quality outranks file
+   * size through the default hard maximum, plus fidelity, format, and a normal peer.
    */
-  qualityLossyPenaltyScale: 256,
+  qualityPoorBase: 800,
+  /**
+   * Extra below-floor shape on top of `qualityPoorBase`.
+   * −(base + round(scale × fraction ^ power)), where fraction is the distance
+   * from the floor down to 32 kbps. 128 kbps is −840. 32 kbps is −864.
+   */
+  qualityLossyPenaltyScale: 64,
   qualityLossyPenaltyPower: 0.5,
   /**
-   * Basename matches the saved version kind. Clears quality, format, known-duration
-   * size, a normal peer, and a mild duration overshoot, and clears the parent step
-   * by that same amount.
+   * Basename matches the saved version kind. Clears acceptable-quality, the
+   * known-duration size penalty through the default hard maximum, fidelity,
+   * format, a normal peer, and a mild duration overshoot. Clears the parent
+   * step by that same amount.
    */
-  versionBasename: 3600,
+  versionBasename: 7800,
   /**
    * Clean title (no version term) when the preference is original, and the parent is clean too.
    * Same height as the fun-style second bonus. Each clears the lower range on its own.
    */
-  versionCleanOriginal: 1200,
+  versionCleanOriginal: 2600,
   /**
    * Immediate parent folder only. Weaker than the basename and stronger than the
-   * fun-style second bonus, each by more than quality + format + size + peer + a mild overshoot.
+   * fun-style second bonus, each by more than the version lower bound.
    */
-  versionParent: 2400,
+  versionParent: 5200,
   /**
    * Under `extended`, a basename remix. Under `remix`, a basename extended or club mix.
    * Above radio edits and originals. Below a parent-folder primary match.
    * Not applied when the request itself names a version.
    */
-  versionSecondary: 1200,
+  versionSecondary: 2600,
   /**
-   * Known, normal duration: penalty is round(scale × ln(size / preferred)).
-   * The difference between two files above the preferred size is about
-   * scale × ln(big / small), so it does not depend on the preferred size.
-   * At 32, a ratio of e^(27/32) ≈ 2.33× exceeds the normal peer span of 27
-   * before rounding. On the scored curve, a 1.2× preferred file against
-   * 2.38× that size is the first step that clears the span.
+   * Known normal duration. Ratios are size / preferredMaxFileSizeMb.
+   * Penalty is 0 at ratio 1. It reaches `sizeGentleMax` at `sizeGentleUntilRatio`
+   * (1.5×, about 45 MiB when the target is 30). That band stays under
+   * fidelity + format + peer, so a better version can still win.
    */
-  sizeGentleLogScale: 32,
+  sizeGentleUntilRatio: 1.5,
+  sizeGentleMax: 96,
   /**
-   * Cap for that log curve. Larger than the peer span, strictly below the format
-   * bonus, and high enough that a ~224 MiB file is still on the slope rather than
-   * pinned to the same penalty as a ~71 MiB file.
+   * At `sizeStrongFromRatio` (2× the preferred size) the penalty is
+   * `sizeStrongAtDouble`, which clears extra fidelity, format, and a normal peer.
+   * Past that, each extra 1.0 of size/preferred adds `sizeStrongPerRatio`.
+   * No cap: the score keeps growing through the hard maximum and beyond it
+   * when that filter is raised.
    */
-  sizeGentleCap: 72,
+  sizeStrongFromRatio: 2,
+  sizeStrongAtDouble: 240,
+  sizeStrongPerRatio: 48,
   /**
-   * Points per 1.0 overshoot ratio when duration is unknown, the file is a long
-   * recording, or duration is past the preferred max. That curve stands in for
-   * the duration tier. It is not part of the size range under format preference.
+   * Points per 1.0 of (size/preferred − 1) when duration is unknown, the file is
+   * a long recording, or duration is past the preferred max. Steeper than the
+   * known-duration curve. Counted in the bad-result tier, not under format.
    */
-  sizeSteepPerRatio: 48,
-  sizePenaltyCap: 140,
+  sizeSteepPerRatio: 400,
   /** Coefficient for duration overshoot. 15 min against a 12 min preferred max is −125. */
   durationPenaltyScale: 400,
   durationPenaltyCap: 400,
@@ -158,11 +174,11 @@ export const SCORE_WEIGHTS = {
    * does not make every mild overshoot lose the bonus.
    */
   versionOvershootCutoff: -400,
-  longRecording: -1000,
+  longRecording: -1900,
   /** Default ceiling for `shortRecording`. Config `short_recording_penalty` overrides it. */
   shortRecording: DEFAULT_SHORT_RECORDING_PENALTY,
   /** Larger than requestedVersion plus every positive component, so a stem stays last. */
-  stem: -11200,
+  stem: -22000,
   availabilityFreeSlot: 6,
   availabilityNoSlot: -4,
   availabilityExtremeQueue: -60,
@@ -683,7 +699,8 @@ function lossyPoints(kbps: number, floor: number, vbr: boolean | undefined, ext:
   const span = Math.max(1, floor - SCORE_WEIGHTS.bitratePlausibleMin);
   const fraction = (floor - kbps) / span;
   const shaped = Math.pow(fraction, SCORE_WEIGHTS.qualityLossyPenaltyPower);
-  return -Math.round(shaped * SCORE_WEIGHTS.qualityLossyPenaltyScale);
+  const extra = Math.round(shaped * SCORE_WEIGHTS.qualityLossyPenaltyScale);
+  return -(SCORE_WEIGHTS.qualityPoorBase + extra);
 }
 
 function qualityOf(track: CandidateTrack, floor: number): { points: number; signal: QualitySignal } {
@@ -720,14 +737,26 @@ function qualityOf(track: CandidateTrack, floor: number): { points: number; sign
 }
 
 /**
- * Cap for a known, non-long, non-overshooting duration. Strictly below the
- * format bonus. The log curve reaches this only for a very large file; a
- * moderate overshoot stays on the slope.
+ * Known, normal duration. Thresholds are ratios of the preferred size, not fixed
+ * megabyte literals. 0 through the preferred size, gentle until 1.5×, then a
+ * stronger slope from 2× that does not flatten before the hard maximum.
  */
-function knownDurationSizeCap(): number {
-  const formatGap = SCORE_WEIGHTS.formatPreference;
-  if (formatGap <= 1) return 0;
-  return Math.min(SCORE_WEIGHTS.sizeGentleCap, formatGap - 1);
+function knownDurationSizePenalty(sizeMb: number, preferredMb: number): number {
+  if (!(preferredMb > 0) || sizeMb <= preferredMb) return 0;
+  const ratio = sizeMb / preferredMb;
+  const gentleUntil = SCORE_WEIGHTS.sizeGentleUntilRatio;
+  const strongFrom = SCORE_WEIGHTS.sizeStrongFromRatio;
+  const gentleMax = SCORE_WEIGHTS.sizeGentleMax;
+  const strongAt = SCORE_WEIGHTS.sizeStrongAtDouble;
+  if (ratio <= gentleUntil) {
+    const t = (ratio - 1) / (gentleUntil - 1);
+    return Math.round(gentleMax * t);
+  }
+  if (ratio <= strongFrom) {
+    const t = (ratio - gentleUntil) / (strongFrom - gentleUntil);
+    return Math.round(gentleMax + (strongAt - gentleMax) * t);
+  }
+  return Math.round(strongAt + SCORE_WEIGHTS.sizeStrongPerRatio * (ratio - strongFrom));
 }
 
 /** Unknown duration, a long-recording phrase, or a duration past the preferred max. */
@@ -744,13 +773,12 @@ function sizeOvershoot(track: CandidateTrack, policy: ResolvedPolicy): number {
   if (policy.preferredMaxFileSizeMb === null) return 0;
   const sizeMb = track.sizeBytes / MIB;
   if (sizeMb <= policy.preferredMaxFileSizeMb) return 0;
-  const ratio = (sizeMb - policy.preferredMaxFileSizeMb) / policy.preferredMaxFileSizeMb;
+  const preferred = policy.preferredMaxFileSizeMb;
   if (!sizeStandsInForDuration(track, policy)) {
-    const penalty = Math.round(SCORE_WEIGHTS.sizeGentleLogScale * Math.log(1 + ratio));
-    return -Math.min(knownDurationSizeCap(), Math.max(0, penalty));
+    return -knownDurationSizePenalty(sizeMb, preferred);
   }
-  const penalty = Math.round(SCORE_WEIGHTS.sizeSteepPerRatio * ratio);
-  return -Math.min(SCORE_WEIGHTS.sizePenaltyCap, penalty);
+  const over = sizeMb / preferred - 1;
+  return -Math.max(0, Math.round(SCORE_WEIGHTS.sizeSteepPerRatio * over));
 }
 
 function medianOf(values: readonly number[]): number {

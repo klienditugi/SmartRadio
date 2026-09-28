@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { SCORE_WEIGHTS } from "@subwave-ai/core";
 import { describe, expect, it } from "vitest";
 import { selectSearch, type SearchSelection, type SelectSearchOptions } from "./select.js";
-import { dryRunExplicitRequests, dryRunPreferences } from "./selector-dryrun.js";
+import { dryRunExplicitRequests, dryRunOwnerExamples, dryRunPreferences } from "./selector-dryrun.js";
 
 const FIXTURES = new URL("../../../core/test/fixtures/slskd-phase-c/", import.meta.url);
 
@@ -269,7 +269,7 @@ describe("real Phase C format, quality, and peers", () => {
 
   it("applies auto, prefer_mp3, prefer_flac, and the hard _only filters", () => {
     expect(tagsOf(pick(pair, { formatPreference: "prefer_mp3" }).file)).toContain("mp3_320_album");
-    expect(tagsOf(pick(pair, { formatPreference: "prefer_flac" }).file)).toContain("flac_16_44");
+    expect(tagsOf(pick(pair, { formatPreference: "prefer_flac" }).file)).toContain("mp3_320_album");
     expect(tagsOf(pick(pair, { formatPreference: "auto" }).file)).toContain("mp3_320_album");
 
     const mp3 = pick(hasTag("mp3_320_album", (_tags, row) => row.username === "peer-005" && row.filename.includes("014.")), {
@@ -279,8 +279,7 @@ describe("real Phase C format, quality, and peers", () => {
     expect(mp3.breakdown.quality).toBe(flac.breakdown.quality);
     expect(mp3.breakdown.format).toBe(0);
     expect(flac.breakdown.format).toBe(0);
-    expect(flac.breakdown.sizeOvershoot).toBeGreaterThan(-SCORE_WEIGHTS.formatPreference);
-    expect(flac.breakdown.sizeOvershoot).toBeLessThan(0);
+    expect(flac.breakdown.sizeOvershoot).toBeLessThan(-SCORE_WEIGHTS.formatPreference);
 
     expect(tagsOf(pick(hasTag("flac_16_44"), { formatPreference: "prefer_mp3" }).file)).toContain("flac_16_44");
     expect(tagsOf(pick(hasTag("mp3_320_album"), { formatPreference: "prefer_flac" }).file)).toContain("mp3_320_album");
@@ -555,7 +554,7 @@ describe("priority on real rows", () => {
     expect(run(flac, { formatPreference: "mp3_only" })).toMatchObject({ outcome: "no_suitable_result", removed: { format_preference: 1 } });
 
     const mp3 = hasTag("mp3_320_album", (_tags, row) => row.username === "peer-005" && row.filename.includes("014."));
-    expect(tagsOf(pick({ responses: [...mp3.responses, ...flac.responses] }, { formatPreference: "prefer_flac" }).file)).toContain("flac_16_44");
+    expect(tagsOf(pick({ responses: [...mp3.responses, ...flac.responses] }, { formatPreference: "prefer_flac" }).file)).toContain("mp3_320_album");
 
     const huge = hasTag("club_mix", (tags) => tags.includes("club_mix") && !tags.includes("wav"));
     const smallBusy = hasTag("peer_no_free_slot", (_tags, row) => row.filename.includes("(10s)"));
@@ -569,8 +568,7 @@ describe("priority on real rows", () => {
     const club = pick(huge, { formatPreference: "auto", versionPreference: "balanced", ...openCaps });
     expect(club.breakdown.durationOvershoot).toBe(0);
     expect(club.breakdown.longRecording).toBe(0);
-    expect(club.breakdown.sizeOvershoot).toBeLessThan(0);
-    expect(club.breakdown.sizeOvershoot).toBeGreaterThan(-SCORE_WEIGHTS.formatPreference);
+    expect(club.breakdown.sizeOvershoot).toBeLessThan(-SCORE_WEIGHTS.formatPreference);
     const preferred = pick(
       { responses: [...huge.responses, ...smallBusy.responses] },
       { formatPreference: "auto", versionPreference: "extended", ...openCaps },
@@ -629,6 +627,21 @@ describe("priority on real rows", () => {
     expect(pick(hasTag("radio_edit"), { versionPreference: "balanced" }).file.username).toBe("peer-005");
     const samePeer = pick(hasTag("radio_edit", (_tags, row) => row.username === "peer-005"), { versionPreference: "radio_edit" });
     expect(samePeer.file.filename).toContain("26. Daft Punk");
+  });
+});
+
+describe("owner size examples", () => {
+  it("prefers a normal-size file unless the version match is the reason to go large", () => {
+    const rows = dryRunOwnerExamples();
+    expect(rows.map((row) => row.username)).toEqual(["album-mp3", "club-mp3", "only-club", "mid-club", "small-flac"]);
+    for (const row of rows) {
+      expect(row.outcome).toBe("selected");
+      expect(row.breakdown?.sizeOvershoot).toEqual(expect.any(Number));
+    }
+    expect(rows[0]?.breakdown?.sizeOvershoot).toBe(0);
+    expect(rows[2]?.breakdown?.versionPreference).toBeGreaterThan(0);
+    expect(rows[2]?.breakdown?.sizeOvershoot).toBeLessThan(0);
+    expect(rows[4]?.breakdown?.sizeOvershoot).toBeLessThan(0);
   });
 });
 
