@@ -60,42 +60,42 @@ Every pick stores `{ breakdown, total, signals }` on the `QUEUED` → `DOWNLOADI
 Priority, high to low. A higher item is not outweighed by the sum of the realistic ranges below it. Hard filters remove a file before it can score. This is a fun web-radio station: version and style outrank format and extra fidelity. **Owner decision:** once a file is acceptable, the saved version matters more than a higher bitrate or FLAC, so a 128–191 kbps Club Mix beats a 320 kbps Radio Edit under `extended`.
 
 1. Correct artist and title. Title tokens are a hard filter. Basename (+36) and path-only (+8) points, plus artist in the path (+48), only separate files that already match.
-2. Explicit requested version (+3200). Clears the full version-preference range plus the bad-result, quality, format, size, and peer ranges.
-3. Saved version preference. Basename +2280, parent folder +1520, clean original +760, fun-style second bonus +760. Every one of those clears quality + format + known-duration size + peer + a mild duration overshoot. `balanced` is 0.
-4. Avoid bad results. Long recording −400, short recording up to −400, duration overshoot up to −400, stem −6400. A known bitrate under 128 kbps, a long-recording phrase, a short-recording hit, a stem, or a duration overshoot as large as −400 gets no version bonus. Unknown-duration size (up to −140) sits in this tier.
-5. Audio quality. Good +160, acceptable +64, 128 kbps −40, 32 kbps −64. The steps clear format + size + peer. Quality sits below every version step.
-6. Format preference (+48). Clears known-duration size plus a normal peer. `mp3_only` and `flac_only` stay hard filters and add no points.
-7. File-size soft preference when duration is known and normal, capped at −12. That cap stays below the format bonus. It does not clear the peer span by itself.
+2. Explicit requested version (+5800). Clears the full version-preference range plus the bad-result, quality, format, size, and peer ranges. When the request names a version, the saved preference and the fun-style second bonus are both 0 for every file.
+3. Saved version preference. Basename +3600, parent folder +2400, clean original +1200, fun-style second bonus +1200. Every one of those clears quality + format + known-duration size + peer + a mild duration overshoot. `balanced` is 0. Off entirely when the request names a version.
+4. Avoid bad results. Long recording −1000, short recording up to −1000, duration overshoot up to −400, stem −11200. A known bitrate under 128 kbps, a long-recording phrase, a short-recording hit, a stem, or a duration overshoot that has reached −400 gets no version bonus. Unknown-duration size (up to −140) sits in this tier.
+5. Audio quality. Good +320, acceptable +80, 128 kbps −162, 32 kbps −256. The steps clear format + size + peer. Quality sits below every version step.
+6. Format preference (+112). Clears the known-duration size cap plus a normal peer. `mp3_only` and `flac_only` stay hard filters and add no points.
+7. File-size soft preference when duration is known and normal. Penalty is round(32 × ln(size / 30 MiB)), capped at −72. The cap stays below the format bonus and is larger than the peer span, so a big enough gap beats any normal peer. A ratio of 2.38× is where that happens (a file at 1.2× the preferred size against 2.38× that file). A smaller gap does not.
 8. Peer availability, about 27 points (−16 to +11). Queues over 1000 are −60 and are not part of that span.
 9. Username, then path.
 
 | Component | Weight | What it measures |
 | --- | --- | --- |
-| `requestedVersion` | +3200 | The request names a version and this file matches it. Overrides the saved preference, including when the saved preference is a different style. |
+| `requestedVersion` | +5800 | The request names a version and this file matches it. The saved preference, including the second bonus, is 0 for every file on that request. A hybrid such as "Radio Edit - X Remix" does not outrank a pure radio edit on a radio-edit request. |
 | `titleMatch` | +36 basename, +8 path only | Title tokens sit in the basename, or only in a folder. 0 when no title was passed. A wrong title is removed before this matters. |
 | `artistInPath` | +48 | Artist tokens appear in the path. 0 when no artist was passed or the path lacks them. |
-| `versionPreference` | +2280 basename, +1520 parent, +760 clean original, +760 second bonus, 0 for `balanced` | Saved style. The second bonus is a basename remix under `extended`, or a basename extended/club mix under `remix`. It ranks above radio edits and originals and below a parent-folder primary match. The gap from parent (+1520) to that second bonus (+760) is 760, which clears quality, format, size, peer, and a mild duration overshoot. |
-| `quality` | +160 for 256–320 kbps CBR, for reported MP3 VBR at 220 kbps or more, and for in-cap FLAC including hi-res; +64 from the floor (default 192) up to 255; below the floor −round(64 × fraction^0.5), so 128 kbps is −40 and 32 kbps is −64; 0 when unknown | Acceptable is enough to keep a version bonus. A known rate under 128 kbps loses the version bonus. 256–320 kbps CBR and standard FLAC are the same good tier. Reported MP3 VBR at about 220 kbps or more is that same tier. The flag on ogg or any other format does not promote the file. Hi-res inside the caps gets no extra. |
-| `format` | +48 for `prefer_mp3` or `prefer_flac`, 0 for `auto` and the `_only` modes | Decides inside one version class. Clears size and peer together. |
-| `sizeOvershoot` | Known normal duration: 12 points per 1.0 ratio above 30 MiB, and it stops at −12. Unknown duration, a long-recording phrase, or a duration past the preferred max: 48 per 1.0 ratio, capped at −140 | The −12 cap stays strictly below the format bonus. A 70 MiB normal FLAC still beats an equal-style MP3 under `prefer_flac`. The steep curve is part of the bad-result tier. |
-| `durationOvershoot` | −400 × overRatio × (1 + overRatio), capped at −400. A 13 min file against 720 s keeps its version bonus. A 15 min file is −125 and still keeps it. The bonus stops when the penalty reaches −400 | A 13-minute extended mix under the 20-minute hard cap is still an extended mix. |
-| `longRecording` | −400 | Basename or the immediate parent matches a long-recording phrase. No version bonus. A Remix DJ Set does not win on a remix preference. A normal-length Club Mix is not a long recording. |
-| `shortRecording` | Scales from 0 at the short line to −400 at 0 seconds | Known duration only. The line is 90 seconds, or 0.6 of the median known length when at least 5 lengths are known. Any hit removes the version bonus. An explicit requested version still applies. |
-| `stem` | −6400 | Instrument-part basename, or stem / stems / multitrack / acapella, when the request did not ask for that part. No version bonus. Larger than the request plus every other positive component. |
+| `versionPreference` | +3600 basename, +2400 parent, +1200 clean original, +1200 second bonus, 0 for `balanced`, 0 when the request names a version | Saved style. The second bonus is a basename remix under `extended`, or a basename extended/club mix under `remix`. It ranks above radio edits and originals and below a parent-folder primary match. The gap from parent (+2400) to that second bonus (+1200) is 1200, which clears quality, format, size, peer, and a mild duration overshoot. |
+| `quality` | +320 for 256–320 kbps CBR, for reported MP3 VBR at 220 kbps or more, and for in-cap FLAC including hi-res; +80 from the floor (default 192) up to 255; below the floor −round(256 × fraction^0.5), so 128 kbps is −162 and 32 kbps is −256; 0 when unknown | Acceptable is enough to keep a version bonus. A known rate under 128 kbps loses the version bonus. 256–320 kbps CBR and standard FLAC are the same good tier. Reported MP3 VBR at about 220 kbps or more is that same tier. The flag on ogg or any other format does not promote the file. Hi-res inside the caps gets no extra. |
+| `format` | +112 for `prefer_mp3` or `prefer_flac`, 0 for `auto` and the `_only` modes | Decides inside one version class. Clears the known-duration size cap and a normal peer together. |
+| `sizeOvershoot` | Known normal duration: round(32 × ln(size / 30 MiB)), capped at −72. Unknown duration, a long-recording phrase, or a duration past the preferred max: 48 per 1.0 ratio, capped at −140 | The log curve keeps growing past a 3× size gap. 2.38× is where the penalty difference exceeds the normal peer span of 27. A smaller ratio does not. The −72 cap stays strictly below the format bonus. A 71 MiB file beats a same-length 224 MiB file of the same style even when the larger file is on a free fast peer. The steep curve is part of the bad-result tier. |
+| `durationOvershoot` | −400 × overRatio × (1 + overRatio), capped at −400. A 13 min file against 720 s keeps its version bonus. A 15 min file is −125 and still keeps it. The bonus stops when the penalty reaches −400 | A 13-minute extended mix under the 20-minute hard cap is still an extended mix. That cutoff is the duration cap, not the long-recording phrase penalty. |
+| `longRecording` | −1000 | Basename or the immediate parent matches a long-recording phrase. No version bonus. A Remix DJ Set does not win on a remix preference. A normal-length Club Mix is not a long recording. |
+| `shortRecording` | Scales from 0 at the short line to −1000 at 0 seconds | Known duration only. The line is 90 seconds, or 0.6 of the median known length when at least 5 lengths are known. Any hit removes the version bonus. An explicit requested version still applies. |
+| `stem` | −11200 | Instrument-part basename, or stem / stems / multitrack / acapella, when the request did not ask for that part. No version bonus. Larger than the request plus every other positive component. |
 | `availability` | +6 free slot, −4 no slot, −1 per 25 queued up to −12, −60 when the queue is over 1000, up to +5 for upload speed | Normal span 27. The −60 abandoned-peer penalty is outside that span. |
 
 A stem penalty is larger than the requested-version bonus plus every positive component, so an incidental stem stays last. If the request itself names that stem or acapella term, the stem penalty is not applied and the requested version wins. A stem file alone is still eligible. It is not a hard filter.
 
-Version terms are read from the basename first. The immediate parent folder is the primary match at +1520 when the basename does not match. Clean original (+760) and the fun-style second bonus (+760) are the same height and apply under different preferences, so they do not compete. There is no exception that lets quality, format, size, or peer flip a version step.
+Version terms are read from the basename first. The immediate parent folder is the primary match at +2400 when the basename does not match. Clean original (+1200) and the fun-style second bonus (+1200) are the same height and apply under different preferences, so they do not compete. There is no exception that lets quality, format, size, or peer flip a version step. If the request names a version, none of these saved bonuses apply.
 
 | Kind | Basename phrases |
 | --- | --- |
 | `radio_edit` | radio edit, radio version, radio mix, single edit, single version |
-| `original` | original mix, original version, original, album version. A clean title with no version term counts as original at +760, and only when the parent is clean too. |
+| `original` | original mix, original version, original, album version. A clean title with no version term counts as original at +1200, and only when the parent is clean too. |
 | `extended` | extended, extended mix, extended version, club mix, 12" version, 12 inch |
 | `remix` | remix, rmx, `<name> remix`, `<name> version`, `<name> edit`, where the name is not radio, single, album, original, or extended |
 
-A bare `mix` is not a remix. `extended mix` and `club mix` are extended, and a normal-length Club Mix is not a long recording. Under `extended`, a named remix scores the +760 second bonus. Under `remix`, an extended or club mix scores that same second bonus. The bonus is not applied to a long recording, a short fragment, a stem, a known bitrate under 128 kbps, or a duration overshoot that has reached −400. A mild overshoot, such as 13 minutes, keeps it. `balanced` adds no version bonus. If the preferred version is missing, the best remaining file wins.
+A bare `mix` is not a remix. `extended mix` and `club mix` are extended, and a normal-length Club Mix is not a long recording. Under `extended`, a named remix scores the +1200 second bonus. Under `remix`, an extended or club mix scores that same second bonus. The bonus is not applied to a long recording, a short fragment, a stem, a known bitrate under 128 kbps, or a duration overshoot that has reached −400. A mild overshoot, such as 13 minutes, keeps it. `balanced` adds no version bonus. A request that names a version adds none of these bonuses either. If the preferred version is missing, the best remaining file wins.
 
 ### Defaults
 
@@ -112,7 +112,7 @@ A bare `mix` is not a remix. `extended mix` and `club mix` are extended, and a n
 | `short_recording_fraction` | 0.6 | Known duration below this fraction of the search median is short. |
 | `short_recording_min_samples` | 5 | Median fraction applies only with at least this many known lengths. |
 | `short_recording_floor_seconds` | 90 | Known duration below this is short even without a median. |
-| `short_recording_penalty` | −400 | Most negative `shortRecording` score. |
+| `short_recording_penalty` | −1000 | Most negative `shortRecording` score. |
 | `max_sample_rate` | 48000 | Hard cap. Null disables it. |
 | `max_bit_depth` | 24 | Hard cap. Null disables it. |
 
@@ -120,13 +120,13 @@ A bare `mix` is not a remix. `extended mix` and `club mix` are extended, and a n
 
 A normal 6-minute 16/44.1 FLAC is about 42 MiB. A 320 kbps MP3 of the same song is about 14 MiB. Quality treats them as the same good tier. Format and size then decide.
 
-Duration is the length signal when it is known. The size penalty stays gentle for a moderate overshoot of a normal-duration file (42 MiB is −5) and grows steeply for a large overshoot or when duration is missing. 30 MiB is not a cutoff: a good 35 MiB file beats a poor 8 MiB file, and a 34 MiB FLAC is not rejected.
+Duration is the length signal when it is known. The size penalty for a normal-duration file is logarithmic: 42 MiB is −11, 71 MiB is −28, and 224 MiB is −64, still short of the −72 cap. It grows steeply when duration is missing or the file is long. 30 MiB is not a cutoff: a good 35 MiB file beats a poor 8 MiB file, and a 34 MiB FLAC is not rejected.
 
-Inside one version class, **default `prefer_mp3`:** the 14 MiB 320 kbps MP3 beats the 42 MiB 16/44.1 FLAC. The MP3 scores quality 160 + format 48. The FLAC scores quality 160 + size −5. A 192 kbps MP3 on a fast free peer does not beat that FLAC when the FLAC's peer has no free slot and a normal queue. A 128 kbps MP3 does not beat either of them under `prefer_mp3` when both are the same style.
+Inside one version class, **default `prefer_mp3`:** the 14 MiB 320 kbps MP3 beats the 42 MiB 16/44.1 FLAC. The MP3 scores quality 320 + format 112. The FLAC scores quality 320 + size −11. A 192 kbps MP3 on a fast free peer does not beat that FLAC when the FLAC's peer has no free slot and a normal queue. A 128 kbps MP3 does not beat either of them under `prefer_mp3` when both are the same style.
 
-**`auto`:** both format bonuses are 0, so the same pair is close and the MP3 wins by the size gap of 5.
+**`auto`:** both format bonuses are 0, so the same pair is close and the MP3 wins by the size gap of 11.
 
-**`prefer_flac`:** the FLAC gains format 48 and wins, including a 70 MiB file whose size penalty is only −12.
+**`prefer_flac`:** the FLAC gains format 112 and wins, including a 70 MiB file. A same-style 71 MiB FLAC also beats a same-length 224 MiB FLAC on a free fast peer, under `prefer_flac` and `flac_only`. The size gap of about 3× is past the 2.38× point where size beats the full normal peer span.
 
 A preferred Club Mix or Extended Mix still beats a Radio Edit or original in the other format. Format does not cross a version step.
 

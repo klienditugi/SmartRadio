@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { SCORE_WEIGHTS } from "@subwave-ai/core";
 import { describe, expect, it } from "vitest";
 import { selectSearch, type SearchSelection, type SelectSearchOptions } from "./select.js";
-import { dryRunPreferences } from "./selector-dryrun.js";
+import { dryRunExplicitRequests, dryRunPreferences } from "./selector-dryrun.js";
 
 const FIXTURES = new URL("../../../core/test/fixtures/slskd-phase-c/", import.meta.url);
 
@@ -279,7 +279,7 @@ describe("real Phase C format, quality, and peers", () => {
     expect(mp3.breakdown.quality).toBe(flac.breakdown.quality);
     expect(mp3.breakdown.format).toBe(0);
     expect(flac.breakdown.format).toBe(0);
-    expect(flac.breakdown.sizeOvershoot).toBeGreaterThan(-10);
+    expect(flac.breakdown.sizeOvershoot).toBeGreaterThan(-SCORE_WEIGHTS.formatPreference);
     expect(flac.breakdown.sizeOvershoot).toBeLessThan(0);
 
     expect(tagsOf(pick(hasTag("flac_16_44"), { formatPreference: "prefer_mp3" }).file)).toContain("flac_16_44");
@@ -559,17 +559,94 @@ describe("priority on real rows", () => {
 
     const huge = hasTag("club_mix", (tags) => tags.includes("club_mix") && !tags.includes("wav"));
     const smallBusy = hasTag("peer_no_free_slot", (_tags, row) => row.filename.includes("(10s)"));
+    const openCaps = { maxSampleRate: 192_000, maxFileSizeMb: null };
     const sized = pick(
       { responses: [...huge.responses, ...smallBusy.responses] },
-      { formatPreference: "auto", versionPreference: "balanced", maxSampleRate: 192_000, maxFileSizeMb: null },
+      { formatPreference: "auto", versionPreference: "balanced", ...openCaps },
     );
-    expect(tagsOf(sized.file)).toContain("club_mix");
-    expect(sized.breakdown.durationOvershoot).toBe(0);
-    expect(sized.breakdown.sizeOvershoot).toBeGreaterThan(-SCORE_WEIGHTS.formatPreference);
+    // 224 MB vs ~10 MB is well past the ratio where known-duration size beats a normal peer.
+    expect(sized.file.filename).toContain("(10s)");
+    const club = pick(huge, { formatPreference: "auto", versionPreference: "balanced", ...openCaps });
+    expect(club.breakdown.durationOvershoot).toBe(0);
+    expect(club.breakdown.longRecording).toBe(0);
+    expect(club.breakdown.sizeOvershoot).toBeLessThan(0);
+    expect(club.breakdown.sizeOvershoot).toBeGreaterThan(-SCORE_WEIGHTS.formatPreference);
+    const preferred = pick(
+      { responses: [...huge.responses, ...smallBusy.responses] },
+      { formatPreference: "auto", versionPreference: "extended", ...openCaps },
+    );
+    expect(tagsOf(preferred.file)).toContain("club_mix");
+    expect(preferred.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+
+    const radios = hasTag("radio_edit");
+    const syntheticHybrid = {
+      responses: [
+        {
+          username: "SYNTHETIC-wbbl",
+          hasFreeUploadSlot: false,
+          queueLength: 300,
+          uploadSpeed: 1,
+          files: [
+            {
+              filename: "@@share\\SYNTHETIC\\Daft Punk - Get Lucky (Radio Edit - WBBL Remix).mp3",
+              size: 10 * 1024 * 1024,
+              length: 248,
+              extension: "mp3",
+              bitRate: 320,
+            },
+          ],
+        },
+      ],
+    };
+    const radioRequest = {
+      query: { artist: "Daft Punk", title: "Get Lucky (Radio Edit)" },
+      versionPreference: "extended" as const,
+    };
+    const pureRadio = pick({ responses: [...radios.responses, ...syntheticHybrid.responses] }, radioRequest);
+    expect(pureRadio.file.username).not.toBe("SYNTHETIC-wbbl");
+    expect(pureRadio.file.filename.toLowerCase()).toContain("radio edit");
+    expect(pureRadio.file.filename.toLowerCase()).not.toContain("remix");
+    expect(pureRadio.breakdown.versionPreference).toBe(0);
+    expect(pureRadio.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    const hybridAlone = pick(syntheticHybrid, { versionPreference: "extended" });
+    expect(hybridAlone.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionSecondary);
+    expect(pick(syntheticHybrid, radioRequest).breakdown.versionPreference).toBe(0);
+
+    const album = tagged((_tags, row) => row.filename.includes("(Album Version)"));
+    const remix = tagged((_tags, row) => row.username === "peer-005" && row.filename.includes("FAT TONY"));
+    const originalRequest = {
+      query: { artist: "Daft Punk", title: "Get Lucky (Album Version)" },
+      versionPreference: "remix" as const,
+    };
+    const originalPick = pick({ responses: [...album.responses, ...remix.responses] }, originalRequest);
+    expect(originalPick.file.filename).toContain("Album Version");
+    expect(originalPick.file.filename.toLowerCase()).not.toContain("remix");
+    expect(originalPick.breakdown.versionPreference).toBe(0);
+    expect(originalPick.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(pick(remix, { versionPreference: "remix" }).breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionBasename);
+    expect(pick(remix, originalRequest).breakdown.versionPreference).toBe(0);
 
     expect(pick(hasTag("radio_edit"), { versionPreference: "balanced" }).file.username).toBe("peer-005");
     const samePeer = pick(hasTag("radio_edit", (_tags, row) => row.username === "peer-005"), { versionPreference: "radio_edit" });
     expect(samePeer.file.filename).toContain("26. Daft Punk");
+  });
+});
+
+describe("explicit version dry-run rows", () => {
+  it("keeps the 5×5 grid and adds a named radio edit and a named album version", () => {
+    expect(dryRunPreferences(curated)).toHaveLength(VERSIONS.length * FORMATS.length);
+    const extra = dryRunExplicitRequests(curated);
+    expect(extra.map((row) => [row.queryTitle, row.versionPreference, row.formatPreference])).toEqual([
+      ["Get Lucky (Radio Edit)", "extended", "prefer_mp3"],
+      ["Get Lucky (Album Version)", "remix", "prefer_mp3"],
+    ]);
+    for (const row of extra) {
+      expect(row.outcome).toBe("selected");
+      expect(row.breakdown?.versionPreference).toBe(0);
+      expect(row.breakdown?.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    }
+    expect(extra[0]?.filename?.toLowerCase()).toContain("radio edit");
+    expect(extra[0]?.filename?.toLowerCase()).not.toContain("remix");
   });
 });
 

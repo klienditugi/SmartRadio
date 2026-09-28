@@ -36,41 +36,80 @@ export function selectorQuery(payload: unknown): { artist?: string; title?: stri
   return {};
 }
 
+function rowFromDecision(
+  versionPreference: DryRunRow["versionPreference"],
+  formatPreference: DryRunRow["formatPreference"],
+  decision: SearchSelection,
+): DryRunRow {
+  if (decision.outcome === "selected") {
+    return {
+      versionPreference,
+      formatPreference,
+      outcome: decision.outcome,
+      username: decision.file.username,
+      filename: decision.file.filename,
+      size: decision.file.size,
+      total: decision.total,
+      signals: decision.signals,
+      breakdown: decision.breakdown,
+      locked: decision.removed.locked,
+    };
+  }
+  return {
+    versionPreference,
+    formatPreference,
+    outcome: decision.outcome,
+    ...(decision.outcome === "no_suitable_result" ? { reason: decision.reason, locked: decision.removed.locked } : {}),
+  };
+}
+
 export function dryRunPreferences(payload: unknown): DryRunRow[] {
   const query = selectorQuery(payload);
   const rows: DryRunRow[] = [];
   for (const versionPreference of DRY_RUN_VERSIONS) {
     for (const formatPreference of DRY_RUN_FORMATS) {
-      const decision = selectSearch(payload, {
-        allowedExtensions: AUDIO,
-        query,
-        versionPreference,
-        formatPreference,
-      });
-      if (decision.outcome === "selected") {
-        rows.push({
+      rows.push(
+        rowFromDecision(
           versionPreference,
           formatPreference,
-          outcome: decision.outcome,
-          username: decision.file.username,
-          filename: decision.file.filename,
-          size: decision.file.size,
-          total: decision.total,
-          signals: decision.signals,
-          breakdown: decision.breakdown,
-          locked: decision.removed.locked,
-        });
-        continue;
-      }
-      rows.push({
-        versionPreference,
-        formatPreference,
-        outcome: decision.outcome,
-        ...(decision.outcome === "no_suitable_result" ? { reason: decision.reason, locked: decision.removed.locked } : {}),
-      });
+          selectSearch(payload, {
+            allowedExtensions: AUDIO,
+            query,
+            versionPreference,
+            formatPreference,
+          }),
+        ),
+      );
     }
   }
   return rows;
+}
+
+/**
+ * Extra rows for a request that names a version. The saved preference is on,
+ * and it must not add points. Kept out of `dryRunPreferences` so the 5×5
+ * grid stays 25 rows.
+ */
+export function dryRunExplicitRequests(payload: unknown): Array<DryRunRow & { queryTitle: string }> {
+  const artist = selectorQuery(payload).artist;
+  const cases = [
+    { versionPreference: "extended" as const, queryTitle: "Get Lucky (Radio Edit)" },
+    { versionPreference: "remix" as const, queryTitle: "Get Lucky (Album Version)" },
+  ];
+  return cases.map(({ versionPreference, queryTitle }) => {
+    const formatPreference = "prefer_mp3" as const;
+    const row = rowFromDecision(
+      versionPreference,
+      formatPreference,
+      selectSearch(payload, {
+        allowedExtensions: AUDIO,
+        query: { ...(artist ? { artist } : {}), title: queryTitle },
+        versionPreference,
+        formatPreference,
+      }),
+    );
+    return { ...row, queryTitle };
+  });
 }
 
 function invokedDirectly(): boolean {
@@ -99,6 +138,9 @@ if (invokedDirectly()) {
   }
   const payload = JSON.parse(readFileSync(file, "utf8")) as unknown;
   for (const row of dryRunPreferences(payload)) {
+    console.log(JSON.stringify(row));
+  }
+  for (const row of dryRunExplicitRequests(payload)) {
     console.log(JSON.stringify(row));
   }
 }

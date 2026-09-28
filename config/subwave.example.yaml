@@ -118,7 +118,7 @@ acquisition:
     short_recording_fraction: 0.6
     short_recording_min_samples: 5
     short_recording_floor_seconds: 90
-    short_recording_penalty: -400
+    short_recording_penalty: -1000
     max_sample_rate: 48000
     max_bit_depth: 24
     version_penalty_terms:

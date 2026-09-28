@@ -16,22 +16,30 @@
  *     a stem, and a known bitrate under 128 kbps. Those files get no version bonus.
  *  5. audio quality (acceptable is enough; good is better, but both sit below version)
  *  6. saved format preference
- *  7. file-size soft preference when duration is known and normal (capped at −12)
+ *  7. file-size soft preference when duration is known and normal
  *  8. peer availability
  *  9. username, then path
  *
- * Every scored tier clears the sum of the tiers below it, except the known-duration
- * size cap. That cap stays at −12 so it cannot beat format, and it is smaller than
- * the normal peer span, so a peer swing can outweigh size alone. Format is large
- * enough to clear size and peer together. Queues over 1000 (−60) are an abandoned
- * peer and are not part of the peer span.
+ * Every scored tier clears the sum of the tiers below it. Known-duration size is
+ * the exception at small ratios: the penalty is logarithmic, so a tiny size gap
+ * does not beat a peer. Once the two files differ by 2.38×, the penalty
+ * difference exceeds the normal peer span. The cap itself is larger than that
+ * span and still strictly below the format gap, so format clears the worst
+ * normal-duration size penalty plus a normal peer. Queues over 1000 (−60) are
+ * an abandoned peer and are not part of the peer span.
+ *
+ * When the request names a version, the saved preference is off for every file,
+ * including the fun-style second bonus. Rank on the requested-version match, then
+ * the lower tiers. A hybrid such as "Radio Edit - X Remix" does not collect a
+ * remix bonus on a radio-edit request.
  *
  * A mild duration overshoot (a 13-minute extended mix under the 20-minute hard cap)
  * still keeps the version bonus. The version steps clear that penalty plus quality,
- * format, size, and peer. An overshoot as large as the long-recording penalty does
- * not keep the bonus. Under `extended`, a named remix gets the second bonus. Under
- * `remix`, an extended or club mix gets it. That second bonus clears the lower
- * range and stays below a parent-folder primary match.
+ * format, size, and peer. The bonus stops when the overshoot reaches the duration
+ * penalty cap, which is separate from the long-recording phrase penalty. Under
+ * `extended`, a named remix gets the second bonus. Under `remix`, an extended or
+ * club mix gets it. That second bonus clears the lower range and stays below a
+ * parent-folder primary match.
  */
 
 import {
@@ -64,82 +72,97 @@ const MIB = 1024 * 1024;
  * policy. Every other number is fixed.
  *
  * Equal-peer 6-minute files, default `prefer_mp3` / `extended`:
- * a 14 MiB 320 kbps MP3 scores quality 160 + format 48 when it is not the preferred style.
- * a 42 MiB 16/44.1 FLAC scores quality 160 + size −5. Format decides inside one style.
+ * a 14 MiB 320 kbps MP3 scores quality 320 + format 112 when it is not the preferred style.
+ * a 42 MiB 16/44.1 FLAC scores quality 320 + size −11. Format decides inside one style.
  * A preferred club or extended version outranks a radio edit or original of any fidelity.
  */
 export const SCORE_WEIGHTS = {
-  requestedVersion: 3200,
+  requestedVersion: 5800,
   /** Filename contains the title tokens. Path-only matches score `titleMatchPath`. */
   titleMatchBasename: 36,
   titleMatchPath: 8,
   artistInPath: 48,
   /**
    * Bonus for prefer_mp3 / prefer_flac. auto and the _only modes add 0.
-   * Clears known-duration size plus a normal peer. The _only modes are filters.
+   * Clears the known-duration size cap plus a normal peer. The _only modes are filters.
    */
-  formatPreference: 48,
+  formatPreference: 112,
   /**
    * 256–320 kbps CBR, reported MP3 VBR at `bitrateVbrGoodMin` or higher, and in-cap
    * FLAC including hi-res. Hi-res gets no extra on top of this. VBR on other
    * formats, such as ogg, does not enter this tier.
    */
-  qualityGood: 160,
+  qualityGood: 320,
   /** Lossy from the floor (default 192) up to 255, and MP3 VBR below `bitrateVbrGoodMin`. */
-  qualityAcceptable: 64,
+  qualityAcceptable: 80,
   /** Derived bitrate contributes this fraction of the reported lossy score, and no more. */
   qualityDerivedScale: 0.5,
   /**
    * Full penalty at 32 kbps. Below the floor the penalty is
    * −round(scale × fraction ^ power), where fraction is the distance from the
    * floor down to 32 kbps. Power below 1 drops faster than a straight line, so
-   * 128 kbps against a 192 floor is −40 while 32 kbps is −64.
+   * 128 kbps against a 192 floor is −162 while 32 kbps is −256.
    */
-  qualityLossyPenaltyScale: 64,
+  qualityLossyPenaltyScale: 256,
   qualityLossyPenaltyPower: 0.5,
   /**
    * Basename matches the saved version kind. Clears quality, format, known-duration
    * size, a normal peer, and a mild duration overshoot, and clears the parent step
    * by that same amount.
    */
-  versionBasename: 2280,
+  versionBasename: 3600,
   /**
    * Clean title (no version term) when the preference is original, and the parent is clean too.
    * Same height as the fun-style second bonus. Each clears the lower range on its own.
    */
-  versionCleanOriginal: 760,
+  versionCleanOriginal: 1200,
   /**
    * Immediate parent folder only. Weaker than the basename and stronger than the
    * fun-style second bonus, each by more than quality + format + size + peer + a mild overshoot.
    */
-  versionParent: 1520,
+  versionParent: 2400,
   /**
    * Under `extended`, a basename remix. Under `remix`, a basename extended or club mix.
    * Above radio edits and originals. Below a parent-folder primary match.
+   * Not applied when the request itself names a version.
    */
-  versionSecondary: 760,
+  versionSecondary: 1200,
   /**
-   * Points per 1.0 overshoot ratio while duration is known and the file is not long
-   * or overshooting. The penalty stops at this value so it stays strictly below the
-   * format gap. A larger file does not add more.
+   * Known, normal duration: penalty is round(scale × ln(size / preferred)).
+   * The difference between two files above the preferred size is about
+   * scale × ln(big / small), so it does not depend on the preferred size.
+   * At 32, a ratio of e^(27/32) ≈ 2.33× exceeds the normal peer span of 27
+   * before rounding. On the scored curve, a 1.2× preferred file against
+   * 2.38× that size is the first step that clears the span.
    */
-  sizeGentlePerRatio: 12,
+  sizeGentleLogScale: 32,
+  /**
+   * Cap for that log curve. Larger than the peer span, strictly below the format
+   * bonus, and high enough that a ~224 MiB file is still on the slope rather than
+   * pinned to the same penalty as a ~71 MiB file.
+   */
+  sizeGentleCap: 72,
   /**
    * Points per 1.0 overshoot ratio when duration is unknown, the file is a long
    * recording, or duration is past the preferred max. That curve stands in for
    * the duration tier. It is not part of the size range under format preference.
    */
   sizeSteepPerRatio: 48,
-  sizeGentleRatioLimit: 1,
   sizePenaltyCap: 140,
   /** Coefficient for duration overshoot. 15 min against a 12 min preferred max is −125. */
   durationPenaltyScale: 400,
   durationPenaltyCap: 400,
-  longRecording: -400,
+  /**
+   * Duration overshoot at or below this drops the version bonus. Equal to the
+   * duration penalty cap, not to `longRecording`, so a harsher long-phrase penalty
+   * does not make every mild overshoot lose the bonus.
+   */
+  versionOvershootCutoff: -400,
+  longRecording: -1000,
   /** Default ceiling for `shortRecording`. Config `short_recording_penalty` overrides it. */
   shortRecording: DEFAULT_SHORT_RECORDING_PENALTY,
   /** Larger than requestedVersion plus every positive component, so a stem stays last. */
-  stem: -6400,
+  stem: -11200,
   availabilityFreeSlot: 6,
   availabilityNoSlot: -4,
   availabilityExtremeQueue: -60,
@@ -698,13 +721,13 @@ function qualityOf(track: CandidateTrack, floor: number): { points: number; sign
 
 /**
  * Cap for a known, non-long, non-overshooting duration. Strictly below the
- * format bonus so a large but normal FLAC cannot lose to format preference.
+ * format bonus. The log curve reaches this only for a very large file; a
+ * moderate overshoot stays on the slope.
  */
 function knownDurationSizeCap(): number {
-  const gentle = Math.round(SCORE_WEIGHTS.sizeGentlePerRatio * SCORE_WEIGHTS.sizeGentleRatioLimit);
   const formatGap = SCORE_WEIGHTS.formatPreference;
   if (formatGap <= 1) return 0;
-  return Math.min(gentle, formatGap - 1);
+  return Math.min(SCORE_WEIGHTS.sizeGentleCap, formatGap - 1);
 }
 
 /** Unknown duration, a long-recording phrase, or a duration past the preferred max. */
@@ -723,9 +746,8 @@ function sizeOvershoot(track: CandidateTrack, policy: ResolvedPolicy): number {
   if (sizeMb <= policy.preferredMaxFileSizeMb) return 0;
   const ratio = (sizeMb - policy.preferredMaxFileSizeMb) / policy.preferredMaxFileSizeMb;
   if (!sizeStandsInForDuration(track, policy)) {
-    const limited = Math.min(ratio, SCORE_WEIGHTS.sizeGentleRatioLimit);
-    const penalty = Math.round(SCORE_WEIGHTS.sizeGentlePerRatio * limited);
-    return -Math.min(knownDurationSizeCap(), penalty);
+    const penalty = Math.round(SCORE_WEIGHTS.sizeGentleLogScale * Math.log(1 + ratio));
+    return -Math.min(knownDurationSizeCap(), Math.max(0, penalty));
   }
   const penalty = Math.round(SCORE_WEIGHTS.sizeSteepPerRatio * ratio);
   return -Math.min(SCORE_WEIGHTS.sizePenaltyCap, penalty);
@@ -783,7 +805,7 @@ function reportedOrDerivedKbps(track: CandidateTrack): number | undefined {
 
 /**
  * Bad results get no saved-version bonus. A mild duration overshoot still can:
- * the file keeps the bonus until the overshoot is as large as `longRecording`.
+ * the file keeps the bonus until the overshoot reaches `versionOvershootCutoff`.
  */
 function versionBonusBlocked(
   track: CandidateTrack,
@@ -796,8 +818,17 @@ function versionBonusBlocked(
   if (shortRecordingPoints(track, policy, cohort) < 0) return true;
   const kbps = reportedOrDerivedKbps(track);
   if (kbps !== undefined && kbps < SCORE_WEIGHTS.bitrateVersionMin) return true;
-  if (durationOvershoot(track, policy) <= SCORE_WEIGHTS.longRecording) return true;
+  if (durationOvershoot(track, policy) <= SCORE_WEIGHTS.versionOvershootCutoff) return true;
   return false;
+}
+
+/** The request names a version kind or a version-penalty term, so the saved preference stays off. */
+function requestNamesVersion(policy: ResolvedPolicy): boolean {
+  const askedText = requestedBlob(policy.query);
+  if (!askedText) return false;
+  const asked = classifyVersionText(askedText);
+  if (asked.radio_edit || asked.extended || asked.remix || asked.original || asked.other) return true;
+  return matchedTerms(askedText, policy.versionPenaltyTerms).length > 0;
 }
 
 function availabilityScore(track: CandidateTrack): number {
@@ -825,6 +856,7 @@ function versionPreferencePoints(
   stem: boolean,
 ): number {
   if (policy.versionPreference === "balanced") return 0;
+  if (requestNamesVersion(policy)) return 0;
   if (versionBonusBlocked(track, policy, cohort, stem)) return 0;
   const base = classifyVersionText(basenameText(track));
   const parent = classifyVersionText(parentText(track));

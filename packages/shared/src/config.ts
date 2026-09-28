@@ -75,7 +75,7 @@ export const DEFAULT_SHORT_RECORDING_MIN_SAMPLES = 5;
 export const DEFAULT_SHORT_RECORDING_FLOOR_SECONDS = 90;
 
 /** Soft short-track penalty reaches this (negative) value. Same scale as a long recording. */
-export const DEFAULT_SHORT_RECORDING_PENALTY = -400;
+export const DEFAULT_SHORT_RECORDING_PENALTY = -1000;
 
 /**
  * Basename / parent-folder words that rank below a clean match.
