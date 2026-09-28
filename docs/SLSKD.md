@@ -33,64 +33,78 @@ Restart the SmartRadio worker after a successful test. It reads acquisition conf
 
 ## Which search file is downloaded
 
-Selection does not call an LLM. The slskd adapter only maps search JSON into a provider-neutral `CandidateTrack`. The score is a sum of named components. The same payload and settings always pick the same file. Ties break on peer username, then the full path.
+Selection does not call an LLM. The slskd adapter maps search JSON into a provider-neutral `CandidateTrack`. This is web radio, not an archive. A normal file is about 20 to 30 MiB. The selector rejects anything that should not play, then compares the survivors in a fixed order and stops at the first difference. It does not add weights.
 
-Keys live under `acquisition.selection` (see `config/subwave.example.yaml`). The settings screen edits the preferred size, the extended/remix bonus, the preferred duration, the hard duration cap, and the lossless-preference weight. Each of those reports `source`: `env`, `yaml`, or `default`. A value set in the environment is read-only in the UI and a different value is rejected with 409.
+The same payload and settings always pick the same file. The last two comparisons are username, then path.
 
-Optional env overrides: `SLSKD_MAX_FILE_SIZE_MB`, `SLSKD_MIN_FILE_SIZE_MB`, `SLSKD_PREFERRED_MAX_FILE_SIZE_MB`, `SLSKD_MAX_DURATION_SECONDS`, `SLSKD_PREFERRED_MAX_DURATION_SECONDS`, `SLSKD_EXTENDED_VERSION_BONUS`, `SLSKD_LOSSLESS_PREFERENCE`, `SLSKD_MAX_SAMPLE_RATE`, `SLSKD_MAX_BIT_DEPTH`.
+Keys live under `acquisition.selection` (see `config/subwave.example.yaml`). Sizes are MiB. 1 MiB = 1,048,576 bytes. The `_mb` key names stay as they are. The settings screen edits version preference, format preference, and the duration cap. It does not show preferred max file size or preferred max duration. Version and format are dropdowns. Each field reports `source`: `env`, `yaml`, or `default`. A value set in the environment is read-only in the UI and a different value is rejected with 409. An invalid enum is rejected with 400.
 
-### Hard filters
+Optional env overrides: `SLSKD_MAX_FILE_SIZE_MB`, `SLSKD_MIN_FILE_SIZE_MB`, `SLSKD_PREFERRED_MAX_FILE_SIZE_MB`, `SLSKD_MAX_DURATION_SECONDS`, `SLSKD_PREFERRED_MAX_DURATION_SECONDS`, `SLSKD_VERSION_PREFERENCE`, `SLSKD_FORMAT_PREFERENCE`, `SLSKD_MAX_SAMPLE_RATE`, `SLSKD_MAX_BIT_DEPTH`.
 
-Files in `lockedFiles`, or with `isLocked: true`, are never chosen. An empty `extension` uses the filename. A junk extension such as `flac@synoeastream` is ignored and the filename is used instead. A basename that starts with `._`, or any path segment named `__MACOSX`, is junk (`\` and `/`, case-insensitive). Files smaller than `min_file_size_mb` (default 1, in 1024×1024-byte units) or larger than `max_file_size_mb` (default 200, same unit as `files.max_bytes`) are excluded. `max_duration_seconds` (default 1200) applies when the file reports a duration; null disables it. Files that omit duration stay eligible. `max_sample_rate` (default 48000 Hz) and `max_bit_depth` (default 24) are broadcast-friendly. A file that reports a sample rate or bit depth above its cap is excluded. A file that does not report that field stays eligible. Set a cap or the size floor to null to disable it.
+`preferred_max_file_size_mb` and `preferred_max_duration_seconds` are still accepted so older yaml loads. The selector ignores them. `SLSKD_EXTENDED_VERSION_BONUS`, `SLSKD_LOSSLESS_PREFERENCE`, and the yaml keys `extended_version_bonus` and `lossless_preference` are ignored. Doctor prints a deprecation note that names the replacement key.
 
-`preferred_max_file_size_mb` (default 30) and `preferred_max_duration_seconds` (default 720) are penalties, not exclusions. Each preferred value must be less than or equal to its hard max when the hard max is set.
+### Hard rejects
 
-When the selector is given a request title, every significant title token must appear in the basename or a parent folder. The title is lowercased, diacritics are stripped, punctuation is dropped, and a bracketed `feat.` / `ft.` credit is removed before tokenizing. Stopwords (`a`, `an`, `the`, `and`, `of`, `feat`, `ft`) are ignored unless the title is only stopwords. Single-letter tokens are ignored unless the title has no longer token. Version terms in the title are not required tokens. Artist tokens are not required. A call that omits the title skips this filter. The worker always passes the request artist and title.
+These run before ranking. Each removed file increments one reason. The dry-run prints the counts.
 
-If junk, extension, minimum size, maximum size, duration, sample rate, bit depth, title, or `isLocked` remove every candidate, selection returns no file. It does not widen a filter or read `lockedFiles` as a fallback. The worker then moves the request `QUEUED` → `FAILED` with outcome `no_suitable_result` and a reason that counts how many candidates each filter removed (`junk`, `min_file_size`, `title_mismatch`, and the older keys). It does not enqueue a download. A search with zero responses is a different failure, `no usable search result`.
+Files in `lockedFiles`, or with `isLocked: true`, are never chosen. Real slskd puts locked hits only in `lockedFiles`, often with `isLocked: false`. Those rows are still mapped as locked. An empty `extension` uses the filename. A junk extension such as `flac@synoeastream` is ignored and the filename is used instead. A basename that starts with `._`, or any path segment named `__MACOSX`, is junk.
 
-### Score
+A file smaller than `min_file_size_mb` (default 1 MiB) is rejected. The adapter does not hand the selector a file with no positive size, so an unknown size never gets a special score. A file larger than `max_file_size_mb` (default 30 MiB) is rejected. There is no graded size curve. `files.max_bytes` is a separate byte count. Existing installs that copied an older example with `max_file_size_mb: 200` should set `acquisition.selection.max_file_size_mb` to 30. Doctor warns when the resolved value is above 30. That warning is not an error, and the process still starts.
 
-Every pick stores `{ breakdown, total, signals }` on the `QUEUED` → `DOWNLOADING` event and on `GET /api/v1/requests/:id` as `selection_score`. Nothing in that object is a secret. `signals.quality` is `reported`, `derived`, or `unknown`.
+`max_duration_seconds` (default 1200) applies when the file reports a duration. Null disables it. A missing duration is not over the cap and is not a short recording. `max_sample_rate` (default 48000 Hz) and `max_bit_depth` (default 24) reject a file that reports a higher value. A file that omits the field stays eligible.
 
-| Component | Default weight | What it measures |
-| --- | --- | --- |
-| `requestedVersion` | +1000 | The request names a version term and this file matches it. Dominates every other component except hard filters and an incidental stem. |
-| `titleMatch` | +12 basename, +4 path only | Title tokens sit in the basename, or only in a folder. 0 when no title was passed. |
-| `artistInPath` | +24 | Artist tokens appear in the path. 0 when no artist was passed or the path lacks them. |
-| `format` | +36 lossless, 0 lossy | `lossless_preference`. This is the configurable format-balance weight. |
-| `quality` | +30 for 16/44.1 or 16/48; +8 more when bit depth or sample rate is higher and still inside the caps; +28 for 256–320 kbps; +22 for 321–500; +8 for the floor up to 255; penalty below the floor (default 192) down to −48 at 32 kbps; 0 when unknown | Reported fields only. Lossy values outside 32–500 kbps are unknown. A derived estimate is half of the reported lossy score and is labeled `derived`. |
-| `extendedBonus` | +48, on by default | Path matches remix, extended, or club mix, and the length is normal. |
-| `sizeOvershoot` | gentle 12 points per 1.0 ratio above 30 MiB when duration is known and normal, up to ratio 1; then 48 per extra 1.0. Unknown duration, or a duration over the preferred max, uses 48 from the start. Capped at −140 | Not a reason to pick a tiny poor file. Under 30 MiB adds nothing. |
-| `durationOvershoot` | −400 × overRatio × (1 + overRatio), capped at −400. A 15 min file against 720 s is −125 | Only when duration is known and above `preferred_max_duration_seconds`. |
-| `longRecording` | −280 | Basename or the immediate parent matches a long-recording phrase. |
-| `stem` | −1600 | Instrument-part basename, or stem / stems / multitrack / acapella, when the request did not ask for that part. |
-| `availability` | +6 free slot, −4 no slot, −1 per 25 queued up to −12, −60 when the queue is over 1000, up to +5 for upload speed | Small, except an extreme queue. A queue of 8 is −1, so it loses to a much faster peer and wins when speed is equal. |
+Wrong artist or title:
 
-A stem penalty is larger than the requested-version bonus plus every positive component, so an incidental stem stays last. If the request itself names that stem or acapella term, the stem penalty is not applied and the requested version wins. A stem file alone is still eligible. It is not a hard filter.
+- The title is a contiguous phrase, not a bag of words. The basename and the title are normalized the same way before the comparison: lowercase, punctuation (underscores, dots, hyphens, brackets) turned into spaces, whitespace collapsed. The same normalization is used for the artist. The phrase must start at a boundary in the original basename. A boundary is the start of the name, the text right after a leading track number (`08 `, `08-`, `201-`, `1 - `, `10A - 117 - `, or a number that leads the following text such as `_08_`), the text right after an artist separator (` - `, `-`, `_-_`, `–`), the text right after `(` or `[`, or the text right after a closing `)` or `]` and its trailing whitespace. The title may also start directly after the requested artist name in the normalized basename, as in `Daft Punk get lucky`. The boundary is chosen on the original string, then the normalized slice is compared, except the artist-name boundary, which is read on the normalized basename. Anything after the phrase is allowed. `You Get Lucky` and `Independant Woman X Get Lucky` do not match, because the phrase does not start at a boundary. A folder supplies the title only when the basename does not carry the phrase at all.
+- A medley is rejected when the basename or the album folder uses the word medley / megamix, or names at least two other titles beside this one, joined by ` _ `, ` / `, ` | `, or ` + `. One extra piece is not enough. A repeated title, a bare underscore used as a space, a track number, the artist, a feat / ft / and / & credit, and a version marker are not another title. ` - ` is not a medley separator. The basename is also a medley when it contains the whole word or phrase `mashup`, `mash up`, `mash-up`, `segue`, `transition`, `vs`, `vs.`, or `versus`. That check is the basename only. A folder named Mashup or vs does not count. `bootleg`, `edit`, `remix`, `x`, `feat`, and `ft` by themselves do not reject the file.
+- The requested artist anywhere in the basename counts, in first, middle, or last position. The same punctuation normalization applies, so `daft_punk` counts. The exception is a different artist leading the basename while this artist appears there only inside `Tribute to X`, `X Cover`, `Originally by X`, `in the style of X`, or `made famous by X`. That file is `tribute_or_cover`. The word `cover` or `covers` as a whole word in the basename is also `tribute_or_cover`, even when the requested artist leads (`Cover`, `Cover Mix`, `cover by X`, `X cover`). A folder named cover, or an image such as `cover.jpg`, does not reject an audio file. A different artist leading the basename, with this artist only in folders, is `artist_mismatch`. A tribute or playlist word in a folder alone does not reject the file.
+
+Stems (an instrument-part basename, or stem / acapella terms the request did not ask for), a long-recording phrase, and a bitrate under 128 kbps are rejects. 128 kbps itself is kept and ranked as poor. A short recording uses the old detector and is now a reject: under 90 seconds, or under 0.6 of the median once five known lengths exist. That median is the matching copies of the song, including the other format, so a 105 second remix FLAC is still short under `flac_only`. `short_recording_penalty` of 0 turns that reject off. The magnitude is not a score.
+
+`mp3_only` and `flac_only` stay hard filters. They are not relaxed when nothing remains.
+
+If every candidate is removed, selection returns no file. The worker moves the request `QUEUED` → `FAILED` with `no_suitable_result` and the reason counts. It does not enqueue. That is not the `acquire_unavailable` path, which is only for an unverified acquisition provider. A search with zero responses is `no usable search result`.
+
+### Ranking
+
+Survivors are compared in this order. The first difference wins.
+
+1. The explicit requested version matches. Naming a version in the request turns the saved preference off.
+2. Version class, from the basename only. A folder does not set the class and does not satisfy an explicit request. The default (`balanced`) ranks remix, club, and extended as equal and first, then album or original (an unmarked file counts here), then radio edit, then anything else. A saved `original`, `radio_edit`, `extended`, or `remix` moves that class to the front. The rest keep the default order. An explicit request turns the saved preference off and ranks that class first. An unmarked file is original, and it is not an explicit Original Mix match. A plain club mix is extended. The most derived marker wins, so `original vocal club remix edit` is a remix and `Radio Edit - X Remix` is a remix.
+3. Quality. Acceptable beats poor. Acceptable is 192 kbps or more CBR, an MP3 VBR average around 170 kbps or more, or lossless FLAC. Poor is 128 to 191 kbps CBR, and MP3 VBR under that 170 line. An MP3 with no usable bitrate uses size and length when both are known, and is poor otherwise. 192, 256, and 320 are the same band.
+4. Format. `prefer_mp3` is the default. `prefer_flac` prefers FLAC only among files that already survived, all of which are at or under the size cap. `auto` does not prefer a format.
+5. Peer: a free upload slot, then a shorter queue, then a higher upload speed.
+6. Username, then path.
+
+| Class | How the name is read |
+| --- | --- |
+| `radio_edit` | radio edit, radio version, radio mix, single edit, single version. Cleared when a derived marker is also present. |
+| `original` | original mix, original version, original, album version, or a clean title with no version term. Cleared when a derived marker is also present. |
+| `extended` | extended, extended mix, extended version, club mix, 12 inch. A plain club mix stays here. |
+| `remix` | remix, rmx, bootleg, mashup, vs, mixshow, rework, re-edit, mix by, mixed by, and a named `<name> edit` / `<name> version` that is not radio, single, album, original, or extended. |
+
+`titleMatch` is 1 when the title tokens are in the basename or a folder, and 0 when no title was passed or the path lacks them. `artistInPath` is 1 when the artist tokens are in the path. Both are printed on the dry-run row. They are not ranking weights. A wrong title is rejected before ranking.
+
+A pick stores `{ breakdown, total, signals, versionClass }` on the accepted request. The breakdown is a set of 0/1 flags for the log. Ranking does not add them up. `signals.quality` is `reported`, `derived`, or `unknown`.
 
 ### Defaults
 
 | Setting | Default | Role |
 | --- | --- | --- |
-| `min_file_size_mb` | 1 | Hard floor. Null disables it. |
-| `preferred_max_file_size_mb` | 30 | Gradual penalty. Env `SLSKD_PREFERRED_MAX_FILE_SIZE_MB`. |
-| `max_file_size_mb` | 200 | Hard exclusion. |
-| `preferred_max_duration_seconds` | 720 | Penalty above 12 min. |
-| `max_duration_seconds` | 1200 | Hard exclusion above 20 min. Null disables it. |
-| `extended_version_bonus` | true | Normal-length remix / extended / club mix. |
-| `lossless_preference` | 36 | See format balance. 0 prefers the 320 kbps MP3. |
-| `bitrate_floor_kbps` | 192 | Lossy rates below this are penalized. |
+| `min_file_size_mb` | 1 MiB | Hard floor. Null disables it. |
+| `max_file_size_mb` | 30 MiB | Hard reject. Env `SLSKD_MAX_FILE_SIZE_MB`. |
+| `preferred_max_file_size_mb` | 30 MiB | Loaded, not used. Kept for older yaml. |
+| `preferred_max_duration_seconds` | 720 | Loaded, not used. Kept for older yaml. |
+| `max_duration_seconds` | 1200 | Hard reject above 20 min. Null disables it. |
+| `version_preference` | `balanced` | Remix, club, and extended first, then album or original, then radio edit. Env `SLSKD_VERSION_PREFERENCE`. |
+| `format_preference` | `prefer_mp3` | `prefer_flac` prefers FLAC among survivors. `mp3_only` and `flac_only` filter. Env `SLSKD_FORMAT_PREFERENCE`. |
+| `bitrate_floor_kbps` | 192 | CBR at or above this is acceptable. Under 128 kbps is a reject. |
+| `short_recording_fraction` | 0.6 | Known duration below this fraction of the median is rejected. |
+| `short_recording_min_samples` | 5 | Median fraction applies only with at least this many known lengths. |
+| `short_recording_floor_seconds` | 90 | Known duration below this is rejected even without a median. |
+| `short_recording_penalty` | −1900 | Any non-zero value keeps the short reject. Zero disables it. |
 | `max_sample_rate` | 48000 | Hard cap. Null disables it. |
 | `max_bit_depth` | 24 | Hard cap. Null disables it. |
-
-### Format balance
-
-A normal 6-minute 16/44.1 FLAC is about 42 MiB. A 320 kbps MP3 of the same song is about 14 MiB. A size-only penalty would pick the MP3 every time.
-
-Duration is the length signal when it is known. The size penalty stays gentle for a moderate overshoot of a normal-duration file (42 MiB is −5) and grows steeply for a large overshoot or when duration is missing.
-
-**Default decision: the 42 MiB 16/44.1 FLAC beats the 14 MiB 320 kbps MP3.** The FLAC scores format 36 + quality 30 + size −5 = 61. The MP3 scores quality 28. Set `lossless_preference` to 0 and the FLAC scores 25, so the MP3 wins. The same default FLAC also beats a 128 kbps MP3 and an unknown-quality small file.
 
 ### Metadata the selector will use
 
@@ -100,16 +114,16 @@ From a live slskd 0.26 search for "Daft Punk Get Lucky" (251 responses, 583 file
 | --- | --- |
 | `size` | Present on all 583 files and always positive. The only universal field. |
 | `length` | Duration in seconds. On 469 of 483 audio files (97%). Missing on all `.opus` and a few mp3/flac. Range 105–635 s, median 369. 28 tracks run 8–12 min. None are 12 min or longer. |
-| `bitRate` | Only on lossy files (mp3/m4a/ogg), 282 files. Never on FLAC or WAV. Usually 128/192/320. Junk outliers include 8 and 2991. `isVariableBitRate` is set on 67. Values outside 32–500 kbps are unknown. |
+| `bitRate` | Only on lossy files (mp3/m4a/ogg), 282 files. Never on FLAC or WAV. Usually 128/192/320. Junk outliers include 8 and 2991. A reported rate under 128 kbps is rejected. 128–191 kbps CBR is poor. 192 kbps and up is acceptable, and so is MP3 VBR around 170 kbps or more. The same VBR flag on ogg does not. An MP3 with no usable bitrate uses size and length when both are known. |
 | `sampleRate` / `bitDepth` | Only on lossless, 189 files (185 of 190 FLAC, plus WAV). bitDepth is 16 on 107 and 24 on 82. sampleRate is 44.1 kHz on 117, 88.2 kHz on 55, and 96 or 192 kHz on 15. |
 | `extension` | Empty on 75%. One leading dot. One junk value (`flac@synoeastream`). The type comes from the filename when the field is empty or junk. Audio by filename: 265 mp3, 190 flac, 16 m4a, 6 ogg, 4 wav, 2 opus, plus video, lyrics, and images. |
 | `filename` | Always Windows `\` paths, 1–8 folders deep. 346 start with a share alias like `@@abcde\`. Folder names often hold the only album, artist, or quality text. |
 | Peer | All 251 responses. `hasFreeUploadSlot` true on 223. `queueLength` median 0, p90 93, max 44239. `uploadSpeed` median about 1.6 MB/s, and 0 on 7. |
 | Audio size | p10 5.7 MiB, median 14.2, p75 41.8, p90 127, max 442. mp3 median 10.5 (max 24). FLAC median 42. |
 
-Long-recording phrases match the basename, and the immediate parent folder. They do not walk deeper folders, and they never match `CD1`, `CD 1`, or `Disc 1`. A bare `mix` does not match, so "Extended Mix" and "Club Mix" are normal tracks (and, when the length is normal, they take the extended bonus). "Mixshow" does match. The default phrase list is `dj set`, `live at`, `live from`, `full album`, `full set`, `podcast`, `radio show`, `radioshow`, `mixshow`, `continuous mix`, `mixed by`, `megamix`, `essential mix`, `concert`, `episode`, and `ep.` plus a number. It is `acquisition.selection.long_recording_phrases`.
+Long-recording phrases match the basename, and the immediate parent folder. They do not walk deeper folders, and they never match `CD1`, `CD 1`, or `Disc 1`. A bare `mix` does not match, so "Extended Mix" and "Club Mix" are normal tracks. "Mixshow" does match. The default phrase list is `dj set`, `live at`, `live from`, `full album`, `full set`, `podcast`, `radio show`, `radioshow`, `mixshow`, `continuous mix`, `mixed by`, `megamix`, `essential mix`, `concert`, `episode`, and `ep.` plus a number. It is `acquisition.selection.long_recording_phrases`.
 
-When duration is known and at or under 720 s, that is a normal length. When duration is missing, a normal length means no long-recording phrase and a size at or under the preferred max. The extended bonus is applied only then.
+A long-recording phrase is a reject, not a penalty. A missing duration does not make a file short and does not trip the duration cap. A file over `max_file_size_mb` is rejected whether or not its duration is known.
 
 The enqueue body is `[{ filename, size }]` using that filename unchanged, including Windows backslashes. slskd search rows have no id. A later transfer matches on username + that exact filename + size. A basename match is used only when exactly one of that user's rows matches the basename and the size.
 

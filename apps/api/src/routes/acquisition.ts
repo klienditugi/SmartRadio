@@ -15,12 +15,15 @@ import {
 import { commitConfigPatch, matchingIntegrationCheck, recordIntegrationProbe } from "../context.js";
 import { requireAdmin } from "./auth.js";
 
+const VERSION_PREFERENCES = ["balanced", "radio_edit", "original", "extended", "remix"] as const;
+const FORMAT_PREFERENCES = ["auto", "prefer_mp3", "prefer_flac", "mp3_only", "flac_only"] as const;
+
 type SelectionBody = {
   preferred_max_file_size_mb?: unknown;
   preferred_max_duration_seconds?: unknown;
   max_duration_seconds?: unknown;
-  extended_version_bonus?: unknown;
-  lossless_preference?: unknown;
+  version_preference?: unknown;
+  format_preference?: unknown;
   long_recording_phrases?: unknown;
 };
 
@@ -44,8 +47,8 @@ const SELECTION_SOURCE_PATHS = [
   "acquisition.selection.preferred_max_file_size_mb",
   "acquisition.selection.preferred_max_duration_seconds",
   "acquisition.selection.max_duration_seconds",
-  "acquisition.selection.extended_version_bonus",
-  "acquisition.selection.lossless_preference",
+  "acquisition.selection.version_preference",
+  "acquisition.selection.format_preference",
   "acquisition.selection.max_file_size_mb",
 ] as const;
 
@@ -70,8 +73,8 @@ export function acquisitionSettingsView(config: RuntimeConfig) {
       max_file_size_mb: selection.max_file_size_mb,
       preferred_max_duration_seconds: selection.preferred_max_duration_seconds,
       max_duration_seconds: selection.max_duration_seconds ?? null,
-      extended_version_bonus: selection.extended_version_bonus,
-      lossless_preference: selection.lossless_preference,
+      version_preference: selection.version_preference,
+      format_preference: selection.format_preference,
     },
     sources,
     secrets_present: {
@@ -87,11 +90,11 @@ function positiveNumber(value: unknown, name: string): number {
   return value;
 }
 
-function nonNegativeNumber(value: unknown, name: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new Error(`${name} must be a number greater than or equal to 0`);
+function enumValue<T extends string>(value: unknown, name: string, allowed: readonly T[]): T {
+  if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) {
+    throw new Error(`${name} must be one of ${allowed.join(", ")}`);
   }
-  return value;
+  return value as T;
 }
 
 function selectionPatch(current: RuntimeConfig["acquisition"]["selection"], body: SelectionBody) {
@@ -106,12 +109,11 @@ function selectionPatch(current: RuntimeConfig["acquisition"]["selection"], body
     if (body.max_duration_seconds === null) next.max_duration_seconds = null;
     else next.max_duration_seconds = positiveNumber(body.max_duration_seconds, "max_duration_seconds");
   }
-  if (body.extended_version_bonus !== undefined) {
-    if (typeof body.extended_version_bonus !== "boolean") throw new Error("extended_version_bonus must be a boolean");
-    next.extended_version_bonus = body.extended_version_bonus;
+  if (body.version_preference !== undefined) {
+    next.version_preference = enumValue(body.version_preference, "version_preference", VERSION_PREFERENCES);
   }
-  if (body.lossless_preference !== undefined) {
-    next.lossless_preference = nonNegativeNumber(body.lossless_preference, "lossless_preference");
+  if (body.format_preference !== undefined) {
+    next.format_preference = enumValue(body.format_preference, "format_preference", FORMAT_PREFERENCES);
   }
   if (body.long_recording_phrases !== undefined) {
     if (!Array.isArray(body.long_recording_phrases) || body.long_recording_phrases.some((item) => typeof item !== "string" || !item.trim())) {
@@ -120,9 +122,6 @@ function selectionPatch(current: RuntimeConfig["acquisition"]["selection"], body
     next.long_recording_phrases = body.long_recording_phrases.map((item) => item.trim());
   }
   const merged = { ...current, ...next };
-  if (merged.preferred_max_file_size_mb > merged.max_file_size_mb) {
-    throw new Error("preferred_max_file_size_mb must be <= max_file_size_mb");
-  }
   if (merged.max_duration_seconds != null && merged.preferred_max_duration_seconds > merged.max_duration_seconds) {
     throw new Error("preferred_max_duration_seconds must be <= max_duration_seconds");
   }

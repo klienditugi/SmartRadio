@@ -27,11 +27,19 @@ export type CandidateTrack = {
   sizeBytes: number;
   durationSeconds?: number;
   format: TrackFormat;
-  /** Lossy bitrate in kbps, only when the provider reported a plausible value. */
+  /**
+   * Reported lossy bitrate in kbps, including junk. The scorer treats 321 or more,
+   * and anything outside 32–500, as unknown. It does not invent a replacement.
+   */
   bitrateKbps?: number;
   sampleRateHz?: number;
   bitDepth?: number;
-  /** Reported VBR flag. Scoring does not guess a bitrate from it. */
+  /**
+   * Reported VBR flag (`isVariableBitRate` when the provider sent it).
+   * Absent means not VBR. Scoring does not invent the flag or a bitrate from it.
+   * A reported MP3 bitrate at or above the VBR good threshold scores as the good tier.
+   * The same flag on any other format does not.
+   */
   vbr?: boolean;
   availability?: TrackAvailability;
   locked: boolean;

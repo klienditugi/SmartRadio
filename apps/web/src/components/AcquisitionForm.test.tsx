@@ -158,7 +158,7 @@ describe("AcquisitionForm", () => {
     expect(document.body.textContent).not.toContain(LEAKED);
   });
 
-  it("edits selector policy, shows the source, and blocks a preferred duration above the hard cap", async () => {
+  it("edits selector policy, shows the source, and hides the unused preferred fields", async () => {
     const calls: Call[] = [];
     installFetch(calls);
     render(
@@ -166,43 +166,49 @@ describe("AcquisitionForm", () => {
         mode="settings"
         sources={{
           "acquisition.selection.preferred_max_file_size_mb": { source: "default" },
-          "acquisition.selection.extended_version_bonus": { source: "yaml" },
+          "acquisition.selection.version_preference": { source: "yaml" },
           "acquisition.selection.preferred_max_duration_seconds": { source: "default" },
           "acquisition.selection.max_duration_seconds": {
             source: "env",
             env: "SLSKD_MAX_DURATION_SECONDS",
           },
-          "acquisition.selection.lossless_preference": { source: "default" },
+          "acquisition.selection.format_preference": {
+            source: "env",
+            env: "SLSKD_FORMAT_PREFERENCE",
+          },
         }}
       />,
     );
-    const preferred = (await screen.findByLabelText("Preferred max file size (MiB)")) as HTMLInputElement;
-    expect(preferred.value).toBe("30");
-    expect(screen.getAllByText("source: default").length).toBeGreaterThan(0);
+    await screen.findByLabelText("Version preference");
+    expect(screen.queryByLabelText("Preferred max file size (MiB)")).toBeNull();
+    expect(screen.queryByLabelText("Preferred max duration (seconds)")).toBeNull();
+    expect(document.body.textContent).toContain("1 MiB = 1,048,576 bytes");
     expect(screen.getByText("source: yaml")).toBeTruthy();
     const hard = screen.getByLabelText("Hard max duration (seconds)") as HTMLInputElement;
     expect(hard.readOnly).toBe(true);
     expect(screen.getByText("set by SLSKD_MAX_DURATION_SECONDS in .env")).toBeTruthy();
-    const bonus = screen.getByRole("checkbox", { name: "Prefer extended mixes and remixes" }) as HTMLInputElement;
-    expect(bonus.checked).toBe(true);
+    const version = screen.getByLabelText("Version preference") as HTMLSelectElement;
+    const format = screen.getByLabelText("Format preference") as HTMLSelectElement;
+    expect(version.value).toBe("balanced");
+    expect(version.disabled).toBe(false);
+    expect(format.value).toBe("prefer_mp3");
+    expect(format.disabled).toBe(true);
+    expect(screen.getByText("set by SLSKD_FORMAT_PREFERENCE in .env")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Prefer extended mixes and remixes" })).toBeNull();
+    expect(screen.queryByLabelText("Lossless preference")).toBeNull();
+    expect(screen.getByRole("option", { name: "Radio edit" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "MP3 only" })).toBeTruthy();
 
-    fireEvent.change(preferred, { target: { value: "40" } });
-    fireEvent.click(bonus);
-    fireEvent.change(screen.getByLabelText("Lossless preference"), { target: { value: "0" } });
+    fireEvent.change(version, { target: { value: "radio_edit" } });
     fireEvent.click(screen.getByRole("button", { name: "Save acquisition" }));
     await screen.findByText(/Saved\. A filled-in form is not a connection/);
     const put = calls.find((call) => call.method === "PUT");
     expect(put?.body?.selection).toMatchObject({
-      preferred_max_file_size_mb: 40,
+      preferred_max_file_size_mb: 30,
       preferred_max_duration_seconds: 720,
       max_duration_seconds: 1200,
-      extended_version_bonus: false,
-      lossless_preference: 0,
+      version_preference: "radio_edit",
+      format_preference: "prefer_mp3",
     });
-
-    fireEvent.change(screen.getByLabelText("Preferred max duration (seconds)"), { target: { value: "2000" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save acquisition" }));
-    expect(await screen.findByText("preferred_max_duration_seconds must be <= max_duration_seconds")).toBeTruthy();
-    expect(calls.filter((call) => call.method === "PUT")).toHaveLength(1);
   });
 });

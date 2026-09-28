@@ -18,15 +18,15 @@ const optionalSetting = z.preprocess((value) => {
   return value;
 }, z.string().trim());
 
-/** Mebibytes (1024×1024 bytes). Default search-hit size cap. */
-export const DEFAULT_MAX_FILE_SIZE_MB = 200;
+/** MiB (1 MiB = 1,048,576 bytes). Default hard cap. Larger files are rejected. */
+export const DEFAULT_MAX_FILE_SIZE_MB = 30;
 
-/** Mebibytes (1024×1024 bytes). Default search-hit size floor. */
+/** MiB (1 MiB = 1,048,576 bytes). Default search-hit size floor. */
 export const DEFAULT_MIN_FILE_SIZE_MB = 1;
 
 /**
- * Mebibytes. Gradual size penalty starts above this. A normal-duration file
- * may still win when it is a little larger. Not a hard exclusion.
+ * MiB (1 MiB = 1,048,576 bytes). Kept so older config files still load.
+ * The selector does not grade size. `max_file_size_mb` is the size gate.
  */
 export const DEFAULT_PREFERRED_MAX_FILE_SIZE_MB = 30;
 
@@ -39,20 +39,47 @@ export const DEFAULT_MAX_BIT_DEPTH = 24;
 /** Hard duration cap in seconds. Files that report a longer `length` are excluded. Null disables it. */
 export const DEFAULT_MAX_DURATION_SECONDS = 1200;
 
-/** Duration penalty starts above this many seconds. Shorter files are a normal length. */
+/**
+ * Kept so older config files still load. The selector does not penalize duration.
+ * `max_duration_seconds` is the duration gate. A long-recording phrase is a reject.
+ */
 export const DEFAULT_PREFERRED_MAX_DURATION_SECONDS = 720;
 
-/** When true, a normal-length extended mix or remix scores above a comparable original. */
-export const DEFAULT_EXTENDED_VERSION_BONUS = true;
+/**
+ * Saved version taste. Never a filter.
+ * `balanced` is the default order: remix, club, and extended together, then album
+ * or original, then radio edit. Any other value moves that class to the front.
+ */
+export const VERSION_PREFERENCES = ["balanced", "radio_edit", "original", "extended", "remix"] as const;
+export type VersionPreference = (typeof VERSION_PREFERENCES)[number];
+export const DEFAULT_VERSION_PREFERENCE: VersionPreference = "balanced";
 
 /**
- * Format component for a lossless file. 36 picks a normal-duration 42 MiB
- * 16/44.1 FLAC over a 14 MiB 320 kbps MP3. 0 picks the MP3.
+ * Saved format taste, separate from the quality tier.
+ * Owner decision: the default is `prefer_mp3`.
+ * `mp3_only` and `flac_only` are hard filters. The others are a bonus or nothing.
  */
-export const DEFAULT_LOSSLESS_PREFERENCE = 36;
+export const FORMAT_PREFERENCES = ["auto", "prefer_mp3", "prefer_flac", "mp3_only", "flac_only"] as const;
+export type FormatPreference = (typeof FORMAT_PREFERENCES)[number];
+export const DEFAULT_FORMAT_PREFERENCE: FormatPreference = "prefer_mp3";
 
 /** Lossy bitrates below this (kbps) are penalized. Values outside 32–500 are unknown. */
 export const DEFAULT_BITRATE_FLOOR_KBPS = 192;
+
+/**
+ * A known duration below this fraction of the search median is short,
+ * once at least `DEFAULT_SHORT_RECORDING_MIN_SAMPLES` lengths are known.
+ */
+export const DEFAULT_SHORT_RECORDING_FRACTION = 0.6;
+
+/** Relative short-track penalty stays off until this many known lengths exist. */
+export const DEFAULT_SHORT_RECORDING_MIN_SAMPLES = 5;
+
+/** Known durations below this many seconds are short even without a median. */
+export const DEFAULT_SHORT_RECORDING_FLOOR_SECONDS = 90;
+
+/** Soft short-track penalty reaches this (negative) value. Same scale as a long recording. */
+export const DEFAULT_SHORT_RECORDING_PENALTY = -1900;
 
 /**
  * Basename / parent-folder words that rank below a clean match.
@@ -135,10 +162,10 @@ export const DEFAULT_LONG_RECORDING_PHRASES = [
 
 const acquisitionSelectionSchema = z
   .object({
-    /** Files larger than this (mebibytes, 1024×1024) are not selected. */
+    /** Files larger than this (MiB, 1,048,576 bytes) are not selected. */
     max_file_size_mb: z.number().positive().default(DEFAULT_MAX_FILE_SIZE_MB),
     /**
-     * Files smaller than this (mebibytes, 1024×1024) are not selected.
+     * Files smaller than this (MiB, 1,048,576 bytes) are not selected.
      * Omit for 1. Null disables the floor.
      */
     min_file_size_mb: z.number().positive().nullable().default(DEFAULT_MIN_FILE_SIZE_MB),
@@ -148,24 +175,40 @@ const acquisitionSelectionSchema = z
      */
     max_duration_seconds: z.number().positive().nullable().default(DEFAULT_MAX_DURATION_SECONDS),
     /**
-     * Gradual penalty above this size (mebibytes). Default 30.
-     * Must be less than or equal to max_file_size_mb. Not a hard exclusion.
+     * Unused by the selector. Kept so older yaml still parses.
+     * Not compared to max_file_size_mb.
      */
     preferred_max_file_size_mb: z.number().positive().default(DEFAULT_PREFERRED_MAX_FILE_SIZE_MB),
     /**
-     * Penalty above this duration (seconds). Default 720.
+     * Unused by the selector. Kept so older yaml still parses.
      * Must be less than or equal to max_duration_seconds when that cap is set.
      */
     preferred_max_duration_seconds: z.number().positive().default(DEFAULT_PREFERRED_MAX_DURATION_SECONDS),
-    /** Normal-length extended mixes and remixes score above a comparable original. */
-    extended_version_bonus: z.boolean().default(DEFAULT_EXTENDED_VERSION_BONUS),
     /**
-     * Points added for a lossless file. Default 36, which prefers a normal-duration
-     * 42 MiB 16/44.1 FLAC over a 14 MiB 320 kbps MP3. 0 prefers the MP3.
+     * Version class order. Default `balanced`: remix, club, and extended first,
+     * then album or original, then radio edit. A saved class moves to the front.
+     * An explicit version in the request turns this off.
      */
-    lossless_preference: z.number().min(0).default(DEFAULT_LOSSLESS_PREFERENCE),
+    version_preference: z.enum(VERSION_PREFERENCES).default(DEFAULT_VERSION_PREFERENCE),
+    /**
+     * `auto` adds nothing. `prefer_mp3` / `prefer_flac` add a bonus and keep the other format eligible.
+     * `mp3_only` / `flac_only` are hard filters with no relaxation. Default `prefer_mp3` (owner decision).
+     * Separate from the quality tier.
+     */
+    format_preference: z.enum(FORMAT_PREFERENCES).default(DEFAULT_FORMAT_PREFERENCE),
     /** Lossy kbps below this are penalized. Default 192. */
     bitrate_floor_kbps: z.number().positive().default(DEFAULT_BITRATE_FLOOR_KBPS),
+    /**
+     * Known duration below this fraction of the correlated-candidate median is short.
+     * Default 0.6. Needs `short_recording_min_samples` known lengths.
+     */
+    short_recording_fraction: z.number().gt(0).lte(1).default(DEFAULT_SHORT_RECORDING_FRACTION),
+    /** Minimum known lengths before the median fraction applies. Default 5. */
+    short_recording_min_samples: z.number().int().positive().default(DEFAULT_SHORT_RECORDING_MIN_SAMPLES),
+    /** Known duration below this (seconds) is short even with no median. Default 90. */
+    short_recording_floor_seconds: z.number().positive().default(DEFAULT_SHORT_RECORDING_FLOOR_SECONDS),
+    /** Zero disables the short-recording reject. Any other value keeps it. Default −1900. */
+    short_recording_penalty: z.number().max(0).default(DEFAULT_SHORT_RECORDING_PENALTY),
     extended_version_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_EXTENDED_VERSION_TERMS]),
     long_recording_phrases: z.array(z.string().min(1)).default(() => [...DEFAULT_LONG_RECORDING_PHRASES]),
     /**
@@ -188,13 +231,6 @@ const acquisitionSelectionSchema = z
     instrument_part_basenames: z.array(z.string().min(1)).default(() => [...DEFAULT_INSTRUMENT_PART_BASENAMES]),
   })
   .superRefine((value, ctx) => {
-    if (value.preferred_max_file_size_mb > value.max_file_size_mb) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["preferred_max_file_size_mb"],
-        message: "preferred_max_file_size_mb must be <= max_file_size_mb",
-      });
-    }
     if (value.max_duration_seconds != null && value.preferred_max_duration_seconds > value.max_duration_seconds) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -318,6 +354,70 @@ export function resetDeprecatedVerifyStatusWarning(): void {
  * One non-secret warning when yaml or env still carries verify_status.
  * The value is ignored. Section and env key names only.
  */
+const DEPRECATED_SELECTION_KEYS = [
+  {
+    key: "extended_version_bonus",
+    env: "SLSKD_EXTENDED_VERSION_BONUS",
+    replacement: "acquisition.selection.version_preference",
+    replacementEnv: "SLSKD_VERSION_PREFERENCE",
+  },
+  {
+    key: "lossless_preference",
+    env: "SLSKD_LOSSLESS_PREFERENCE",
+    replacement: "acquisition.selection.format_preference",
+    replacementEnv: "SLSKD_FORMAT_PREFERENCE",
+  },
+] as const;
+
+function selectionRecord(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const acquisition = (raw as Record<string, unknown>).acquisition;
+  if (!acquisition || typeof acquisition !== "object" || Array.isArray(acquisition)) return null;
+  const selection = (acquisition as Record<string, unknown>).selection;
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)) return null;
+  return selection as Record<string, unknown>;
+}
+
+/**
+ * Old selector keys are ignored. They are not translated into the new enums.
+ * Names only — never a secret value.
+ */
+export function selectionDeprecationNotes(raw: unknown, env: NodeJS.ProcessEnv): string[] {
+  const selection = selectionRecord(raw);
+  const notes: string[] = [];
+  for (const item of DEPRECATED_SELECTION_KEYS) {
+    if (selection && Object.prototype.hasOwnProperty.call(selection, item.key)) {
+      notes.push(
+        `${item.key} is deprecated and ignored. Use ${item.replacement} (env ${item.replacementEnv}).`,
+      );
+    }
+    const envValue = env[item.env];
+    if (typeof envValue === "string" && envValue.trim()) {
+      notes.push(`${item.env} is deprecated and ignored. Use ${item.replacementEnv} (${item.replacement}).`);
+    }
+  }
+  return notes;
+}
+
+let selectionDeprecationLogged = false;
+
+/** Test helper. Production logs each distinct note at most once per process. */
+export function resetDeprecatedSelectionWarning(): void {
+  selectionDeprecationLogged = false;
+}
+
+/** Doctor warning when a copied install still rejects above the old 200 MiB example. */
+export function maxFileSizeUpgradeNote(maxFileSizeMb: number): string | null {
+  if (!(maxFileSizeMb > DEFAULT_MAX_FILE_SIZE_MB)) return null;
+  return `max_file_size_mb is above ${DEFAULT_MAX_FILE_SIZE_MB}. The recommended web-radio value is ${DEFAULT_MAX_FILE_SIZE_MB}. Existing installs should set acquisition.selection.max_file_size_mb to ${DEFAULT_MAX_FILE_SIZE_MB}.`;
+}
+
+export function warnDeprecatedSelection(notes: readonly string[]): void {
+  if (selectionDeprecationLogged || notes.length === 0) return;
+  selectionDeprecationLogged = true;
+  for (const note of notes) console.warn(note);
+}
+
 export function warnDeprecatedVerifyStatus(raw: unknown, env: NodeJS.ProcessEnv): void {
   if (verifyStatusDeprecationLogged) return;
   const root = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -351,6 +451,8 @@ export type RuntimeConfig = AppConfig & {
   verify_status_explicit?: VerifyStatusExplicit;
   /** Where each reported setting came from. Env-pinned fields cannot be saved over. */
   field_sources?: FieldSources;
+  /** Non-secret deprecation notes for doctor. Old selector keys are named here and ignored. */
+  deprecation_notes?: string[];
 };
 
 const ENV_INTERPOLATION = /\$\{([A-Z0-9_]+)\}/g;
@@ -428,6 +530,10 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
   const overridden = applyEnvOverrides(interpolated, env);
   const parsed = parseAppConfig(overridden);
   warnDeprecatedVerifyStatus(overridden, env);
+  const deprecation_notes = selectionDeprecationNotes(rawObject, env);
+  const sizeNote = maxFileSizeUpgradeNote(parsed.acquisition.selection.max_file_size_mb);
+  if (sizeNote) deprecation_notes.push(sizeNote);
+  warnDeprecatedSelection(deprecation_notes);
   for (const section of VERIFY_STATUS_SECTIONS) {
     parsed[section].verify_status = "unverified";
   }
@@ -441,6 +547,7 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
     secrets,
     verify_status_explicit: readVerifyStatusExplicit(overridden),
     field_sources: fieldSourcesFor(rawObject, env),
+    deprecation_notes,
   };
 }
 
@@ -692,9 +799,13 @@ function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
     preferred_max_file_size_mb: selection.preferred_max_file_size_mb,
     max_duration_seconds: selection.max_duration_seconds ?? null,
     preferred_max_duration_seconds: selection.preferred_max_duration_seconds,
-    extended_version_bonus: selection.extended_version_bonus,
-    lossless_preference: selection.lossless_preference,
+    version_preference: selection.version_preference,
+    format_preference: selection.format_preference,
     bitrate_floor_kbps: selection.bitrate_floor_kbps,
+    short_recording_fraction: selection.short_recording_fraction,
+    short_recording_min_samples: selection.short_recording_min_samples,
+    short_recording_floor_seconds: selection.short_recording_floor_seconds,
+    short_recording_penalty: selection.short_recording_penalty,
     max_sample_rate: selection.max_sample_rate,
     max_bit_depth: selection.max_bit_depth,
     version_penalty_terms: [...selection.version_penalty_terms],

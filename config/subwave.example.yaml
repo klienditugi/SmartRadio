@@ -89,27 +89,38 @@ acquisition:
   enabled: false
   provider: slskd
   base_url: "${SLSKD_URL}"
-  # Search-hit score (worker, deterministic, no LLM). See docs/SLSKD.md.
-  # Sizes are mebibytes (1024×1024). preferred_max_file_size_mb is a gradual
-  # penalty. max_file_size_mb is still a hard exclusion.
+  # Search-hit pick (worker, deterministic, no LLM). See docs/SLSKD.md.
+  # Sizes are MiB (1 MiB = 1,048,576 bytes). The _mb key names stay as they are.
+  # max_file_size_mb is a hard reject. Default 30. There is no size curve.
+  # An older example used 200. Existing installs should set max_file_size_mb to 30.
+  # Doctor warns when the value is above 30. The warning is not an error.
+  # preferred_max_file_size_mb and preferred_max_duration_seconds are kept so older
+  # files still load. The selector does not use them.
   # max_duration_seconds (default 1200) is a hard cap. Null disables it.
-  # preferred_max_duration_seconds (default 720) is the penalty threshold.
-  # Preferred values must be <= the matching hard max.
-  # lossless_preference 36 picks a normal 42 MiB 16/44.1 FLAC over a 320 kbps MP3.
-  # 0 picks the MP3. extended_version_bonus is on by default.
+  # version_preference: balanced | radio_edit | original | extended | remix.
+  # Default balanced: remix, club, and extended first, then album or original, then radio edit.
+  # format_preference: auto | prefer_mp3 | prefer_flac | mp3_only | flac_only.
+  # Default prefer_mp3. mp3_only and flac_only are hard filters.
+  # Old keys extended_version_bonus and lossless_preference are ignored. Doctor names the replacements.
   # Optional env: SLSKD_MAX_FILE_SIZE_MB, SLSKD_MIN_FILE_SIZE_MB,
   # SLSKD_PREFERRED_MAX_FILE_SIZE_MB, SLSKD_MAX_DURATION_SECONDS,
-  # SLSKD_PREFERRED_MAX_DURATION_SECONDS, SLSKD_EXTENDED_VERSION_BONUS,
-  # SLSKD_LOSSLESS_PREFERENCE, SLSKD_MAX_SAMPLE_RATE, SLSKD_MAX_BIT_DEPTH.
+  # SLSKD_PREFERRED_MAX_DURATION_SECONDS, SLSKD_VERSION_PREFERENCE,
+  # SLSKD_FORMAT_PREFERENCE, SLSKD_MAX_SAMPLE_RATE, SLSKD_MAX_BIT_DEPTH.
   selection:
-    max_file_size_mb: 200
+    max_file_size_mb: 30
     min_file_size_mb: 1
     preferred_max_file_size_mb: 30
     max_duration_seconds: 1200
     preferred_max_duration_seconds: 720
-    extended_version_bonus: true
-    lossless_preference: 36
+    version_preference: balanced
+    format_preference: prefer_mp3
     bitrate_floor_kbps: 192
+    # Short tracks are rejected: below 0.6 of the search median (needs 5 known lengths) or below 90s.
+    # short_recording_penalty 0 turns that reject off. The number is not a score.
+    short_recording_fraction: 0.6
+    short_recording_min_samples: 5
+    short_recording_floor_seconds: 90
+    short_recording_penalty: -1900
     max_sample_rate: 48000
     max_bit_depth: 24
     version_penalty_terms:

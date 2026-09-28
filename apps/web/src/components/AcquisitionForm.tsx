@@ -2,21 +2,25 @@ import { FormEvent, useEffect, useState } from "react";
 import { api } from "../api";
 import {
   acquisitionStatusLabel,
+  FORMAT_PREFERENCE_OPTIONS,
   providerOptions,
+  VERSION_PREFERENCE_OPTIONS,
   type AcquisitionConnectionReport,
   type AcquisitionDraft,
   type AcquisitionSelectionSettings,
   type AcquisitionSettings,
+  type FormatPreference,
+  type VersionPreference,
 } from "../acquisition";
 import { isEnvPinned, pinNote, type FieldSources } from "../types";
 
 const SELECTION_DEFAULTS: AcquisitionSelectionSettings = {
   preferred_max_file_size_mb: 30,
-  max_file_size_mb: 200,
+  max_file_size_mb: 30,
   preferred_max_duration_seconds: 720,
   max_duration_seconds: 1200,
-  extended_version_bonus: true,
-  lossless_preference: 36,
+  version_preference: "balanced",
+  format_preference: "prefer_mp3",
 };
 
 type WizardProps = {
@@ -158,8 +162,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
   const [hardDuration, setHardDuration] = useState(
     SELECTION_DEFAULTS.max_duration_seconds == null ? "" : String(SELECTION_DEFAULTS.max_duration_seconds),
   );
-  const [extendedBonus, setExtendedBonus] = useState(SELECTION_DEFAULTS.extended_version_bonus);
-  const [losslessPreference, setLosslessPreference] = useState(String(SELECTION_DEFAULTS.lossless_preference));
+  const [versionPreference, setVersionPreference] = useState<VersionPreference>(SELECTION_DEFAULTS.version_preference);
+  const [formatPreference, setFormatPreference] = useState<FormatPreference>(SELECTION_DEFAULTS.format_preference);
 
   function applySettings(settings: AcquisitionSettings) {
     setLoaded(settings);
@@ -174,8 +178,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     setHardFileMb(selection.max_file_size_mb);
     setPreferredDuration(String(selection.preferred_max_duration_seconds));
     setHardDuration(selection.max_duration_seconds == null ? "" : String(selection.max_duration_seconds));
-    setExtendedBonus(selection.extended_version_bonus);
-    setLosslessPreference(String(selection.lossless_preference));
+    setVersionPreference(selection.version_preference);
+    setFormatPreference(selection.format_preference);
   }
 
   useEffect(() => {
@@ -226,11 +230,9 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
   const providers = providerOptions(provider, ["slskd"]);
   const apiKeyConfigured = loaded?.secrets_present.slskd_api_key ?? false;
   const fieldSources = props.sources ?? loaded?.sources;
-  const preferredSizeLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.preferred_max_file_size_mb");
-  const preferredDurationLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.preferred_max_duration_seconds");
   const hardDurationLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.max_duration_seconds");
-  const bonusLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.extended_version_bonus");
-  const losslessLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.lossless_preference");
+  const versionLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.version_preference");
+  const formatLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.format_preference");
 
   function patchLocal(patch: Partial<AcquisitionDraft>) {
     if (patch.enabled !== undefined) setEnabled(patch.enabled);
@@ -244,25 +246,18 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
   function selectionBody() {
     const preferredSize = Number(preferredFileMb);
     const preferredSeconds = Number(preferredDuration);
-    const lossless = Number(losslessPreference);
     const hardSeconds = hardDuration.trim() === "" ? null : Number(hardDuration);
     return {
       preferred_max_file_size_mb: preferredSize,
       preferred_max_duration_seconds: preferredSeconds,
       max_duration_seconds: hardSeconds,
-      extended_version_bonus: extendedBonus,
-      lossless_preference: lossless,
+      version_preference: versionPreference,
+      format_preference: formatPreference,
     };
   }
 
   function selectionError(): string | null {
     const body = selectionBody();
-    if (!Number.isFinite(body.preferred_max_file_size_mb) || body.preferred_max_file_size_mb <= 0) {
-      return "preferred_max_file_size_mb must be a positive number";
-    }
-    if (body.preferred_max_file_size_mb > hardFileMb) {
-      return "preferred_max_file_size_mb must be <= max_file_size_mb";
-    }
     if (!Number.isFinite(body.preferred_max_duration_seconds) || body.preferred_max_duration_seconds <= 0) {
       return "preferred_max_duration_seconds must be a positive number";
     }
@@ -271,9 +266,6 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
     }
     if (body.max_duration_seconds !== null && body.preferred_max_duration_seconds > body.max_duration_seconds) {
       return "preferred_max_duration_seconds must be <= max_duration_seconds";
-    }
-    if (!Number.isFinite(body.lossless_preference) || body.lossless_preference < 0) {
-      return "lossless_preference must be a number greater than or equal to 0";
     }
     return null;
   }
@@ -303,8 +295,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
       body.preferred_max_file_size_mb !== selection.preferred_max_file_size_mb ||
       body.preferred_max_duration_seconds !== selection.preferred_max_duration_seconds ||
       body.max_duration_seconds !== selection.max_duration_seconds ||
-      body.extended_version_bonus !== selection.extended_version_bonus ||
-      body.lossless_preference !== selection.lossless_preference
+      body.version_preference !== selection.version_preference ||
+      body.format_preference !== selection.format_preference
     );
   }
 
@@ -388,45 +380,28 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
         <>
           <h3>Which file to download</h3>
           <p className="muted">
-            Hard max file size is {hardFileMb} MiB. A file above the preferred size is penalized, not dropped, until it
-            hits that hard max. Preferred size and preferred duration must stay at or under the hard limits.
+            Sizes are MiB (1 MiB = 1,048,576 bytes). Files larger than the hard max ({hardFileMb} MiB) are rejected.
+            The selector does not grade size below that cap. A file with no size never reaches it.
           </p>
           <label className="field">
-            <span>Preferred max file size (MiB)</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={preferredFileMb}
-              readOnly={preferredSizeLocked}
-              disabled={readOnly}
-              onChange={(e) => setPreferredFileMb(e.target.value)}
-            />
+            <span>Version preference</span>
+            <select
+              value={versionPreference}
+              disabled={versionLocked}
+              onChange={(e) => setVersionPreference(e.target.value as VersionPreference)}
+            >
+              {VERSION_PREFERENCE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
-          <SourceLine sources={fieldSources} path="acquisition.selection.preferred_max_file_size_mb" />
-          <label className="field check">
-            <input
-              type="checkbox"
-              checked={extendedBonus}
-              disabled={bonusLocked}
-              onChange={(e) => setExtendedBonus(e.target.checked)}
-            />
-            <span>Prefer extended mixes and remixes</span>
-          </label>
-          <SourceLine sources={fieldSources} path="acquisition.selection.extended_version_bonus" />
-          <label className="field">
-            <span>Preferred max duration (seconds)</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={preferredDuration}
-              readOnly={preferredDurationLocked}
-              disabled={readOnly}
-              onChange={(e) => setPreferredDuration(e.target.value)}
-            />
-          </label>
-          <SourceLine sources={fieldSources} path="acquisition.selection.preferred_max_duration_seconds" />
+          <SourceLine sources={fieldSources} path="acquisition.selection.version_preference" />
+          <p className="muted">
+            Balanced ranks remix, club, and extended together, then an album or original, then a radio edit. A saved
+            class moves to the front. A version named in the request turns the saved choice off.
+          </p>
           <label className="field">
             <span>Hard max duration (seconds)</span>
             <input
@@ -443,20 +418,24 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
           <SourceLine sources={fieldSources} path="acquisition.selection.max_duration_seconds" />
           <p className="muted">Leave hard max duration empty to disable it. Files with no duration stay eligible.</p>
           <label className="field">
-            <span>Lossless preference</span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={losslessPreference}
-              readOnly={losslessLocked}
-              disabled={readOnly}
-              onChange={(e) => setLosslessPreference(e.target.value)}
-            />
+            <span>Format preference</span>
+            <select
+              value={formatPreference}
+              disabled={formatLocked}
+              onChange={(e) => setFormatPreference(e.target.value as FormatPreference)}
+            >
+              {FORMAT_PREFERENCE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
-          <SourceLine sources={fieldSources} path="acquisition.selection.lossless_preference" />
+          <SourceLine sources={fieldSources} path="acquisition.selection.format_preference" />
           <p className="muted">
-            Default 36 picks a normal 6-minute 16/44.1 FLAC over a 320 kbps MP3. 0 picks the MP3.
+            MP3 is preferred by default. Prefer FLAC only chooses among files that already passed the filters. MP3 only
+            and FLAC only drop the other format. Acceptable quality is 192 kbps or higher, MP3 VBR around 170 kbps or
+            higher, or FLAC. 128 kbps up to that line is a worse file, not a reject.
           </p>
         </>
       ) : null}
