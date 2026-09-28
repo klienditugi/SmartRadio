@@ -12,7 +12,7 @@
  *   punctuation is spaces only for that comparison, and anything after the
  *   phrase is allowed; a closing ) or ] , or the requested artist name, is
  *   also a boundary), a medley (two other songs, or the whole word mashup,
- *   mash up, segue, or transition in the basename), a tribute or the word
+ *   mash up, segue, transition, vs, or versus in the basename), a tribute or the word
  *   cover in the basename,
  *   a different artist leading the basename when this artist is only in folders,
  *   stems, long-recording phrases, bitrate under 128 kbps,
@@ -808,10 +808,11 @@ function basenameHasCoverWord(track: CandidateTrack): boolean {
 }
 
 /**
- * Whole word or phrase in the basename only. `mash-up` normalizes to `mash up`.
- * A folder named Mashup does not count. bootleg, edit, remix, vs, x, and feat do not.
+ * Whole word or phrase in the basename only. `mash-up` normalizes to `mash up`,
+ * and `vs.` normalizes to `vs`. A folder name does not count.
+ * bootleg, edit, remix, x, feat, and ft do not.
  */
-const MEDLEY_BASENAME_PHRASES = ["mashup", "mash up", "segue", "transition"] as const;
+const MEDLEY_BASENAME_PHRASES = ["mashup", "mash up", "segue", "transition", "versus", "vs"] as const;
 
 function basenameHasMedleyWord(track: CandidateTrack): boolean {
   return hasAnyPhrase(basenameText(track), MEDLEY_BASENAME_PHRASES);

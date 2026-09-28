@@ -356,13 +356,29 @@ describe("ordered selector", () => {
     const folderMashup = selectTracks([inMashupFolder], { query });
     expect(folderMashup.outcome).toBe("selected");
     if (folderMashup.outcome === "selected") expect(folderMashup.removed.medley).toBe(0);
+    const beeGees = mp3("bee-gees", "Daft Punk VS Bee Gees - Get Lucky-You Should Be Dancing.mp3");
+    const billieJean = mp3("billie", "Daft Punk VS Michael Jackson - Get Lucky-Billie Jean.mp3");
+    const billieFirst = mp3("billie-first", "Daft Punk VS Michael Jackson - Billie Jean-Get Lucky.mp3");
+    const versus = mp3("versus", "Daft Punk versus Someone - Get Lucky.mp3");
+    const vsDot = mp3("vs-dot", "Daft Punk vs. Someone - Get Lucky.mp3");
+    for (const file of [beeGees, billieJean, billieFirst, versus, vsDot]) {
+      const decision = selectTracks([file], { query });
+      expect(decision.outcome).toBe("no_suitable_result");
+      if (decision.outcome === "no_suitable_result") expect(decision.removed.medley).toBe(1);
+    }
+    const inVsFolder = mp3("folder-vs", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\vs\\Daft Punk - Get Lucky.mp3",
+    });
+    const folderVs = selectTracks([inVsFolder], { query });
+    expect(folderVs.outcome).toBe("selected");
+    if (folderVs.outcome === "selected") expect(folderVs.removed.medley).toBe(0);
     const bootleg = mp3("bootleg", "06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg)[Clean].mp3");
     const editOnly = mp3("edit", "Daft Punk - Get Lucky (Radio Edit).mp3");
     const remixOnly = mp3("remix-word", "Daft Punk - Get Lucky (Remix).mp3");
-    const vsOnly = mp3("vs", "Daft Punk VS Someone - Get Lucky.mp3");
     const xOnly = mp3("x", "Daft Punk X Pharrell - Get Lucky.mp3");
     const featOnly = mp3("feat", "Daft Punk feat. Pharrell Williams - Get Lucky.mp3");
-    expect(selected([bootleg, editOnly, remixOnly, vsOnly, xOnly, featOnly]).pick.peer).toBe("bootleg");
+    const ftOnly = mp3("ft", "Daft Punk ft. Pharrell Williams - Get Lucky.mp3");
+    expect(selected([bootleg, editOnly, remixOnly, xOnly, featOnly, ftOnly]).pick.peer).toBe("bootleg");
     expect(selected([bootleg]).removed.medley).toBe(0);
     const inCoverFolder = mp3("album", "Daft Punk - Get Lucky.mp3", {
       path: "music\\cover\\Daft Punk - Get Lucky.mp3",
