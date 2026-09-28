@@ -13,29 +13,32 @@
  *  2. explicit requested version
  *  3. saved version preference (basename, parent, clean original, and the fun-style second bonus).
  *     Off for every file when the request names a version.
- *  4. avoid bad results: long recording, short recording, a large duration overshoot,
- *     a stem, and a known bitrate under 128 kbps. Those files get no version bonus.
- *  5. reaching acceptable quality — the below-floor penalty
- *  6. file size, for a known normal duration. Web radio, not an archive.
- *  7. extra fidelity — good versus acceptable. Below size.
- *  8. saved format preference. Below size. It does not override a real size gap.
- *  9. peer availability
- * 10. username, then path
+ *  4. avoid bad results: long recording, short or incomplete recording, a large
+ *     duration overshoot, a stem, and a known bitrate under 128 kbps.
+ *     Those files get no version bonus, plus a penalty.
+ *  5. file size, for a known normal duration. Listeners should hear the song soon.
+ *  6. audio quality for 128 kbps and up: poor, acceptable, and good. All of it
+ *     sits below size.
+ *  7. saved format preference. It does not override a real size gap.
+ *  8. peer availability
+ *  9. username, then path
  *
  * Known-duration size is 0 through the preferred size (30 MiB). It is gentle up to
- * 1.5× that target, so a clearly better version can still win around 35–45 MiB.
- * From 2× the target (60 MiB) the penalty exceeds extra fidelity, format, and the
- * full normal peer span, so a 60–70 MiB FLAC loses to an acceptable normal-size
- * MP3 of the same version. The curve keeps growing through the hard maximum.
- * Past that maximum the file is filtered; if the cap is raised, a larger file
- * still loses to a smaller one of the same style and format. Unknown duration,
- * a long-recording phrase, or a duration past the preferred max uses a steeper
- * curve and counts in the bad-result tier.
+ * 1.5× that target (about 45 MiB). That band stays under the full quality range,
+ * so a clearly better version can still win there. From 2× the target (60 MiB)
+ * the penalty exceeds the full quality range (128 kbps through good), format, and
+ * the full normal peer span, so a 60–70 MiB FLAC loses to a normal-size MP3 of
+ * the same version, including a 128 kbps MP3. The curve keeps growing through
+ * the hard maximum. Past that maximum the file is filtered; if the cap is raised,
+ * a larger file still loses to a smaller one of the same style and format.
+ * Unknown duration, a long-recording phrase, or a duration past the preferred max
+ * uses a steeper curve and counts in the bad-result tier.
  *
  * Version steps clear the known-duration penalty through the default hard maximum,
- * plus acceptable-quality, fidelity, format, peer, and a mild duration overshoot.
- * A 70 MiB Club Mix wins under `extended` only when no normal-size club or
- * extended file is present.
+ * plus quality from 128 kbps through good, format, peer, and a mild duration
+ * overshoot. A 70 MiB Club Mix wins under `extended` only when no normal-size
+ * club or extended file is present. `prefer_flac` only decides between same-style
+ * files in about the same size range.
  *
  * When the request names a version, the saved preference is off for every file,
  * including the fun-style second bonus. A hybrid such as "Radio Edit - X Remix"
@@ -81,7 +84,8 @@ const MIB = 1024 * 1024;
  * Equal-peer files, default `prefer_mp3` / `extended`:
  * a 14 MiB 320 kbps MP3 is the normal target (size 0, quality good, format bonus).
  * a 42 MiB FLAC of the same version pays a size penalty larger than the format bonus,
- * so prefer_flac does not take it. A preferred club or extended version still
+ * so prefer_flac does not take it. From 60 MiB the size penalty also beats a
+ * 128 kbps file of the same version. A preferred club or extended version still
  * outranks a radio edit, including a large FLAC when that is the only preferred file.
  */
 export const SCORE_WEIGHTS = {
@@ -98,8 +102,8 @@ export const SCORE_WEIGHTS = {
   /**
    * 256–320 kbps CBR, reported MP3 VBR at `bitrateVbrGoodMin` or higher, and in-cap
    * FLAC including hi-res. Hi-res gets no extra on top of this. VBR on other
-   * formats, such as ogg, does not enter this tier. The step above acceptable
-   * is extra fidelity and sits below file size.
+   * formats, such as ogg, does not enter this tier. Good, acceptable, and poor
+   * (128 kbps up to the floor) are one tier, and that whole tier sits below file size.
    */
   qualityGood: 160,
   /** Lossy from the floor (default 192) up to 255, and MP3 VBR below `bitrateVbrGoodMin`. */
@@ -107,20 +111,26 @@ export const SCORE_WEIGHTS = {
   /** Derived bitrate contributes this fraction of the reported lossy score, and no more. */
   qualityDerivedScale: 0.5,
   /**
-   * Added to every below-floor score so missing acceptable quality outranks file
-   * size through the default hard maximum, plus fidelity, format, and a normal peer.
-   */
-  qualityPoorBase: 800,
-  /**
-   * Extra below-floor shape on top of `qualityPoorBase`.
+   * Below-floor scores from 128 kbps up to the floor. This is the poor step of the
+   * quality tier. It beats format and a normal peer, and it loses to the size
+   * penalty from 2× the preferred size.
    * −(base + round(scale × fraction ^ power)), where fraction is the distance
-   * from the floor down to 32 kbps. 128 kbps is −840. 32 kbps is −864.
+   * from the floor down to 128 kbps.
    */
-  qualityLossyPenaltyScale: 64,
+  qualityPoorBase: 80,
+  qualityPoorScale: 40,
+  /**
+   * Known bitrate under 128 kbps. A bad result, above file size: 0 version points
+   * and a penalty that clears the known-duration size range through the hard
+   * maximum, plus quality from 128 kbps through good, format, and a normal peer.
+   * Fraction runs from 128 kbps down to 32 kbps.
+   */
+  qualityUnderMinBase: 1700,
+  qualityUnderScale: 64,
   qualityLossyPenaltyPower: 0.5,
   /**
-   * Basename matches the saved version kind. Clears acceptable-quality, the
-   * known-duration size penalty through the default hard maximum, fidelity,
+   * Basename matches the saved version kind. Clears quality from 128 kbps through
+   * good, the known-duration size penalty through the default hard maximum,
    * format, a normal peer, and a mild duration overshoot. Clears the parent
    * step by that same amount.
    */
@@ -144,21 +154,22 @@ export const SCORE_WEIGHTS = {
   /**
    * Known normal duration. Ratios are size / preferredMaxFileSizeMb.
    * Penalty is 0 at ratio 1. It reaches `sizeGentleMax` at `sizeGentleUntilRatio`
-   * (1.5×, about 45 MiB when the target is 30). That band stays under
-   * fidelity + format + peer, so a better version can still win.
+   * (1.5×, about 45 MiB when the target is 30). That band stays under the full
+   * quality range, so a better version, and a much better encode, can still win.
    */
   sizeGentleUntilRatio: 1.5,
   sizeGentleMax: 96,
   /**
    * At `sizeStrongFromRatio` (2× the preferred size) the penalty is
-   * `sizeStrongAtDouble`, which clears extra fidelity, format, and a normal peer.
+   * `sizeStrongAtDouble`, which clears the full quality range from 128 kbps
+   * through good, format, and a normal peer.
    * Past that, each extra 1.0 of size/preferred adds `sizeStrongPerRatio`.
    * No cap: the score keeps growing through the hard maximum and beyond it
    * when that filter is raised.
    */
   sizeStrongFromRatio: 2,
-  sizeStrongAtDouble: 240,
-  sizeStrongPerRatio: 48,
+  sizeStrongAtDouble: 480,
+  sizeStrongPerRatio: 64,
   /**
    * Points per 1.0 of (size/preferred − 1) when duration is unknown, the file is
    * a long recording, or duration is past the preferred max. Steeper than the
@@ -696,11 +707,17 @@ function lossyPoints(kbps: number, floor: number, vbr: boolean | undefined, ext:
   const vbrGood = ext === ".mp3" && vbr === true && kbps >= SCORE_WEIGHTS.bitrateVbrGoodMin && inRange;
   if (cbrGood || vbrGood) return SCORE_WEIGHTS.qualityGood;
   if (kbps >= floor) return SCORE_WEIGHTS.qualityAcceptable;
-  const span = Math.max(1, floor - SCORE_WEIGHTS.bitratePlausibleMin);
-  const fraction = (floor - kbps) / span;
-  const shaped = Math.pow(fraction, SCORE_WEIGHTS.qualityLossyPenaltyPower);
-  const extra = Math.round(shaped * SCORE_WEIGHTS.qualityLossyPenaltyScale);
-  return -(SCORE_WEIGHTS.qualityPoorBase + extra);
+  const power = SCORE_WEIGHTS.qualityLossyPenaltyPower;
+  if (kbps >= SCORE_WEIGHTS.bitrateVersionMin) {
+    const span = Math.max(1, floor - SCORE_WEIGHTS.bitrateVersionMin);
+    const fraction = (floor - kbps) / span;
+    const extra = Math.round(Math.pow(fraction, power) * SCORE_WEIGHTS.qualityPoorScale);
+    return -(SCORE_WEIGHTS.qualityPoorBase + extra);
+  }
+  const span = Math.max(1, SCORE_WEIGHTS.bitrateVersionMin - SCORE_WEIGHTS.bitratePlausibleMin);
+  const fraction = (SCORE_WEIGHTS.bitrateVersionMin - kbps) / span;
+  const extra = Math.round(Math.pow(fraction, power) * SCORE_WEIGHTS.qualityUnderScale);
+  return -(SCORE_WEIGHTS.qualityUnderMinBase + extra);
 }
 
 function qualityOf(track: CandidateTrack, floor: number): { points: number; signal: QualitySignal } {

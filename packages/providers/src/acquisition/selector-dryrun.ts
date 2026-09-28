@@ -152,6 +152,7 @@ export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
     scenario: string;
     versionPreference: DryRunRow["versionPreference"];
     formatPreference: DryRunRow["formatPreference"];
+    queryTitle?: string;
     maxFileSizeMb?: number | null;
     responses: ReturnType<typeof ownerFile>[];
   }> = [
@@ -243,6 +244,159 @@ export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
       ],
     },
     {
+      scenario: "format sweep auto: 18 MiB Extended Mix MP3 vs 65 MiB Radio Edit FLAC",
+      versionPreference: "extended",
+      formatPreference: "auto",
+      responses: [
+        ownerFile({
+          username: "ext-mp3",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Extended Mix).mp3",
+          sizeMb: 18,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "radio-flac",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit).flac",
+          sizeMb: 65,
+          ext: "flac",
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+    {
+      scenario: "format sweep prefer_mp3: 18 MiB Extended Mix MP3 vs 65 MiB Radio Edit FLAC",
+      versionPreference: "extended",
+      formatPreference: "prefer_mp3",
+      responses: [
+        ownerFile({
+          username: "ext-mp3",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Extended Mix).mp3",
+          sizeMb: 18,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "radio-flac",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit).flac",
+          sizeMb: 65,
+          ext: "flac",
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+    {
+      scenario: "format sweep prefer_flac: 18 MiB Extended Mix MP3 vs 65 MiB Radio Edit FLAC",
+      versionPreference: "extended",
+      formatPreference: "prefer_flac",
+      responses: [
+        ownerFile({
+          username: "ext-mp3",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Extended Mix).mp3",
+          sizeMb: 18,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "radio-flac",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit).flac",
+          sizeMb: 65,
+          ext: "flac",
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+    {
+      scenario: "format sweep mp3_only: 18 MiB Extended Mix MP3 vs 65 MiB Radio Edit FLAC",
+      versionPreference: "extended",
+      formatPreference: "mp3_only",
+      responses: [
+        ownerFile({
+          username: "ext-mp3",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Extended Mix).mp3",
+          sizeMb: 18,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "radio-flac",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit).flac",
+          sizeMb: 65,
+          ext: "flac",
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+    {
+      scenario: "format sweep flac_only: 18 MiB Extended Mix MP3 vs 65 MiB Radio Edit FLAC",
+      versionPreference: "extended",
+      formatPreference: "flac_only",
+      responses: [
+        ownerFile({
+          username: "ext-mp3",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Extended Mix).mp3",
+          sizeMb: 18,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "radio-flac",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit).flac",
+          sizeMb: 65,
+          ext: "flac",
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+    {
+      scenario: "radio edit request under saved extended: pure radio edit vs SYNTHETIC WBBL hybrid",
+      versionPreference: "extended",
+      formatPreference: "prefer_mp3",
+      queryTitle: "Get Lucky (Radio Edit)",
+      responses: [
+        ownerFile({
+          username: "pure-radio",
+          filename: "@@share\\Album\\Get Lucky (Radio Edit).mp3",
+          sizeMb: 10,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "wbbl-hybrid",
+          filename: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit - WBBL Remix).mp3",
+          sizeMb: 10,
+          ext: "mp3",
+          bitRate: 320,
+          freeSlot: false,
+          queueLength: 300,
+          uploadSpeed: 1,
+        }),
+      ],
+    },
+    {
+      scenario: "original request under saved remix: album version vs remix",
+      versionPreference: "remix",
+      formatPreference: "prefer_mp3",
+      queryTitle: "Get Lucky (Album Version)",
+      responses: [
+        ownerFile({
+          username: "album-version",
+          filename: "@@share\\Album\\Get Lucky (Album Version).mp3",
+          sizeMb: 14,
+          ext: "mp3",
+          bitRate: 320,
+        }),
+        ownerFile({
+          username: "plain-remix",
+          filename: "@@share\\Album\\Get Lucky (Remix).mp3",
+          sizeMb: 12,
+          ext: "mp3",
+          bitRate: 320,
+          uploadSpeed: fast,
+        }),
+      ],
+    },
+    {
       scenario: "flac_only, caps raised: 71 MiB slower FLAC vs 224 MiB free fast FLAC",
       versionPreference: "extended",
       formatPreference: "flac_only",
@@ -277,7 +431,7 @@ export function dryRunOwnerExamples(): Array<DryRunRow & { scenario: string }> {
         { responses: item.responses },
         {
           allowedExtensions: AUDIO,
-          query: { artist: "Daft Punk", title: "Get Lucky" },
+          query: { artist: "Daft Punk", title: item.queryTitle ?? "Get Lucky" },
           versionPreference: item.versionPreference,
           formatPreference: item.formatPreference,
           ...(item.maxFileSizeMb !== undefined ? { maxFileSizeMb: item.maxFileSizeMb } : {}),

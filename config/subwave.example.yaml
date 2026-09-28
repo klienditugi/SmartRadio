@@ -97,8 +97,8 @@ acquisition:
   # Preferred values must be <= the matching hard max.
   # version_preference is a ranking bonus: balanced | radio_edit | original | extended | remix.
   # Default extended (owner decision). format_preference: auto | prefer_mp3 | prefer_flac | mp3_only | flac_only.
-  # Default prefer_mp3 (owner decision). A 14 MiB 320 kbps MP3 beats a 42 MiB FLAC of the same version,
-  # including under prefer_flac. Format only decides when the size penalty is about the same.
+  # Default prefer_mp3 (owner decision). A 14 MiB MP3 beats a 60–70 MiB FLAC of the same version,
+  # including a 128 kbps MP3 and including under prefer_flac. Format only decides when the size penalty is about the same.
   # mp3_only and flac_only are hard filters. Inside flac_only the size curve still ranks the FLACs.
   # Old keys extended_version_bonus and lossless_preference are ignored. Doctor names the replacements.
   # Optional env: SLSKD_MAX_FILE_SIZE_MB, SLSKD_MIN_FILE_SIZE_MB,

@@ -633,15 +633,40 @@ describe("priority on real rows", () => {
 describe("owner size examples", () => {
   it("prefers a normal-size file unless the version match is the reason to go large", () => {
     const rows = dryRunOwnerExamples();
-    expect(rows.map((row) => row.username)).toEqual(["album-mp3", "club-mp3", "only-club", "mid-club", "small-flac"]);
+    const winner = (scenario: string) => rows.find((row) => row.scenario.startsWith(scenario));
+    expect(winner("original + prefer_flac")?.username).toBe("album-mp3");
+    expect(winner("original + prefer_flac")?.breakdown?.sizeOvershoot).toBe(0);
+    expect(winner("extended + prefer_flac: 25")?.username).toBe("club-mp3");
+    expect(winner("extended: only Club Mix")?.username).toBe("only-club");
+    expect(winner("extended: only Club Mix")?.breakdown?.versionPreference).toBeGreaterThan(0);
+    expect(winner("extended: only Club Mix")?.breakdown?.sizeOvershoot).toBeLessThan(0);
+    expect(winner("extended: 40 MiB")?.username).toBe("mid-club");
+    expect(winner("flac_only, caps raised")?.username).toBe("small-flac");
+    expect(winner("flac_only, caps raised")?.breakdown?.sizeOvershoot).toBeLessThan(0);
+    for (const format of ["auto", "prefer_mp3", "prefer_flac", "mp3_only"]) {
+      const row = winner(`format sweep ${format}:`);
+      expect(row?.username).toBe("ext-mp3");
+      expect(row?.filename?.endsWith(".mp3")).toBe(true);
+    }
+    const flacOnly = winner("format sweep flac_only:");
+    expect(flacOnly?.username).toBe("radio-flac");
+    expect(flacOnly?.filename?.endsWith(".flac")).toBe(true);
+    expect(flacOnly?.breakdown?.sizeOvershoot).toBeLessThan(0);
+    const radioRequest = winner("radio edit request");
+    expect(radioRequest?.username).toBe("pure-radio");
+    expect(radioRequest?.breakdown?.versionPreference).toBe(0);
+    expect(radioRequest?.breakdown?.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(radioRequest?.filename?.toLowerCase()).toContain("radio edit");
+    expect(radioRequest?.filename?.toLowerCase()).not.toContain("wbbl");
+    const originalRequest = winner("original request");
+    expect(originalRequest?.username).toBe("album-version");
+    expect(originalRequest?.breakdown?.versionPreference).toBe(0);
+    expect(originalRequest?.breakdown?.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(originalRequest?.filename?.toLowerCase()).not.toContain("remix");
     for (const row of rows) {
       expect(row.outcome).toBe("selected");
       expect(row.breakdown?.sizeOvershoot).toEqual(expect.any(Number));
     }
-    expect(rows[0]?.breakdown?.sizeOvershoot).toBe(0);
-    expect(rows[2]?.breakdown?.versionPreference).toBeGreaterThan(0);
-    expect(rows[2]?.breakdown?.sizeOvershoot).toBeLessThan(0);
-    expect(rows[4]?.breakdown?.sizeOvershoot).toBeLessThan(0);
   });
 });
 

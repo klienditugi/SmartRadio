@@ -451,7 +451,7 @@ describe("quality priority", () => {
     if (mismatch.outcome === "no_suitable_result") expect(mismatch.removed.title_mismatch).toBe(1);
 
     const qualityScores: number[] = [];
-    for (let kbps = SCORE_WEIGHTS.bitratePlausibleMin; kbps <= SCORE_WEIGHTS.bitrateGoodMax; kbps += 1) {
+    for (let kbps = SCORE_WEIGHTS.bitrateVersionMin; kbps <= SCORE_WEIGHTS.bitrateGoodMax; kbps += 1) {
       qualityScores.push(qualityAt(kbps));
     }
     qualityScores.push(scoreTrack(flacAt(42)).breakdown.quality);
@@ -460,6 +460,10 @@ describe("quality priority", () => {
     const qualityGood = qualityAt(SCORE_WEIGHTS.bitrateGoodMax);
     const qualityAcceptable = qualityAt(floor);
     const qualityPoor = qualityAt(SCORE_WEIGHTS.bitrateVersionMin);
+    const underMinScores: number[] = [];
+    for (let kbps = SCORE_WEIGHTS.bitratePlausibleMin; kbps < SCORE_WEIGHTS.bitrateVersionMin; kbps += 1) {
+      underMinScores.push(qualityAt(kbps));
+    }
 
     const formatScores = [
       scoreTrack(lossy(320), { formatPreference: "prefer_mp3" }).breakdown.format,
@@ -574,18 +578,26 @@ describe("quality priority", () => {
     const fidelityGap = qualityGood - qualityAcceptable;
     const justUnderFloor = qualityAt(floor - 1);
     const poorGap = qualityAcceptable - justUnderFloor;
+    const qualityStep = Math.min(fidelityGap, poorGap);
     const formatRange = span(formatMin, formatMax);
     const knownSizeRange = span(knownSizeMin, knownSizeMax);
     const availabilityRange = span(availabilityMin, availabilityMax);
-    const belowSize = fidelityGap + formatRange + availabilityRange;
+    const belowQuality = formatRange + availabilityRange;
+    const belowSize = qualityRange + belowQuality;
     const versionQuality = span(qualityPoor, qualityGood);
     const versionLower = versionQuality + knownSizeRange + formatRange + availabilityRange + Math.abs(mildOvershoot);
-    const badMagnitude = Math.min(Math.abs(Math.min(...longScores)), Math.abs(Math.min(...shortScores)));
+    const underMinMagnitude = Math.abs(Math.max(...underMinScores));
+    const badMagnitude = Math.min(
+      Math.abs(Math.min(...longScores)),
+      Math.abs(Math.min(...shortScores)),
+      underMinMagnitude,
+    );
     const badLower = qualityRange + knownSizeRange + formatRange + availabilityRange;
 
+    expect(qualityAt(SCORE_WEIGHTS.bitrateVersionMin - 1)).toBeLessThan(qualityPoor);
     expect(sizeAt(preferredMb)).toBe(0);
     expect(sizeAt(preferredMb * SCORE_WEIGHTS.sizeGentleUntilRatio)).toBeLessThan(0);
-    expect(Math.abs(sizeAt(preferredMb * SCORE_WEIGHTS.sizeGentleUntilRatio))).toBeLessThan(belowSize);
+    expect(Math.abs(sizeAt(preferredMb * SCORE_WEIGHTS.sizeGentleUntilRatio))).toBeLessThan(qualityRange);
     expect(Math.abs(sizeAt(preferredMb * SCORE_WEIGHTS.sizeStrongFromRatio))).toBeGreaterThan(belowSize);
     expect(Math.abs(sizeAt(hardMaxMb))).toBe(knownSizeRange);
     let previousSize = 0;
@@ -623,9 +635,8 @@ describe("quality priority", () => {
       { name: "requestedVersion", gap: span(requestedOff, requestedOn), lower: basename + badMagnitude + badLower, dominates: true },
       { name: "versionPreference", gap: smallestNonZeroGap([0, secondary, parentOnly, basename]), lower: versionLower, dominates: true },
       { name: "badResults", gap: badMagnitude, lower: badLower, dominates: true },
-      { name: "acceptableQuality", gap: poorGap, lower: knownSizeRange + belowSize, dominates: true },
       { name: "size", gap: Math.abs(sizeAt(preferredMb * SCORE_WEIGHTS.sizeStrongFromRatio)), lower: belowSize, dominates: true },
-      { name: "fidelity", gap: fidelityGap, lower: formatRange + availabilityRange, dominates: true },
+      { name: "quality", gap: qualityStep, lower: belowQuality, dominates: true },
       { name: "format", gap: formatRange, lower: availabilityRange, dominates: true },
       { name: "peer", gap: availabilityRange, lower: 0, dominates: false },
     ];
@@ -634,9 +645,8 @@ describe("quality priority", () => {
       "requestedVersion",
       "versionPreference",
       "badResults",
-      "acceptableQuality",
       "size",
-      "fidelity",
+      "quality",
       "format",
       "peer",
     ]);
@@ -644,7 +654,7 @@ describe("quality priority", () => {
       if (!tier.dominates) continue;
       expect(tier.gap).toBeGreaterThan(tier.lower);
     }
-    expect(fidelityGap).toBeLessThan(Math.abs(sizeAt(preferredMb * SCORE_WEIGHTS.sizeStrongFromRatio)));
+    expect(qualityRange).toBeLessThan(Math.abs(sizeAt(preferredMb * SCORE_WEIGHTS.sizeStrongFromRatio)));
 
     for (const step of [basename, parentOnly, cleanOriginal, secondary, clubUnderRemix]) {
       expect(step).toBeGreaterThan(versionLower);
@@ -677,7 +687,8 @@ describe("quality priority", () => {
     expect(flacScore.breakdown.durationOvershoot).toBe(0);
     expect(flacScore.breakdown.longRecording).toBe(0);
     expect(mp3Score.breakdown.sizeOvershoot).toBe(0);
-    expect(flacScore.breakdown.sizeOvershoot).toBeLessThan(-(SCORE_WEIGHTS.qualityGood - SCORE_WEIGHTS.qualityAcceptable) - SCORE_WEIGHTS.formatPreference);
+    const qualitySpan = SCORE_WEIGHTS.qualityGood - scoreTrack(lossy(SCORE_WEIGHTS.bitrateVersionMin)).breakdown.quality;
+    expect(flacScore.breakdown.sizeOvershoot).toBeLessThan(-(qualitySpan + SCORE_WEIGHTS.formatPreference));
     expect(flacScore.breakdown.format).toBeGreaterThan(0);
     expect(mp3Score.breakdown.format).toBe(0);
     expect(flacScore.breakdown.versionPreference).toBe(mp3Score.breakdown.versionPreference);
@@ -732,6 +743,55 @@ describe("quality priority", () => {
     expect(scoreTrack(midClub, extended).breakdown.sizeOvershoot).toBeGreaterThan(
       -SCORE_WEIGHTS.versionBasename,
     );
+  });
+
+  it("lets a normal-size extended MP3 beat a 65 MiB FLAC radio edit under every format except flac_only", () => {
+    const extendedMp3 = lossy(320, {
+      peer: "ext-mp3",
+      path: "@@share\\SYNTHETIC\\Get Lucky (Extended Mix).mp3",
+      sizeBytes: 18 * MIB,
+    });
+    const radioFlac = flacAt(65, {
+      peer: "radio-flac",
+      path: "@@share\\SYNTHETIC\\Get Lucky (Radio Edit).flac",
+      availability: { freeSlot: true, queueLength: 0, speedBps: 10 ** (SCORE_WEIGHTS.availabilitySpeedCap + 4) },
+    });
+    const extended = { versionPreference: "extended" as const };
+    for (const formatPreference of ["auto", "prefer_mp3", "prefer_flac", "mp3_only"] as const) {
+      const pick = selected([extendedMp3, radioFlac], { ...extended, formatPreference });
+      expect(pick.pick.peer).toBe("ext-mp3");
+      expect(pick.pick.format.ext).toBe(".mp3");
+    }
+    const onlyFlac = selected([extendedMp3, radioFlac], { ...extended, formatPreference: "flac_only" });
+    expect(onlyFlac.pick.peer).toBe("radio-flac");
+    expect(onlyFlac.pick.format.ext).toBe(".flac");
+    expect(onlyFlac.breakdown.sizeOvershoot).toBeLessThan(0);
+  });
+
+  it("lets a 14 MiB 128 kbps MP3 beat a 70 MiB FLAC of the same version, and keeps under 128 in the bad tier", () => {
+    const poor = lossy(128, {
+      peer: "poor-mp3",
+      path: "@@share\\Album\\Get Lucky (Album Version).mp3",
+      sizeBytes: 14 * MIB,
+    });
+    const huge = flacAt(70, {
+      peer: "huge-flac",
+      path: "@@share\\Album\\Get Lucky (Album Version).flac",
+      availability: { freeSlot: true, queueLength: 0, speedBps: 10 ** (SCORE_WEIGHTS.availabilitySpeedCap + 4) },
+    });
+    const policy = { versionPreference: "original" as const, formatPreference: "prefer_flac" as const };
+    expect(selected([poor, huge], policy).pick.peer).toBe("poor-mp3");
+    expect(scoreTrack(poor, policy).breakdown.versionPreference).toBeGreaterThan(0);
+    expect(scoreTrack(huge, policy).breakdown.sizeOvershoot).toBeLessThan(scoreTrack(poor, policy).breakdown.quality - SCORE_WEIGHTS.qualityGood);
+
+    const under = lossy(96, {
+      peer: "under-mp3",
+      path: "@@share\\Album\\Get Lucky (Album Version).mp3",
+      sizeBytes: 10 * MIB,
+    });
+    expect(scoreTrack(under, policy).breakdown.versionPreference).toBe(0);
+    expect(scoreTrack(under, policy).breakdown.quality).toBeLessThan(-Math.abs(scoreTrack(huge, policy).breakdown.sizeOvershoot));
+    expect(selected([under, huge], policy).pick.peer).toBe("huge-flac");
   });
 
   it("prefers a normal-size 192 kbps MP3 over a 42 MiB FLAC under prefer_mp3", () => {
