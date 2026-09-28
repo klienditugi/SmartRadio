@@ -13,25 +13,32 @@
  *  2. explicit requested version (1000)
  *  3. hard filters, including mp3_only / flac_only
  *  4. saved version preference (basename 240, clean original 160, parent 80)
- *  5. duration overshoot and long-recording avoidance (−280, and no version bonus)
+ *  5. duration policy: overshoot, long-recording (−280), and short-recording (up to −280)
  *  6. audio quality (good tier 100; acceptable 28; 128 kbps is −40 at the default floor)
  *  7. saved format preference (24)
- *  8. file-size soft preference (gentle curve; 42 MiB is −5)
+ *  8. file-size soft preference when duration is known and normal (capped at −12)
  *  9. peer availability
  * 10. username, then path
  *
  * The basename version bonus clears the whole quality range plus format, the
- * gentle size curve, and a normal peer. The partial version bonuses (160 and 80)
+ * known-duration size cap, and a normal peer. The partial version bonuses (160 and 80)
  * do not: a clean original or a parent-folder match can lose to that full swing.
  * A long-recording phrase is not a normal length, so it does not receive the
  * version bonus. −280 is larger than the basename version bonus, and larger than
  * the quality range plus everything below quality, so a Remix DJ Set cannot win
- * on a remix preference.
+ * on a remix preference. A known short duration scales toward the same −280.
+ * When duration is known and the file is not long or overshooting, size stops at
+ * −12, strictly below the format bonus. Unknown duration, or a long or
+ * overshooting file, keeps the steep size curve as part of the duration tier.
  */
 
 import {
   DEFAULT_BITRATE_FLOOR_KBPS,
   DEFAULT_FORMAT_PREFERENCE,
+  DEFAULT_SHORT_RECORDING_FLOOR_SECONDS,
+  DEFAULT_SHORT_RECORDING_FRACTION,
+  DEFAULT_SHORT_RECORDING_MIN_SAMPLES,
+  DEFAULT_SHORT_RECORDING_PENALTY,
   DEFAULT_INSTRUMENT_PART_BASENAMES,
   DEFAULT_LONG_RECORDING_PHRASES,
   DEFAULT_MAX_BIT_DEPTH,
@@ -100,9 +107,17 @@ export const SCORE_WEIGHTS = {
    * +80 does not clear the full quality range plus format, gentle size, and a normal peer.
    */
   versionParent: 80,
-  /** Points per 1.0 overshoot ratio while duration is known and normal, up to 1.0. */
+  /**
+   * Points per 1.0 overshoot ratio while duration is known and the file is not long
+   * or overshooting. The penalty stops at this value so it stays strictly below the
+   * format gap. A larger file does not add more.
+   */
   sizeGentlePerRatio: 12,
-  /** Points per 1.0 overshoot ratio when duration is unknown, the file is long, or the ratio exceeds 1. */
+  /**
+   * Points per 1.0 overshoot ratio when duration is unknown, the file is a long
+   * recording, or duration is past the preferred max. That curve stands in for
+   * the duration tier. It is not part of the size range under format preference.
+   */
   sizeSteepPerRatio: 48,
   sizeGentleRatioLimit: 1,
   sizePenaltyCap: 140,
@@ -110,6 +125,8 @@ export const SCORE_WEIGHTS = {
   durationPenaltyScale: 400,
   durationPenaltyCap: 400,
   longRecording: -280,
+  /** Default ceiling for `shortRecording`. Config `short_recording_penalty` overrides it. */
+  shortRecording: DEFAULT_SHORT_RECORDING_PENALTY,
   /** Larger than requestedVersion plus every positive component, so a stem stays last. */
   stem: -1600,
   availabilityFreeSlot: 6,
@@ -143,6 +160,7 @@ export const SCORE_COMPONENTS = [
   "sizeOvershoot",
   "durationOvershoot",
   "longRecording",
+  "shortRecording",
   "stem",
   "availability",
 ] as const;
@@ -270,6 +288,19 @@ export type SelectionPolicyInput = {
   formatPreference?: FormatPreference;
   /** kbps. Omit for 192. Lossy rates below this are penalized. */
   bitrateFloorKbps?: number;
+  /** Fraction of the search median. Omit for 0.6. */
+  shortRecordingFraction?: number;
+  /** Known lengths required before the median fraction applies. Omit for 5. */
+  shortRecordingMinSamples?: number;
+  /** Seconds. Omit for 90. Known durations below this are short without a median. */
+  shortRecordingFloorSeconds?: number;
+  /** Most negative short-track score. Omit for −280. Zero disables it. */
+  shortRecordingPenalty?: number;
+  /**
+   * Known durations of the correlated candidates in this search, including this file.
+   * `selectTracks` fills this from the files that passed the hard filters.
+   */
+  cohortDurationSeconds?: readonly number[];
   versionPenaltyTerms?: readonly string[];
   instrumentPartBasenames?: readonly string[];
   longRecordingPhrases?: readonly string[];
@@ -289,6 +320,10 @@ type ResolvedPolicy = {
   versionPreference: VersionPreference;
   formatPreference: FormatPreference;
   bitrateFloorKbps: number;
+  shortRecordingFraction: number;
+  shortRecordingMinSamples: number;
+  shortRecordingFloorSeconds: number;
+  shortRecordingPenalty: number;
   versionPenaltyTerms: readonly string[];
   instrumentPartBasenames: readonly string[];
   longRecordingPhrases: readonly string[];
@@ -338,6 +373,10 @@ export function resolveSelectionPolicy(input: SelectionPolicyInput = {}): Resolv
     versionPreference: input.versionPreference ?? DEFAULT_VERSION_PREFERENCE,
     formatPreference: input.formatPreference ?? DEFAULT_FORMAT_PREFERENCE,
     bitrateFloorKbps: resolveOptionalCap(input.bitrateFloorKbps, DEFAULT_BITRATE_FLOOR_KBPS) ?? DEFAULT_BITRATE_FLOOR_KBPS,
+    shortRecordingFraction: input.shortRecordingFraction ?? DEFAULT_SHORT_RECORDING_FRACTION,
+    shortRecordingMinSamples: input.shortRecordingMinSamples ?? DEFAULT_SHORT_RECORDING_MIN_SAMPLES,
+    shortRecordingFloorSeconds: input.shortRecordingFloorSeconds ?? DEFAULT_SHORT_RECORDING_FLOOR_SECONDS,
+    shortRecordingPenalty: input.shortRecordingPenalty ?? DEFAULT_SHORT_RECORDING_PENALTY,
     versionPenaltyTerms: input.versionPenaltyTerms ?? DEFAULT_VERSION_PENALTY_TERMS,
     instrumentPartBasenames: input.instrumentPartBasenames ?? DEFAULT_INSTRUMENT_PART_BASENAMES,
     longRecordingPhrases: input.longRecordingPhrases ?? DEFAULT_LONG_RECORDING_PHRASES,
@@ -356,6 +395,7 @@ function emptyBreakdown(): ScoreBreakdown {
     sizeOvershoot: 0,
     durationOvershoot: 0,
     longRecording: 0,
+    shortRecording: 0,
     stem: 0,
     availability: 0,
   };
@@ -643,25 +683,70 @@ function qualityOf(track: CandidateTrack, floor: number): { points: number; sign
   return { points: 0, signal: { quality: "unknown" } };
 }
 
+/**
+ * Cap for a known, non-long, non-overshooting duration. Strictly below the
+ * format bonus so a large but normal FLAC cannot lose to format preference.
+ */
+function knownDurationSizeCap(): number {
+  const gentle = Math.round(SCORE_WEIGHTS.sizeGentlePerRatio * SCORE_WEIGHTS.sizeGentleRatioLimit);
+  const formatGap = SCORE_WEIGHTS.formatPreference;
+  if (formatGap <= 1) return 0;
+  return Math.min(gentle, formatGap - 1);
+}
+
+/** Unknown duration, a long-recording phrase, or a duration past the preferred max. */
+function sizeStandsInForDuration(track: CandidateTrack, policy: ResolvedPolicy): boolean {
+  if (track.durationSeconds === undefined) return true;
+  if (matchesLongRecording(track, policy.longRecordingPhrases)) return true;
+  if (policy.preferredMaxDurationSeconds !== null && track.durationSeconds > policy.preferredMaxDurationSeconds) {
+    return true;
+  }
+  return false;
+}
+
 function sizeOvershoot(track: CandidateTrack, policy: ResolvedPolicy): number {
   if (policy.preferredMaxFileSizeMb === null) return 0;
   const sizeMb = track.sizeBytes / MIB;
   if (sizeMb <= policy.preferredMaxFileSizeMb) return 0;
   const ratio = (sizeMb - policy.preferredMaxFileSizeMb) / policy.preferredMaxFileSizeMb;
-  const normalDuration =
-    policy.preferredMaxDurationSeconds !== null &&
-    track.durationSeconds !== undefined &&
-    track.durationSeconds <= policy.preferredMaxDurationSeconds;
-  let penalty: number;
-  if (normalDuration && ratio <= SCORE_WEIGHTS.sizeGentleRatioLimit) {
-    penalty = SCORE_WEIGHTS.sizeGentlePerRatio * ratio;
-  } else if (normalDuration) {
-    const extra = ratio - SCORE_WEIGHTS.sizeGentleRatioLimit;
-    penalty = SCORE_WEIGHTS.sizeGentlePerRatio * SCORE_WEIGHTS.sizeGentleRatioLimit + SCORE_WEIGHTS.sizeSteepPerRatio * extra;
-  } else {
-    penalty = SCORE_WEIGHTS.sizeSteepPerRatio * ratio;
+  if (!sizeStandsInForDuration(track, policy)) {
+    const limited = Math.min(ratio, SCORE_WEIGHTS.sizeGentleRatioLimit);
+    const penalty = Math.round(SCORE_WEIGHTS.sizeGentlePerRatio * limited);
+    return -Math.min(knownDurationSizeCap(), penalty);
   }
-  return -Math.min(SCORE_WEIGHTS.sizePenaltyCap, Math.round(penalty));
+  const penalty = Math.round(SCORE_WEIGHTS.sizeSteepPerRatio * ratio);
+  return -Math.min(SCORE_WEIGHTS.sizePenaltyCap, penalty);
+}
+
+function medianOf(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const upper = sorted[mid] ?? 0;
+  if (sorted.length % 2 === 1) return upper;
+  const lower = sorted[mid - 1] ?? upper;
+  return (lower + upper) / 2;
+}
+
+/**
+ * Soft penalty for a known short duration. Missing duration is not short.
+ * The line is the absolute floor, or (when enough lengths are known) the
+ * fraction of the median, whichever is higher and still above this file.
+ * The score scales from 0 at that line to `shortRecordingPenalty` at 0 seconds.
+ */
+function shortRecordingPoints(track: CandidateTrack, policy: ResolvedPolicy, cohort: readonly number[]): number {
+  const duration = track.durationSeconds;
+  if (duration === undefined || !Number.isFinite(duration) || duration <= 0) return 0;
+  let line = 0;
+  if (duration < policy.shortRecordingFloorSeconds) line = policy.shortRecordingFloorSeconds;
+  const known = cohort.filter((value) => Number.isFinite(value) && value > 0);
+  if (known.length >= policy.shortRecordingMinSamples) {
+    const relative = policy.shortRecordingFraction * medianOf(known);
+    if (duration < relative) line = Math.max(line, relative);
+  }
+  if (!(line > duration)) return 0;
+  const ratio = (line - duration) / line;
+  const magnitude = Math.abs(policy.shortRecordingPenalty);
+  return -Math.min(magnitude, Math.round(magnitude * ratio));
 }
 
 function durationOvershoot(track: CandidateTrack, policy: ResolvedPolicy): number {
@@ -784,6 +869,7 @@ export function scoreTrack(track: CandidateTrack, input: SelectionPolicyInput = 
   breakdown.sizeOvershoot = sizeOvershoot(track, policy);
   breakdown.durationOvershoot = durationOvershoot(track, policy);
   if (matchesLongRecording(track, policy.longRecordingPhrases)) breakdown.longRecording = SCORE_WEIGHTS.longRecording;
+  breakdown.shortRecording = shortRecordingPoints(track, policy, input.cohortDurationSeconds ?? []);
   if (incidentalStem(track, policy, titleTokens, asked)) breakdown.stem = SCORE_WEIGHTS.stem;
   breakdown.availability = availabilityScore(track);
 
@@ -812,7 +898,10 @@ export function selectTracks(tracks: readonly CandidateTrack[], input: Selection
     else kept.push(track);
   }
   if (kept.length === 0) return { outcome: "no_suitable_result", removed, reason: removalReason(removed) };
-  const scored = kept.map((track) => scoreTrack(track, input));
+  const cohortDurationSeconds = kept
+    .map((track) => track.durationSeconds)
+    .filter((value): value is number => value !== undefined && Number.isFinite(value) && value > 0);
+  const scored = kept.map((track) => scoreTrack(track, { ...input, cohortDurationSeconds }));
   scored.sort(compareScored);
   const best = scored[0];
   if (!best) return { outcome: "no_suitable_result", removed, reason: removalReason(removed) };

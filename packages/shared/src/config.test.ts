@@ -7,6 +7,10 @@ import {
   applyEnvOverrides,
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_BITRATE_FLOOR_KBPS,
+  DEFAULT_SHORT_RECORDING_FLOOR_SECONDS,
+  DEFAULT_SHORT_RECORDING_FRACTION,
+  DEFAULT_SHORT_RECORDING_MIN_SAMPLES,
+  DEFAULT_SHORT_RECORDING_PENALTY,
   DEFAULT_EXTENDED_VERSION_TERMS,
   DEFAULT_FORMAT_PREFERENCE,
   DEFAULT_LONG_RECORDING_PHRASES,
@@ -282,6 +286,10 @@ acquisition:
     expect(cfg.acquisition.selection.version_preference).toBe(DEFAULT_VERSION_PREFERENCE);
     expect(cfg.acquisition.selection.format_preference).toBe(DEFAULT_FORMAT_PREFERENCE);
     expect(cfg.acquisition.selection.bitrate_floor_kbps).toBe(DEFAULT_BITRATE_FLOOR_KBPS);
+    expect(cfg.acquisition.selection.short_recording_fraction).toBe(DEFAULT_SHORT_RECORDING_FRACTION);
+    expect(cfg.acquisition.selection.short_recording_min_samples).toBe(DEFAULT_SHORT_RECORDING_MIN_SAMPLES);
+    expect(cfg.acquisition.selection.short_recording_floor_seconds).toBe(DEFAULT_SHORT_RECORDING_FLOOR_SECONDS);
+    expect(cfg.acquisition.selection.short_recording_penalty).toBe(DEFAULT_SHORT_RECORDING_PENALTY);
     expect(cfg.acquisition.selection.max_sample_rate).toBe(DEFAULT_MAX_SAMPLE_RATE);
     expect(cfg.acquisition.selection.max_bit_depth).toBe(DEFAULT_MAX_BIT_DEPTH);
     expect(cfg.acquisition.selection.version_penalty_terms).toEqual([...DEFAULT_VERSION_PENALTY_TERMS]);
@@ -363,6 +371,10 @@ acquisition:
       version_preference: DEFAULT_VERSION_PREFERENCE,
       format_preference: DEFAULT_FORMAT_PREFERENCE,
       bitrate_floor_kbps: DEFAULT_BITRATE_FLOOR_KBPS,
+      short_recording_fraction: DEFAULT_SHORT_RECORDING_FRACTION,
+      short_recording_min_samples: DEFAULT_SHORT_RECORDING_MIN_SAMPLES,
+      short_recording_floor_seconds: DEFAULT_SHORT_RECORDING_FLOOR_SECONDS,
+      short_recording_penalty: DEFAULT_SHORT_RECORDING_PENALTY,
       max_sample_rate: 96000,
       max_bit_depth: null,
       version_penalty_terms: ["remix", "live"],

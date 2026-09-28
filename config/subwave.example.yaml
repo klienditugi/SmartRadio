@@ -113,6 +113,12 @@ acquisition:
     version_preference: balanced
     format_preference: prefer_mp3
     bitrate_floor_kbps: 192
+    # Short tracks: below 0.6 of the search median (needs 5 known lengths) or below 90s.
+    # The penalty scales to short_recording_penalty. Not a hard filter.
+    short_recording_fraction: 0.6
+    short_recording_min_samples: 5
+    short_recording_floor_seconds: 90
+    short_recording_penalty: -280
     max_sample_rate: 48000
     max_bit_depth: 24
     version_penalty_terms:

@@ -408,6 +408,54 @@ describe("real Phase C format, quality, and peers", () => {
     expect(ogg.breakdown.quality).not.toBe(SCORE_WEIGHTS.qualityGood);
   });
 
+  it("penalizes the real 105 s remix and a SYNTHETIC short FLAC", () => {
+    const short = tagged((_, row) => row.username === "peer-092" && row.filename.includes("HOME_The Atlantic Tapes"));
+    const longerRemix = hasTag("remix_named", (_, row) => row.username === "peer-005");
+    const fillers = hasTag("mp3_320_album", (tags) => tags.length === 1);
+    const pool = { responses: [...short.responses, ...longerRemix.responses, ...fillers.responses] };
+    const saved = pick(pool, { versionPreference: "remix", formatPreference: "prefer_mp3" });
+    expect(saved.file.username).not.toBe("peer-092");
+    expect(saved.breakdown.shortRecording).toBe(0);
+
+    const requested = pick(
+      { responses: [...short.responses, ...fillers.responses] },
+      { query: { artist: "Daft Punk", title: "Get Lucky Remix" } },
+    );
+    expect(requested.file.username).toBe("peer-092");
+    expect(requested.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(requested.breakdown.shortRecording).toBeLessThan(0);
+    expect(requested.pick.durationSeconds).toBe(105);
+
+    const syntheticShort = {
+      label: "SYNTHETIC",
+      responses: [
+        {
+          username: "SYNTHETIC-short-flac",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 1_000_000,
+          files: [
+            {
+              filename: "@@share\\SYNTHETIC\\Daft Punk - Get Lucky (HOME Remix).flac",
+              size: 12 * 1024 * 1024,
+              length: 105,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+            },
+          ],
+        },
+      ],
+    };
+    const longerFlacRemix = hasTag("remix_daft_punk", (tags) => tags.includes("remix_daft_punk") && !tags.includes("mp3_320"));
+    const beside = pick(
+      { responses: [...syntheticShort.responses, ...longerFlacRemix.responses, ...fillers.responses] },
+      { versionPreference: "remix", formatPreference: "prefer_flac" },
+    );
+    expect(beside.file.username).not.toBe("SYNTHETIC-short-flac");
+    expect(beside.breakdown.shortRecording).toBe(0);
+  });
+
   it("prefers a free slot over a long queue on otherwise similar radio edits", () => {
     const radios = hasTag("radio_edit");
     const decision = pick(radios, { versionPreference: "radio_edit" });
@@ -499,7 +547,9 @@ describe("priority on real rows", () => {
       { responses: [...huge.responses, ...smallBusy.responses] },
       { formatPreference: "auto", versionPreference: "balanced", maxSampleRate: 192_000, maxFileSizeMb: null },
     );
-    expect(tagsOf(sized.file)).toContain("peer_no_free_slot");
+    expect(tagsOf(sized.file)).toContain("club_mix");
+    expect(sized.breakdown.durationOvershoot).toBe(0);
+    expect(sized.breakdown.sizeOvershoot).toBeGreaterThan(-SCORE_WEIGHTS.formatPreference);
 
     expect(pick(hasTag("radio_edit"), { versionPreference: "balanced" }).file.username).toBe("peer-005");
     const samePeer = pick(hasTag("radio_edit", (_tags, row) => row.username === "peer-005"), { versionPreference: "radio_edit" });

@@ -63,10 +63,10 @@ Priority, high to low. A higher item is not outweighed by the sum of the realist
 2. Explicit requested version (+1000).
 3. Hard validity filters, including `mp3_only` and `flac_only`.
 4. Saved version preference (basename 240, clean original 160, parent folder 80). The basename bonus clears the whole quality range plus format, gentle size, and a normal peer. The +160 and +80 steps do not.
-5. Sensible duration and long-recording avoidance (−280, and no version bonus on that file).
+5. Duration policy. Overshoot, long-recording avoidance (−280, and no version bonus on that file), and a short-recording penalty that scales to −280. Unknown-duration size uses this tier too.
 6. Audio quality (good tier 100; acceptable 28; 128 kbps is −40 at the default floor; 32 kbps is −64).
 7. Saved format preference (24).
-8. File-size soft preference (42 MiB is −5; the gentle curve reaches −12 at twice the preferred size).
+8. File-size soft preference when duration is known and normal (capped at −12, strictly below the format bonus; 42 MiB is −5).
 9. Peer availability (about 27 points from a fast free peer down to a full normal queue with no slot). Queues over 1000 are a separate −60 outlier and are not part of that range.
 10. Username, then path.
 
@@ -78,9 +78,10 @@ Priority, high to low. A higher item is not outweighed by the sum of the realist
 | `versionPreference` | +240 basename, +160 clean original, +80 parent, 0 for `balanced` | Saved `version_preference`, and only on a normal-length file. Ranking bonus, never a filter. +240 clears the whole quality range plus format, gentle size, and a normal peer. +160 and +80 are a known exception: they can lose to that full swing. |
 | `quality` | +100 for 256–320 kbps CBR, for reported MP3 VBR at 220 kbps or more, and for in-cap FLAC including hi-res; +28 from the floor (default 192) up to 255; below the floor −round(64 × fraction^0.5), so 128 kbps is −40 and 32 kbps is −64; 0 when unknown | 256–320 kbps CBR and standard FLAC (16/44.1 or 16/48) are the same tier. Reported MP3 VBR (`isVariableBitRate` on `.mp3`) at about 220 kbps or more is that same good tier. The same flag on ogg or any other format does not promote the file. CBR from 220 to 255 stays acceptable. Hi-res inside the caps gets no extra. `bitRate` of 321 or more, or outside 32–500, is unknown. A derived estimate is half of the reported lossy score, is labeled `derived`, and is not promoted by a VBR flag. Missing fields are unknown, not bad. |
 | `format` | +24 for `prefer_mp3` or `prefer_flac`, 0 for `auto` and the `_only` modes | Separate from quality. The other format stays eligible under `prefer_*`. |
-| `sizeOvershoot` | gentle 12 points per 1.0 ratio above 30 MiB when duration is known and normal, up to ratio 1; then 48 per extra 1.0. Unknown duration, or a duration over the preferred max, uses 48 from the start. Capped at −140 | Not a cutoff. Under 30 MiB adds nothing. A normal FLAC slightly over 30 MiB is not rejected. |
+| `sizeOvershoot` | Known normal duration: 12 points per 1.0 ratio above 30 MiB, and it stops at −12 even when the file is far larger. Unknown duration, a long-recording phrase, or a duration past the preferred max: 48 per 1.0 ratio, capped at −140 | The −12 cap stays strictly below the format bonus, so a 70 MiB normal FLAC still beats an MP3 under `prefer_flac`. The steep curve stands in for the duration tier when length is missing or the file is already long. Under 30 MiB adds nothing. |
 | `durationOvershoot` | −400 × overRatio × (1 + overRatio), capped at −400. A 15 min file against 720 s is −125 | Only when duration is known and above `preferred_max_duration_seconds`. |
-| `longRecording` | −280 | Basename or the immediate parent matches a long-recording phrase. Larger than the basename version bonus, and larger than the quality range plus format, gentle size, and a normal peer. A Remix DJ Set does not win on a remix preference. |
+| `longRecording` | −280 | Basename or the immediate parent matches a long-recording phrase. Larger than the basename version bonus, and larger than the quality range plus format, known-duration size, and a normal peer. A Remix DJ Set does not win on a remix preference. |
+| `shortRecording` | Scales from 0 at the short line to −280 at 0 seconds | Known duration only. The line is 90 seconds, or 0.6 of the median known length of the filtered candidates when at least 5 lengths are known, whichever is higher. A 1:45 file in a normal-length search is penalized. An explicit requested version still wins. |
 | `stem` | −1600 | Instrument-part basename, or stem / stems / multitrack / acapella, when the request did not ask for that part. |
 | `availability` | +6 free slot, −4 no slot, −1 per 25 queued up to −12, −60 when the queue is over 1000, up to +5 for upload speed | Small, except an extreme queue. A queue of 8 is −1, so it loses to a much faster peer and wins when speed is equal. |
 
@@ -109,6 +110,10 @@ A bare `mix` is not a remix. `extended mix` and `club mix` are normal tracks. Th
 | `version_preference` | `balanced` | Owner-chosen default. `radio_edit`, `original`, `extended`, or `remix` add a ranking bonus. Env `SLSKD_VERSION_PREFERENCE`. |
 | `format_preference` | `prefer_mp3` | Owner-chosen default. `auto` adds nothing. `prefer_flac` bonuses FLAC. `mp3_only` and `flac_only` filter. Env `SLSKD_FORMAT_PREFERENCE`. |
 | `bitrate_floor_kbps` | 192 | Lossy rates below this are penalized. |
+| `short_recording_fraction` | 0.6 | Known duration below this fraction of the search median is short. |
+| `short_recording_min_samples` | 5 | Median fraction applies only with at least this many known lengths. |
+| `short_recording_floor_seconds` | 90 | Known duration below this is short even without a median. |
+| `short_recording_penalty` | −280 | Most negative `shortRecording` score. |
 | `max_sample_rate` | 48000 | Hard cap. Null disables it. |
 | `max_bit_depth` | 24 | Hard cap. Null disables it. |
 

@@ -63,6 +63,21 @@ export const DEFAULT_FORMAT_PREFERENCE: FormatPreference = "prefer_mp3";
 export const DEFAULT_BITRATE_FLOOR_KBPS = 192;
 
 /**
+ * A known duration below this fraction of the search median is short,
+ * once at least `DEFAULT_SHORT_RECORDING_MIN_SAMPLES` lengths are known.
+ */
+export const DEFAULT_SHORT_RECORDING_FRACTION = 0.6;
+
+/** Relative short-track penalty stays off until this many known lengths exist. */
+export const DEFAULT_SHORT_RECORDING_MIN_SAMPLES = 5;
+
+/** Known durations below this many seconds are short even without a median. */
+export const DEFAULT_SHORT_RECORDING_FLOOR_SECONDS = 90;
+
+/** Soft short-track penalty reaches this (negative) value. Same scale as a long recording. */
+export const DEFAULT_SHORT_RECORDING_PENALTY = -280;
+
+/**
  * Basename / parent-folder words that rank below a clean match.
  * Word-boundary and case-insensitive. When the request artist or title contains
  * a term, files that match that term rank above files that do not.
@@ -178,6 +193,17 @@ const acquisitionSelectionSchema = z
     format_preference: z.enum(FORMAT_PREFERENCES).default(DEFAULT_FORMAT_PREFERENCE),
     /** Lossy kbps below this are penalized. Default 192. */
     bitrate_floor_kbps: z.number().positive().default(DEFAULT_BITRATE_FLOOR_KBPS),
+    /**
+     * Known duration below this fraction of the correlated-candidate median is short.
+     * Default 0.6. Needs `short_recording_min_samples` known lengths.
+     */
+    short_recording_fraction: z.number().gt(0).lte(1).default(DEFAULT_SHORT_RECORDING_FRACTION),
+    /** Minimum known lengths before the median fraction applies. Default 5. */
+    short_recording_min_samples: z.number().int().positive().default(DEFAULT_SHORT_RECORDING_MIN_SAMPLES),
+    /** Known duration below this (seconds) is short even with no median. Default 90. */
+    short_recording_floor_seconds: z.number().positive().default(DEFAULT_SHORT_RECORDING_FLOOR_SECONDS),
+    /** Most negative short-track score. Default −280. Zero disables the penalty. */
+    short_recording_penalty: z.number().max(0).default(DEFAULT_SHORT_RECORDING_PENALTY),
     extended_version_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_EXTENDED_VERSION_TERMS]),
     long_recording_phrases: z.array(z.string().min(1)).default(() => [...DEFAULT_LONG_RECORDING_PHRASES]),
     /**
@@ -770,6 +796,10 @@ function selectionSettings(selection: AppConfig["acquisition"]["selection"]) {
     version_preference: selection.version_preference,
     format_preference: selection.format_preference,
     bitrate_floor_kbps: selection.bitrate_floor_kbps,
+    short_recording_fraction: selection.short_recording_fraction,
+    short_recording_min_samples: selection.short_recording_min_samples,
+    short_recording_floor_seconds: selection.short_recording_floor_seconds,
+    short_recording_penalty: selection.short_recording_penalty,
     max_sample_rate: selection.max_sample_rate,
     max_bit_depth: selection.max_bit_depth,
     version_penalty_terms: [...selection.version_penalty_terms],

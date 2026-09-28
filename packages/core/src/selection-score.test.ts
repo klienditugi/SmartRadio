@@ -397,72 +397,167 @@ describe("quality priority", () => {
     return gap;
   }
 
+  function flacAt(sizeMb: number, extra: Partial<CandidateTrack> = {}): CandidateTrack {
+    return track({
+      peer: "flac",
+      path: "@@share\\Album\\Get Lucky.flac",
+      sizeBytes: sizeMb * MIB,
+      durationSeconds: 360,
+      bitDepth: 16,
+      sampleRateHz: 44100,
+      ...extra,
+    });
+  }
+
   it("keeps each priority tier strictly above the ranges below it", () => {
+    const qualityScores: number[] = [];
+    for (let kbps = SCORE_WEIGHTS.bitratePlausibleMin; kbps <= SCORE_WEIGHTS.bitrateGoodMax; kbps += 1) {
+      qualityScores.push(qualityAt(kbps));
+    }
+    qualityScores.push(scoreTrack(flacAt(42)).breakdown.quality);
+    const qualityMin = Math.min(...qualityScores);
+    const qualityMax = Math.max(...qualityScores);
     const qualityGood = qualityAt(SCORE_WEIGHTS.bitrateGoodMax);
     const qualityAcceptable = qualityAt(floor);
     const qualityPoor = qualityAt(128);
-    const qualityMin = qualityAt(SCORE_WEIGHTS.bitratePlausibleMin);
-    expect(qualityGood).toBe(SCORE_WEIGHTS.qualityGood);
-    expect(qualityAcceptable).toBe(SCORE_WEIGHTS.qualityAcceptable);
-    expect(qualityPoor).toBeLessThan(0);
-    expect(qualityMin).toBeLessThan(qualityPoor);
 
-    const formatMax = scoreTrack(lossy(SCORE_WEIGHTS.bitrateGoodMax), { formatPreference: "prefer_mp3" }).breakdown.format;
-    const formatMin = scoreTrack(lossy(SCORE_WEIGHTS.bitrateGoodMax), { formatPreference: "auto" }).breakdown.format;
+    const formatScores = [
+      scoreTrack(lossy(320), { formatPreference: "prefer_mp3" }).breakdown.format,
+      scoreTrack(lossy(320), { formatPreference: "auto" }).breakdown.format,
+      scoreTrack(lossy(320), { formatPreference: "mp3_only" }).breakdown.format,
+      scoreTrack(flacAt(14), { formatPreference: "prefer_flac" }).breakdown.format,
+      scoreTrack(flacAt(14), { formatPreference: "prefer_mp3" }).breakdown.format,
+    ];
+    const formatMin = Math.min(...formatScores);
+    const formatMax = Math.max(...formatScores);
 
-    const gentleSize = scoreTrack(
-      track({
-        peer: "wide",
-        path: "@@share\\Album\\Get Lucky.flac",
-        sizeBytes: DEFAULT_PREFERRED_MAX_FILE_SIZE_MB * (1 + SCORE_WEIGHTS.sizeGentleRatioLimit) * MIB,
-        durationSeconds: 360,
-        bitDepth: 16,
-        sampleRateHz: 44100,
-      }),
-    ).breakdown.sizeOvershoot;
-    const sizeMin = gentleSize;
-    const sizeMax = 0;
+    const knownDurationSizes = [1, 14, 30, 31, 42, 60, 70, 100, 140, 200, 400, 800];
+    const knownSizeScores = knownDurationSizes.map(
+      (sizeMb) => scoreTrack(flacAt(sizeMb)).breakdown.sizeOvershoot,
+    );
+    const knownSizeMin = Math.min(...knownSizeScores);
+    const knownSizeMax = Math.max(...knownSizeScores);
+
+    const steepSizeScores = [40, 70, 120, 200, 400, 800].map((sizeMb) => {
+      const unknownDuration = scoreTrack(flacAt(sizeMb, { durationSeconds: undefined })).breakdown.sizeOvershoot;
+      const overshooting = scoreTrack(flacAt(sizeMb, { durationSeconds: 15 * 60 })).breakdown.sizeOvershoot;
+      const longPhrase = scoreTrack(
+        flacAt(sizeMb, { path: "@@share\\SYNTHETIC DJ Set\\Get Lucky.flac", durationSeconds: 360 }),
+      ).breakdown.sizeOvershoot;
+      return Math.min(unknownDuration, overshooting, longPhrase);
+    });
 
     const speedForCap = 10 ** (SCORE_WEIGHTS.availabilitySpeedCap + 4);
-    const availabilityMax = availabilityAt({ freeSlot: true, queueLength: 0, speedBps: speedForCap });
+    const availabilityScores = [
+      availabilityAt({ freeSlot: true, queueLength: 0, speedBps: speedForCap }),
+      availabilityAt({ freeSlot: true, queueLength: 0, speedBps: 0 }),
+      availabilityAt({ freeSlot: false, queueLength: 0, speedBps: 0 }),
+      availabilityAt({ freeSlot: false, queueLength: SCORE_WEIGHTS.availabilityQueueStep, speedBps: 0 }),
+      availabilityAt({
+        freeSlot: false,
+        queueLength: SCORE_WEIGHTS.availabilityExtremeQueueAbove,
+        speedBps: 0,
+      }),
+    ];
     // Queue equal to the extreme threshold still uses the normal cap. The −60
     // penalty applies only once the queue is over 1000. That is an abandoned
     // peer, not a queue a normal file sits in, so it is left out of this range.
     // Folding it in would let one outlier overturn a quality tier.
-    const availabilityMin = availabilityAt({
-      freeSlot: false,
-      queueLength: SCORE_WEIGHTS.availabilityExtremeQueueAbove,
-      speedBps: 0,
-    });
     const extremeQueue = availabilityAt({
       freeSlot: false,
       queueLength: SCORE_WEIGHTS.availabilityExtremeQueueAbove + 1,
       speedBps: 0,
     });
-    expect(extremeQueue).toBe(-Math.abs(SCORE_WEIGHTS.availabilityNoSlot) + SCORE_WEIGHTS.availabilityExtremeQueue);
+    const availabilityMin = Math.min(...availabilityScores);
+    const availabilityMax = Math.max(...availabilityScores);
     expect(extremeQueue).toBeLessThan(availabilityMin);
 
-    const qualityRange = span(qualityMin, qualityGood);
-    const formatRange = span(formatMin, formatMax);
-    const sizeRange = span(sizeMin, sizeMax);
-    const availabilityRange = span(availabilityMin, availabilityMax);
-    const belowQuality = formatRange + sizeRange + availabilityRange;
+    const cohort = [300, 340, 360, 369, 400, 420];
+    const shortScores = [1, 30, 60, 89, 105, 200, 360].map(
+      (durationSeconds) =>
+        scoreTrack(flacAt(12, { durationSeconds }), { cohortDurationSeconds: cohort }).breakdown.shortRecording,
+    );
+    const aloneShort = scoreTrack(flacAt(12, { durationSeconds: 60 })).breakdown.shortRecording;
+    const aloneNormal = scoreTrack(flacAt(12, { durationSeconds: 105 })).breakdown.shortRecording;
+    shortScores.push(aloneShort, aloneNormal);
+    const longScores = [
+      scoreTrack(flacAt(42, { path: "@@share\\Album\\Get Lucky.flac" })).breakdown.longRecording,
+      scoreTrack(flacAt(42, { path: "@@share\\Radio Show Episode 12\\Get Lucky.flac" })).breakdown.longRecording,
+    ];
+    const durationScores = [400, 720, 721, 900, 1200, 1800].map(
+      (durationSeconds) => scoreTrack(flacAt(42, { durationSeconds })).breakdown.durationOvershoot,
+    );
 
+    const matched = scoreTrack(flacAt(28), { query }).breakdown;
+    const requestedOn = scoreTrack(flacAt(28, { path: "@@share\\Album\\Get Lucky (Remix).flac" }), {
+      query: { title: "Get Lucky Remix" },
+    }).breakdown.requestedVersion;
+    const requestedOff = scoreTrack(flacAt(28)).breakdown.requestedVersion;
+    const versionOn = scoreTrack(flacAt(28, { path: "@@share\\Album\\Get Lucky (Extended Mix).flac" }), {
+      versionPreference: "extended",
+    }).breakdown.versionPreference;
+    const versionOff = scoreTrack(flacAt(28, { path: "@@share\\Album\\Get Lucky (Extended Mix).flac" }), {
+      versionPreference: "balanced",
+    }).breakdown.versionPreference;
+    const cleanOriginal = scoreTrack(flacAt(28, { path: "@@share\\Album\\Get Lucky.flac" }), {
+      query,
+      versionPreference: "original",
+    }).breakdown.versionPreference;
+    const parentOnly = scoreTrack(
+      track({
+        peer: "parent",
+        path: "@@share\\Get Lucky (Extended Mix)\\06.flac",
+        basename: "06.flac",
+        folders: ["@@share", "Get Lucky (Extended Mix)"],
+        sizeBytes: 28 * MIB,
+        durationSeconds: 360,
+        bitDepth: 16,
+        sampleRateHz: 44100,
+      }),
+      { versionPreference: "extended" },
+    ).breakdown.versionPreference;
+    const stemOn = scoreTrack(
+      track({
+        peer: "stem",
+        path: "@@share\\Daft Punk - Get Lucky\\drums.ogg",
+        sizeBytes: 8 * MIB,
+        durationSeconds: 369,
+      }),
+      { query },
+    ).breakdown.stem;
+    const stemOff = scoreTrack(flacAt(28), { query }).breakdown.stem;
+
+    const qualityRange = span(qualityMin, qualityMax);
+    const formatRange = span(formatMin, formatMax);
+    const knownSizeRange = span(knownSizeMin, knownSizeMax);
+    const availabilityRange = span(availabilityMin, availabilityMax);
+    const belowFormat = knownSizeRange + availabilityRange;
+    const belowQuality = formatRange + belowFormat;
+    const belowVersion = qualityRange + belowQuality;
+
+    expect(formatRange).toBeGreaterThan(knownSizeRange);
+    expect(Math.min(...steepSizeScores)).toBeLessThan(knownSizeMin);
+
+    const durationFloor = Math.max(Math.min(...longScores), Math.min(...shortScores));
     const tiers: { name: string; values: number[]; lower: number }[] = [
       {
         name: "requestedVersion",
-        values: [0, SCORE_WEIGHTS.requestedVersion],
-        lower: span(0, SCORE_WEIGHTS.versionBasename) + qualityRange + belowQuality,
-      },
-      {
-        name: "longRecording",
-        values: [0, SCORE_WEIGHTS.longRecording],
-        lower: qualityRange + belowQuality,
+        values: [requestedOff, requestedOn],
+        lower: span(versionOff, versionOn) + belowVersion,
       },
       {
         name: "versionPreference",
-        values: [0, SCORE_WEIGHTS.versionBasename],
-        lower: qualityRange + belowQuality,
+        values: [versionOff, versionOn],
+        lower: belowVersion,
+      },
+      {
+        // Long-recording, short-recording, duration overshoot, and the steep size
+        // curve (unknown duration or a long/overshooting file) are one tier.
+        // The check uses the less severe of the long and short extremes, so a
+        // one-point difference between those two penalties is not a lower tier.
+        name: "duration",
+        values: [0, durationFloor],
+        lower: belowVersion,
       },
       {
         name: "quality",
@@ -471,34 +566,60 @@ describe("quality priority", () => {
       },
       {
         name: "stem",
-        values: [0, SCORE_WEIGHTS.stem],
+        values: [stemOff, stemOn],
         lower:
-          SCORE_WEIGHTS.requestedVersion +
-          SCORE_WEIGHTS.titleMatchBasename +
-          SCORE_WEIGHTS.artistInPath +
-          SCORE_WEIGHTS.versionBasename +
-          Math.max(0, qualityGood) +
-          Math.max(0, formatMax) +
-          Math.max(0, availabilityMax),
+          Math.max(requestedOn, 0) +
+          Math.max(matched.titleMatch, 0) +
+          Math.max(matched.artistInPath, 0) +
+          Math.max(versionOn, 0) +
+          Math.max(qualityMax, 0) +
+          Math.max(formatMax, 0) +
+          Math.max(availabilityMax, 0),
       },
     ];
 
     for (const tier of tiers) {
-      expect(smallestNonZeroGap(tier.values)).toBeGreaterThan(tier.lower);
+      const gap = smallestNonZeroGap(tier.values);
+      expect(gap).toBeGreaterThan(tier.lower);
     }
 
-    expect(smallestNonZeroGap([0, SCORE_WEIGHTS.longRecording])).toBeGreaterThan(SCORE_WEIGHTS.versionBasename);
+    const durationGap = Math.min(Math.abs(Math.min(...longScores)), Math.abs(Math.min(...shortScores)));
+    expect(durationGap).toBeGreaterThan(span(versionOff, versionOn));
 
-    // Known exception. versionCleanOriginal and versionParent are interior steps.
-    // Their gaps do not clear the quality range plus format, gentle size, and a
-    // normal peer, so a clean original or a parent-folder match can lose to that
-    // full swing. The basename bonus is the step that has to dominate.
-    const versionLower = qualityRange + belowQuality;
-    for (const partial of [SCORE_WEIGHTS.versionCleanOriginal, SCORE_WEIGHTS.versionParent]) {
+    // Known exception. The clean-original and parent-folder steps do not clear
+    // the quality range plus format, known-duration size, and a normal peer.
+    for (const partial of [cleanOriginal, parentOnly]) {
       expect(partial).toBeGreaterThan(0);
-      expect(partial).toBeLessThan(SCORE_WEIGHTS.versionBasename);
-      expect(partial).toBeLessThanOrEqual(versionLower);
+      expect(partial).toBeLessThan(versionOn);
+      expect(partial).toBeLessThanOrEqual(belowVersion);
     }
+  });
+
+  it("lets a known-duration 70 MiB FLAC beat a comparable MP3 under prefer_flac", () => {
+    const flac = flacAt(70, { peer: "album-flac", path: "@@share\\Album\\Get Lucky (Album Version).flac" });
+    const mp3 = lossy(320, {
+      peer: "album-mp3",
+      path: "@@share\\Album\\Get Lucky (Album Version).mp3",
+      sizeBytes: 14 * MIB,
+    });
+    const policy = { formatPreference: "prefer_flac" as const, versionPreference: "original" as const };
+    const flacScore = scoreTrack(flac, policy);
+    const mp3Score = scoreTrack(mp3, policy);
+    const formatGap =
+      scoreTrack(mp3, { formatPreference: "prefer_mp3" }).breakdown.format -
+      scoreTrack(mp3, { formatPreference: "auto" }).breakdown.format;
+    expect(flacScore.breakdown.durationOvershoot).toBe(0);
+    expect(flacScore.breakdown.longRecording).toBe(0);
+    expect(flacScore.breakdown.sizeOvershoot).toBeLessThan(0);
+    expect(flacScore.breakdown.sizeOvershoot).toBeGreaterThan(-formatGap);
+    expect(flacScore.breakdown.format).toBeGreaterThan(0);
+    expect(mp3Score.breakdown.format).toBe(0);
+    expect(selected([flac, mp3], policy).pick.peer).toBe("album-flac");
+
+    const only = selected([flac], { formatPreference: "flac_only" });
+    expect(only.pick.peer).toBe("album-flac");
+    expect(only.breakdown.sizeOvershoot).toBe(flacScore.breakdown.sizeOvershoot);
+    expect(only.breakdown.sizeOvershoot).toBeGreaterThan(-formatGap);
   });
 
   it("prefers a 42 MiB 16/44.1 FLAC on a queued peer over a 192 kbps MP3 on a fast free peer under prefer_mp3", () => {
@@ -525,6 +646,37 @@ describe("quality priority", () => {
     expect(mp3Score.breakdown.availability).toBeGreaterThan(flacScore.breakdown.availability);
     expect(flacScore.breakdown.sizeOvershoot).toBeLessThan(0);
     expect(selected([mp3, flac], policy).pick.peer).toBe("queued-flac");
+  });
+
+  it("penalizes a SYNTHETIC short remix and still lets an explicit request win", () => {
+    const fillers = [300, 340, 369, 400, 420].map((durationSeconds, index) =>
+      flacAt(40, { peer: `fill-${index}`, durationSeconds }),
+    );
+    const short = flacAt(12, {
+      peer: "SYNTHETIC-short",
+      path: "@@share\\SYNTHETIC\\Get Lucky (HOME Remix).flac",
+      durationSeconds: 105,
+    });
+    const full = flacAt(42, {
+      peer: "full-remix",
+      path: "@@share\\Album\\Get Lucky (Remix).flac",
+      durationSeconds: 369,
+    });
+    const saved = selected([short, full, ...fillers], {
+      query,
+      versionPreference: "remix",
+      formatPreference: "prefer_flac",
+    });
+    expect(saved.pick.peer).toBe("full-remix");
+    expect(saved.breakdown.shortRecording).toBe(0);
+
+    const requested = selected([short, ...fillers], {
+      query: { artist: "Daft Punk", title: "Get Lucky Remix" },
+      formatPreference: "prefer_flac",
+    });
+    expect(requested.pick.peer).toBe("SYNTHETIC-short");
+    expect(requested.breakdown.requestedVersion).toBe(SCORE_WEIGHTS.requestedVersion);
+    expect(requested.breakdown.shortRecording).toBeLessThan(0);
   });
 
   it("scores reported MP3 VBR at the VBR threshold as good and leaves other formats and CBR below 256 acceptable", () => {
