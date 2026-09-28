@@ -230,8 +230,6 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
   const providers = providerOptions(provider, ["slskd"]);
   const apiKeyConfigured = loaded?.secrets_present.slskd_api_key ?? false;
   const fieldSources = props.sources ?? loaded?.sources;
-  const preferredSizeLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.preferred_max_file_size_mb");
-  const preferredDurationLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.preferred_max_duration_seconds");
   const hardDurationLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.max_duration_seconds");
   const versionLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.version_preference");
   const formatLocked = readOnly || isEnvPinned(fieldSources, "acquisition.selection.format_preference");
@@ -260,12 +258,6 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
 
   function selectionError(): string | null {
     const body = selectionBody();
-    if (!Number.isFinite(body.preferred_max_file_size_mb) || body.preferred_max_file_size_mb <= 0) {
-      return "preferred_max_file_size_mb must be a positive number";
-    }
-    if (body.preferred_max_file_size_mb > hardFileMb) {
-      return "preferred_max_file_size_mb must be <= max_file_size_mb";
-    }
     if (!Number.isFinite(body.preferred_max_duration_seconds) || body.preferred_max_duration_seconds <= 0) {
       return "preferred_max_duration_seconds must be a positive number";
     }
@@ -392,19 +384,6 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
             The selector does not grade size below that cap. A file with no size never reaches it.
           </p>
           <label className="field">
-            <span>Preferred max file size (MiB)</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={preferredFileMb}
-              readOnly={preferredSizeLocked}
-              disabled={readOnly}
-              onChange={(e) => setPreferredFileMb(e.target.value)}
-            />
-          </label>
-          <SourceLine sources={fieldSources} path="acquisition.selection.preferred_max_file_size_mb" />
-          <label className="field">
             <span>Version preference</span>
             <select
               value={versionPreference}
@@ -423,19 +402,6 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
             Balanced ranks remix, club, and extended together, then an album or original, then a radio edit. A saved
             class moves to the front. A version named in the request turns the saved choice off.
           </p>
-          <label className="field">
-            <span>Preferred max duration (seconds)</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={preferredDuration}
-              readOnly={preferredDurationLocked}
-              disabled={readOnly}
-              onChange={(e) => setPreferredDuration(e.target.value)}
-            />
-          </label>
-          <SourceLine sources={fieldSources} path="acquisition.selection.preferred_max_duration_seconds" />
           <label className="field">
             <span>Hard max duration (seconds)</span>
             <input

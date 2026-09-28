@@ -122,9 +122,6 @@ function selectionPatch(current: RuntimeConfig["acquisition"]["selection"], body
     next.long_recording_phrases = body.long_recording_phrases.map((item) => item.trim());
   }
   const merged = { ...current, ...next };
-  if (merged.preferred_max_file_size_mb > merged.max_file_size_mb) {
-    throw new Error("preferred_max_file_size_mb must be <= max_file_size_mb");
-  }
   if (merged.max_duration_seconds != null && merged.preferred_max_duration_seconds > merged.max_duration_seconds) {
     throw new Error("preferred_max_duration_seconds must be <= max_duration_seconds");
   }

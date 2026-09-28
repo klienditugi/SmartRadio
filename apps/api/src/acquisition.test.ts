@@ -374,7 +374,7 @@ describe("A6 acquisition settings", () => {
     expect(stored.json().settings.verify_status).toBe("unverified");
   });
 
-  it("reads and writes selector policy, reports sources, and rejects a preferred value above the hard max", async () => {
+  it("reads and writes selector policy, reports sources, and keeps an ignored preferred size", async () => {
     const ctx = await adminApp();
     fixtures.push(ctx.cleanup);
     const before = await ctx.app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers: ctx.headers });
@@ -428,15 +428,15 @@ describe("A6 acquisition settings", () => {
     expect(invalid.json().error).toMatch(/version_preference/);
     expect(ctx.app.config.acquisition.selection.version_preference).toBe("radio_edit");
 
-    const tooBig = await ctx.app.inject({
+    const ignoredPreferred = await ctx.app.inject({
       method: "PUT",
       url: "/api/v1/acquisition/settings",
       headers: ctx.headers,
       payload: { selection: { preferred_max_file_size_mb: 250 } },
     });
-    expect(tooBig.statusCode).toBe(400);
-    expect(tooBig.json().error).toMatch(/preferred_max_file_size_mb/);
-    expect(ctx.app.config.acquisition.selection.preferred_max_file_size_mb).toBe(20);
+    expect(ignoredPreferred.statusCode).toBe(200);
+    expect(ignoredPreferred.json().selection.preferred_max_file_size_mb).toBe(250);
+    expect(ctx.app.config.acquisition.selection.preferred_max_file_size_mb).toBe(250);
 
     const tooLong = await ctx.app.inject({
       method: "PUT",
@@ -589,7 +589,85 @@ acquisition:
     expect(notes).toContain("preferred_max_file_size_mb");
     expect(notes).toContain("min_file_size_mb");
     expect(notes).toContain("max_file_size_mb");
+    expect(notes).not.toContain("recommended web-radio value is 30");
     const deprecation = (doctor.json().notes as string[]).filter((note) => note.includes("deprecated and ignored")).join("\n");
     expect(deprecation).not.toMatch(/password|api_key|secret|true|false|\b36\b|\b0\b/i);
+  });
+
+  it("doctor warns when max_file_size_mb is above 30 and a hard max of 25 still loads", async () => {
+    resetDeprecatedSelectionWarning();
+    const dir = mkdtempSync(path.join(os.tmpdir(), "subwave-api-size-"));
+    const secrets = path.join(dir, "secrets");
+    mkdirSync(secrets);
+    writeFileSync(path.join(secrets, "admin_password"), "test-admin-password");
+    writeFileSync(path.join(secrets, "session_secret"), "test-session-secret");
+    const cfgPath = path.join(dir, "subwave.yaml");
+    const yaml = (max: number) => `
+server:
+  host: "127.0.0.1"
+  port: 8788
+database:
+  path: ":memory:"
+paths:
+  secrets_dir: "${secrets}"
+  downloads: "${path.join(dir, "downloads")}"
+  staging: "${path.join(dir, "staging")}"
+  library: "${path.join(dir, "library")}"
+acquisition:
+  provider: slskd
+  base_url: ""
+  selection:
+    max_file_size_mb: ${max}
+    preferred_max_file_size_mb: 30
+`;
+    writeFileSync(cfgPath, yaml(200));
+    const warned = loadConfig({ configPath: cfgPath, env: {} });
+    const warnedDb = testDb(warned);
+    const warnedApp = await buildApp({ config: warned, db: warnedDb, serveWeb: false, logger: false });
+    const doctor = await warnedApp.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(doctor.statusCode).toBe(200);
+    expect(doctor.json().ok).toBe(true);
+    const notes = (doctor.json().notes as string[]).join("\n");
+    expect(notes).toContain("max_file_size_mb is above 30");
+    expect(notes).toContain("recommended web-radio value is 30");
+    expect(doctor.json().acquire_unavailable).toBe(true);
+    await warnedApp.close();
+
+    resetDeprecatedSelectionWarning();
+    writeFileSync(cfgPath, yaml(25));
+    const tight = loadConfig({ configPath: cfgPath, env: {} });
+    expect(tight.acquisition.selection.max_file_size_mb).toBe(25);
+    expect(tight.acquisition.selection.preferred_max_file_size_mb).toBe(30);
+    const tightDb = testDb(tight);
+    const app = await buildApp({ config: tight, db: tightDb, serveWeb: false, logger: false });
+    fixtures.push(() => {
+      void app.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    const quiet = await app.inject({ method: "GET", url: "/api/v1/doctor" });
+    expect(quiet.statusCode).toBe(200);
+    expect(quiet.json().ok).toBe(true);
+    expect((quiet.json().notes as string[]).join("\n")).not.toContain("recommended web-radio value is 30");
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "admin", password: "test-admin-password" },
+    });
+    expect(login.statusCode).toBe(200);
+    const headers = { authorization: `Bearer ${(login.json() as { token: string }).token}` };
+    const settings = await app.inject({ method: "GET", url: "/api/v1/acquisition/settings", headers });
+    expect(settings.statusCode).toBe(200);
+    expect(settings.json().selection.max_file_size_mb).toBe(25);
+    expect(settings.json().selection.preferred_max_file_size_mb).toBe(30);
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/v1/acquisition/settings",
+      headers,
+      payload: { selection: { version_preference: "remix" } },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().selection.max_file_size_mb).toBe(25);
+    expect(saved.json().selection.preferred_max_file_size_mb).toBe(30);
+    expect(saved.json().selection.version_preference).toBe("remix");
   });
 });

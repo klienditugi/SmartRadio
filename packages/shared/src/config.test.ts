@@ -382,15 +382,24 @@ acquisition:
       long_recording_phrases: [...DEFAULT_LONG_RECORDING_PHRASES],
       instrument_part_basenames: [...DEFAULT_INSTRUMENT_PART_BASENAMES],
     });
-    expect(() =>
-      parseAppConfig({
-        ...exampleYamlObject,
-        acquisition: {
-          ...exampleYamlObject.acquisition,
-          selection: { preferred_max_file_size_mb: 250, max_file_size_mb: 200 },
-        },
-      }),
-    ).toThrow(/preferred_max_file_size_mb/);
+    const ignoredPreferred = parseAppConfig({
+      ...exampleYamlObject,
+      acquisition: {
+        ...exampleYamlObject.acquisition,
+        selection: { preferred_max_file_size_mb: 250, max_file_size_mb: 200 },
+      },
+    });
+    expect(ignoredPreferred.acquisition.selection.preferred_max_file_size_mb).toBe(250);
+    expect(ignoredPreferred.acquisition.selection.max_file_size_mb).toBe(200);
+    const hard25 = parseAppConfig({
+      ...exampleYamlObject,
+      acquisition: {
+        ...exampleYamlObject.acquisition,
+        selection: { max_file_size_mb: 25 },
+      },
+    });
+    expect(hard25.acquisition.selection.max_file_size_mb).toBe(25);
+    expect(hard25.acquisition.selection.preferred_max_file_size_mb).toBe(DEFAULT_PREFERRED_MAX_FILE_SIZE_MB);
     expect(() =>
       parseAppConfig({
         ...exampleYamlObject,
@@ -497,6 +506,64 @@ acquisition:
     expect(doctorNotes).toContain("extended_version_bonus");
     expect(doctorNotes).toContain("lossless_preference");
     expect(warned.join("\n")).toContain("deprecated and ignored");
+    spy.mockRestore();
+  });
+
+  it("warns when max_file_size_mb is above 30 and still loads a hard max of 25", () => {
+    resetDeprecatedSelectionWarning();
+    const warned: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((message) => {
+      warned.push(String(message));
+    });
+    const dir = mkdtempSync(path.join(os.tmpdir(), "subwave-cfg-size-"));
+    const secrets = path.join(dir, "secrets");
+    mkdirSync(secrets);
+    writeFileSync(path.join(secrets, "admin_password"), "test-admin-secret\n");
+    writeFileSync(path.join(secrets, "session_secret"), "test-session-secret\n");
+    const cfgPath = path.join(dir, "subwave.yaml");
+    const yaml = (max: number) => `
+server:
+  host: "127.0.0.1"
+  port: 8788
+database:
+  path: ":memory:"
+paths:
+  secrets_dir: "${secrets}"
+  downloads: "${path.join(dir, "downloads")}"
+  staging: "${path.join(dir, "staging")}"
+  library: "${path.join(dir, "library")}"
+acquisition:
+  selection:
+    max_file_size_mb: ${max}
+    preferred_max_file_size_mb: 30
+`;
+    writeFileSync(cfgPath, yaml(200));
+    const copied = loadConfig({ configPath: cfgPath, env: {} });
+    expect(copied.acquisition.selection.max_file_size_mb).toBe(200);
+    const copiedNotes = (copied.deprecation_notes ?? []).join("\n");
+    expect(copiedNotes).toContain("recommended web-radio value is 30");
+    expect(copiedNotes).toContain("max_file_size_mb is above 30");
+    expect(warned.join("\n")).toContain("recommended web-radio value is 30");
+
+    resetDeprecatedSelectionWarning();
+    warned.length = 0;
+    writeFileSync(cfgPath, yaml(30));
+    const current = loadConfig({ configPath: cfgPath, env: {} });
+    expect(current.acquisition.selection.max_file_size_mb).toBe(30);
+    expect((current.deprecation_notes ?? []).join("\n")).not.toContain("recommended web-radio value is 30");
+    expect(warned.join("\n")).not.toContain("recommended web-radio value is 30");
+
+    resetDeprecatedSelectionWarning();
+    writeFileSync(cfgPath, yaml(30));
+    const fromEnv = loadConfig({ configPath: cfgPath, env: { SLSKD_MAX_FILE_SIZE_MB: "200" } });
+    expect(fromEnv.acquisition.selection.max_file_size_mb).toBe(200);
+    expect((fromEnv.deprecation_notes ?? []).join("\n")).toContain("recommended web-radio value is 30");
+
+    writeFileSync(cfgPath, yaml(25));
+    const tight = loadConfig({ configPath: cfgPath, env: {} });
+    expect(tight.acquisition.selection.max_file_size_mb).toBe(25);
+    expect(tight.acquisition.selection.preferred_max_file_size_mb).toBe(30);
+    expect((tight.deprecation_notes ?? []).join("\n")).not.toContain("recommended web-radio value is 30");
     spy.mockRestore();
   });
 

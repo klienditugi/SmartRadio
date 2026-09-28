@@ -176,7 +176,7 @@ const acquisitionSelectionSchema = z
     max_duration_seconds: z.number().positive().nullable().default(DEFAULT_MAX_DURATION_SECONDS),
     /**
      * Unused by the selector. Kept so older yaml still parses.
-     * Must be less than or equal to max_file_size_mb.
+     * Not compared to max_file_size_mb.
      */
     preferred_max_file_size_mb: z.number().positive().default(DEFAULT_PREFERRED_MAX_FILE_SIZE_MB),
     /**
@@ -231,13 +231,6 @@ const acquisitionSelectionSchema = z
     instrument_part_basenames: z.array(z.string().min(1)).default(() => [...DEFAULT_INSTRUMENT_PART_BASENAMES]),
   })
   .superRefine((value, ctx) => {
-    if (value.preferred_max_file_size_mb > value.max_file_size_mb) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["preferred_max_file_size_mb"],
-        message: "preferred_max_file_size_mb must be <= max_file_size_mb",
-      });
-    }
     if (value.max_duration_seconds != null && value.preferred_max_duration_seconds > value.max_duration_seconds) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -413,6 +406,12 @@ export function resetDeprecatedSelectionWarning(): void {
   selectionDeprecationLogged = false;
 }
 
+/** Doctor warning when a copied install still rejects above the old 200 MiB example. */
+export function maxFileSizeUpgradeNote(maxFileSizeMb: number): string | null {
+  if (!(maxFileSizeMb > DEFAULT_MAX_FILE_SIZE_MB)) return null;
+  return `max_file_size_mb is above ${DEFAULT_MAX_FILE_SIZE_MB}. The recommended web-radio value is ${DEFAULT_MAX_FILE_SIZE_MB}. Existing installs should set acquisition.selection.max_file_size_mb to ${DEFAULT_MAX_FILE_SIZE_MB}.`;
+}
+
 export function warnDeprecatedSelection(notes: readonly string[]): void {
   if (selectionDeprecationLogged || notes.length === 0) return;
   selectionDeprecationLogged = true;
@@ -532,6 +531,8 @@ export function loadConfig(options: LoadConfigOptions = {}): RuntimeConfig {
   const parsed = parseAppConfig(overridden);
   warnDeprecatedVerifyStatus(overridden, env);
   const deprecation_notes = selectionDeprecationNotes(rawObject, env);
+  const sizeNote = maxFileSizeUpgradeNote(parsed.acquisition.selection.max_file_size_mb);
+  if (sizeNote) deprecation_notes.push(sizeNote);
   warnDeprecatedSelection(deprecation_notes);
   for (const section of VERIFY_STATUS_SECTIONS) {
     parsed[section].verify_status = "unverified";

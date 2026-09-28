@@ -158,7 +158,7 @@ describe("AcquisitionForm", () => {
     expect(document.body.textContent).not.toContain(LEAKED);
   });
 
-  it("edits selector policy, shows the source, and blocks a preferred duration above the hard cap", async () => {
+  it("edits selector policy, shows the source, and hides the unused preferred fields", async () => {
     const calls: Call[] = [];
     installFetch(calls);
     render(
@@ -179,10 +179,10 @@ describe("AcquisitionForm", () => {
         }}
       />,
     );
-    const preferred = (await screen.findByLabelText("Preferred max file size (MiB)")) as HTMLInputElement;
+    await screen.findByLabelText("Version preference");
+    expect(screen.queryByLabelText("Preferred max file size (MiB)")).toBeNull();
+    expect(screen.queryByLabelText("Preferred max duration (seconds)")).toBeNull();
     expect(document.body.textContent).toContain("1 MiB = 1,048,576 bytes");
-    expect(preferred.value).toBe("30");
-    expect(screen.getAllByText("source: default").length).toBeGreaterThan(0);
     expect(screen.getByText("source: yaml")).toBeTruthy();
     const hard = screen.getByLabelText("Hard max duration (seconds)") as HTMLInputElement;
     expect(hard.readOnly).toBe(true);
@@ -199,22 +199,16 @@ describe("AcquisitionForm", () => {
     expect(screen.getByRole("option", { name: "Radio edit" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "MP3 only" })).toBeTruthy();
 
-    fireEvent.change(preferred, { target: { value: "20" } });
     fireEvent.change(version, { target: { value: "radio_edit" } });
     fireEvent.click(screen.getByRole("button", { name: "Save acquisition" }));
     await screen.findByText(/Saved\. A filled-in form is not a connection/);
     const put = calls.find((call) => call.method === "PUT");
     expect(put?.body?.selection).toMatchObject({
-      preferred_max_file_size_mb: 20,
+      preferred_max_file_size_mb: 30,
       preferred_max_duration_seconds: 720,
       max_duration_seconds: 1200,
       version_preference: "radio_edit",
       format_preference: "prefer_mp3",
     });
-
-    fireEvent.change(screen.getByLabelText("Preferred max duration (seconds)"), { target: { value: "2000" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save acquisition" }));
-    expect(await screen.findByText("preferred_max_duration_seconds must be <= max_duration_seconds")).toBeTruthy();
-    expect(calls.filter((call) => call.method === "PUT")).toHaveLength(1);
   });
 });

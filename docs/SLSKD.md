@@ -37,7 +37,7 @@ Selection does not call an LLM. The slskd adapter maps search JSON into a provid
 
 The same payload and settings always pick the same file. The last two comparisons are username, then path.
 
-Keys live under `acquisition.selection` (see `config/subwave.example.yaml`). Sizes are MiB. 1 MiB = 1,048,576 bytes. The `_mb` key names stay as they are. The settings screen edits version preference, format preference, and the duration cap. Version and format are dropdowns. Each field reports `source`: `env`, `yaml`, or `default`. A value set in the environment is read-only in the UI and a different value is rejected with 409. An invalid enum is rejected with 400.
+Keys live under `acquisition.selection` (see `config/subwave.example.yaml`). Sizes are MiB. 1 MiB = 1,048,576 bytes. The `_mb` key names stay as they are. The settings screen edits version preference, format preference, and the duration cap. It does not show preferred max file size or preferred max duration. Version and format are dropdowns. Each field reports `source`: `env`, `yaml`, or `default`. A value set in the environment is read-only in the UI and a different value is rejected with 409. An invalid enum is rejected with 400.
 
 Optional env overrides: `SLSKD_MAX_FILE_SIZE_MB`, `SLSKD_MIN_FILE_SIZE_MB`, `SLSKD_PREFERRED_MAX_FILE_SIZE_MB`, `SLSKD_MAX_DURATION_SECONDS`, `SLSKD_PREFERRED_MAX_DURATION_SECONDS`, `SLSKD_VERSION_PREFERENCE`, `SLSKD_FORMAT_PREFERENCE`, `SLSKD_MAX_SAMPLE_RATE`, `SLSKD_MAX_BIT_DEPTH`.
 
@@ -49,7 +49,7 @@ These run before ranking. Each removed file increments one reason. The dry-run p
 
 Files in `lockedFiles`, or with `isLocked: true`, are never chosen. Real slskd puts locked hits only in `lockedFiles`, often with `isLocked: false`. Those rows are still mapped as locked. An empty `extension` uses the filename. A junk extension such as `flac@synoeastream` is ignored and the filename is used instead. A basename that starts with `._`, or any path segment named `__MACOSX`, is junk.
 
-A file smaller than `min_file_size_mb` (default 1 MiB) is rejected. The adapter does not hand the selector a file with no positive size, so an unknown size never gets a special score. A file larger than `max_file_size_mb` (default 30 MiB) is rejected. There is no graded size curve. `files.max_bytes` is a separate byte count.
+A file smaller than `min_file_size_mb` (default 1 MiB) is rejected. The adapter does not hand the selector a file with no positive size, so an unknown size never gets a special score. A file larger than `max_file_size_mb` (default 30 MiB) is rejected. There is no graded size curve. `files.max_bytes` is a separate byte count. Existing installs that copied an older example with `max_file_size_mb: 200` should set `acquisition.selection.max_file_size_mb` to 30. Doctor warns when the resolved value is above 30. That warning is not an error, and the process still starts.
 
 `max_duration_seconds` (default 1200) applies when the file reports a duration. Null disables it. A missing duration is not over the cap and is not a short recording. `max_sample_rate` (default 48000 Hz) and `max_bit_depth` (default 24) reject a file that reports a higher value. A file that omits the field stays eligible.
 
