@@ -8,8 +8,9 @@
  * Rejects, before any ranking:
  *   locked, junk paths, extensions, mp3_only / flac_only,
  *   files under min_file_size_mb,
- *   wrong title (the title is a phrase, not a bag of words), a medley that names
- *   two other songs, a tribute/cover basename,
+ *   wrong title (the title is a phrase, not a bag of words; punctuation is
+ *   spaces before that comparison), a medley that names
+ *   two other songs, a tribute or the word cover in the basename,
  *   a different artist leading the basename when this artist is only in folders,
  *   stems, long-recording phrases, bitrate under 128 kbps,
  *   files over max_file_size_mb (default 30 MiB), duration, sample rate, bit depth,
@@ -722,13 +723,28 @@ function differentArtistLeads(rawBase: string, artistTokens: readonly string[], 
   return true;
 }
 
+function openerCloses(raw: string, from: number, open: string, close: string): boolean {
+  let depth = 0;
+  for (let i = from; i < raw.length; i++) {
+    const ch = raw[i] ?? "";
+    if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return true;
+    }
+  }
+  return false;
+}
+
 function splitOutsideBrackets(raw: string): string[] {
   const parts: string[] = [];
   let current = "";
   let depth = 0;
+  const pairs: Record<string, string> = { "(": ")", "[": "]", "{": "}" };
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i] ?? "";
-    if ("([{".includes(ch)) depth += 1;
+    const close = pairs[ch];
+    if (close && openerCloses(raw, i, ch, close)) depth += 1;
     else if (")]}".includes(ch) && depth > 0) depth -= 1;
     const dash = raw.slice(i, i + 3);
     if (depth === 0 && /^\s[-–—]\s$/.test(dash)) {
@@ -743,8 +759,14 @@ function splitOutsideBrackets(raw: string): string[] {
   return parts.map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
+function stripWebNoise(raw: string): string {
+  return raw.replace(/\bhttps?:\/\/\S+/gi, " ").replace(/\bwww\.\S+/gi, " ");
+}
+
 function stripBracketed(raw: string): string {
-  return raw.replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*\)/g, " ").replace(/\{[^}]*\}/g, " ");
+  let text = raw.replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*\)/g, " ").replace(/\{[^}]*\}/g, " ");
+  text = text.replace(/\[[^\]]*$/g, " ").replace(/\([^)]*$/g, " ").replace(/\{[^}]*$/g, " ");
+  return text.replace(/[()[\]{}]/g, " ");
 }
 
 /** Leftover words that may sit beside the title phrase: artists, credits, versions, track numbers, key/BPM tags. */
@@ -753,7 +775,11 @@ function titleLeftovers(segment: string, phrase: string, artistTokens: readonly 
     new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "gi"),
     " ",
   );
-  const withoutCredit = stripped.replace(/\b(?:feat|ft|featuring)\b[\s\S]*$/i, " ").replace(/\s+/g, " ").trim();
+  const withoutCredit = stripped
+    .replace(/\b(?:feat|ft|featuring|with|w)\b[\s\S]*$/i, " ")
+    .replace(/^(?:dj\s+[a-z0-9]+\s*)+/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   const allowed = new Set([
     ...artistTokens,
     ...CREDIT_WORDS,
@@ -768,9 +794,20 @@ function titleLeftovers(segment: string, phrase: string, artistTokens: readonly 
     "hz",
     "kbps",
     "audio",
+    "edition",
+    "drumless",
+    "remaster",
+    "remastered",
+    "deluxe",
+    "anniversary",
   ]);
   return significantTokens(withoutCredit).filter(
-    (token) => token.length > 0 && !allowed.has(token) && !/^\d+$/.test(token) && !/^\d+[ab]$/i.test(token),
+    (token) =>
+      token.length > 0 &&
+      !allowed.has(token) &&
+      !/^\d+$/.test(token) &&
+      !/^\d+[ab]$/i.test(token) &&
+      !/^\d+k\d+$/i.test(token),
   );
 }
 
@@ -778,24 +815,60 @@ function segmentCarriesTitle(segment: string, phrase: string): boolean {
   return hasPhrase(normalizeMatchText(stripBracketed(segment)), phrase);
 }
 
+function segmentHasVersion(segment: string, outsideBrackets: boolean): boolean {
+  const raw = outsideBrackets ? stripBracketed(segment) : segment;
+  const text = normalizeMatchText(raw);
+  return hasAnyPhrase(text, TITLE_STRIP_PHRASES) || hasNamedProducerEdit(text);
+}
+
+/**
+ * A clean title field has only allowed words beside the phrase.
+ * A version marker outside brackets means the other words are the remixer's, not another song.
+ * A version marker only inside brackets allows one trailing tag (a release-group suffix).
+ */
 function titleSegmentIsClean(segment: string, phrase: string, artistTokens: readonly string[]): boolean {
-  return segmentCarriesTitle(segment, phrase) && titleLeftovers(segment, phrase, artistTokens).length === 0;
+  if (!segmentCarriesTitle(segment, phrase)) return false;
+  const leftovers = titleLeftovers(segment, phrase, artistTokens);
+  if (leftovers.length === 0) return true;
+  // An underscore in the same field joins another title (`_Rock with You_`). Remixer
+  // words are allowed only when the version marker is not sharing that join.
+  if (segmentHasVersion(segment, true) && !segment.includes("_")) return true;
+  return leftovers.length === 1 && segmentHasVersion(segment, false);
+}
+
+function titlePieces(rawBase: string): string[] {
+  return splitOutsideBrackets(rawBase).flatMap((segment) => medleyPieces(segment));
+}
+
+function piecesMatchTitle(pieces: readonly string[], phrase: string, artistTokens: readonly string[]): boolean {
+  const carriers = pieces.filter((segment) => segmentCarriesTitle(segment, phrase));
+  return carriers.length > 0 && carriers.every((segment) => titleSegmentIsClean(segment, phrase, artistTokens));
 }
 
 /**
  * The title is a contiguous phrase, not a bag of words.
- * Extra words in that basename segment must be artist names, credits, version
- * markers, parentheticals, track numbers, or key/BPM tags. A folder supplies
- * the title only when the basename does not carry the phrase at all.
+ * Punctuation (underscores, dots, hyphens) is spaces before that comparison,
+ * same as artist tokens. A ` - ` segment can carry the phrase. An underscore
+ * can also separate scene fields (`Artist_Album_08_Title`), and a clean field
+ * is enough. Extra words in the title field must be artist names, credits,
+ * version markers, parentheticals, track numbers, or key/BPM tags.
+ * A folder supplies the title only when the basename does not carry the phrase at all.
  */
 function titleEvidence(track: CandidateTrack, titleTokens: readonly string[] | null, artistTokens: readonly string[]): boolean {
   if (!titleTokens || titleTokens.length === 0) return true;
   const phrase = titleTokens.join(" ");
-  const segments = splitOutsideBrackets(rawBasename(track)).flatMap((segment) => medleyPieces(segment));
-  const carriers = segments.filter((segment) => segmentCarriesTitle(segment, phrase));
-  if (carriers.length > 0) return carriers.every((segment) => titleSegmentIsClean(segment, phrase, artistTokens));
+  const base = stripWebNoise(rawBasename(track));
+  const pieces = titlePieces(base);
+  if (piecesMatchTitle(pieces, phrase, artistTokens)) return true;
+  const fields = pieces.flatMap((segment) => segment.split("_").map((part) => part.trim()).filter((part) => part.length > 0));
+  if (piecesMatchTitle(fields, phrase, artistTokens)) return true;
   if (hasPhrase(basenameText(track), phrase)) return false;
   return track.folders.some((folder) => titleSegmentIsClean(folder, phrase, artistTokens));
+}
+
+/** Whole word in the basename only. A folder named cover, or cover.jpg, is not this. */
+function basenameHasCoverWord(track: CandidateTrack): boolean {
+  return /\bcovers?\b/.test(basenameText(track));
 }
 
 function identityRejection(
@@ -806,6 +879,7 @@ function identityRejection(
   const artists = artistTokenList(policy.query);
   const artist = typeof policy.query.artist === "string" ? policy.query.artist : "";
   const base = rawBasename(track);
+  if (basenameHasCoverWord(track)) return "tribute_or_cover";
   if (titleTokens && !titleEvidence(track, titleTokens, artists)) return "title_mismatch";
   if (isMedleyName(base, titleTokens, artists) || isMedleyName(albumFolderRaw(track), titleTokens, artists)) {
     return "medley";

@@ -220,6 +220,37 @@ describe("ordered selector", () => {
     expect(selected([folderTitle]).pick.peer).toBe("folder-title");
     expect(scoreTrack(folderTitle, { query }).breakdown.titleMatch).toBe(1);
 
+    const scene = [
+      "08-daft_punk-get_lucky_(feat._pharrell_williams_and_nile_rodgers).flac",
+      "Daft_Punk-Get_Lucky.mp3",
+      "201-daft_punk_ft._pharrell_williams-get_lucky.flac",
+      "102_daft_punk_feat.pharrell_williams-get_lucky.mp3",
+      "06-daft_punk_(feat._pharrell_williams)-get_lucky_(116_bpm).mp3",
+      "Get_Lucky_(feat._Pharrell_Williams_and_Nile_Rodgers).flac",
+      "Daft Punk_Random Access Memories_08_Get Lucky.flac",
+    ];
+    for (const name of scene) {
+      const file = mp3(name, name);
+      expect(scoreTrack(file, { query }).breakdown.titleMatch).toBe(1);
+      if (name.toLowerCase().includes("daft")) {
+        expect(scoreTrack(file, { query }).breakdown.artistInPath).toBe(1);
+      }
+    }
+    const djEdit = mp3("dj-edit", "DJ Example Get Lucky.mp3");
+    const unclosed = mp3("unclosed", "Daft Punk (Feat. Name - Get Lucky (Remix).mp3");
+    expect(scoreTrack(djEdit, { query }).breakdown.titleMatch).toBe(1);
+    expect(scoreTrack(unclosed, { query }).breakdown.titleMatch).toBe(1);
+    const underscoredArtist = mp3("artist", "daft_punk-get_lucky.mp3");
+    expect(scoreTrack(underscoredArtist, { query }).breakdown.artistInPath).toBe(1);
+    const gluedMashup = mp3("glued", "Daft Punk and Someone _Other Song and Get Lucky_ Remix Mashup.mp3");
+    const woman = mp3("woman", "Destiny's Child X Daft Punk - Independant Woman X Get Lucky.mp3");
+    const luckyMusic = mp3("lucky-music", "Get Lucky Music.mp3");
+    for (const wrong of [woman, luckyMusic, gluedMashup]) {
+      const decision = selectTracks([wrong], { query });
+      expect(decision.outcome).toBe("no_suitable_result");
+      if (decision.outcome === "no_suitable_result") expect(decision.removed.title_mismatch).toBe(1);
+    }
+
     const singleOther = mp3("single", "Get Lucky _ Contact.mp3");
     expect(selected([singleOther]).pick.peer).toBe("single");
     const production = mp3("hd", "Get Lucky (club mix) (24bit88.2kHz) FOR HD PRODUCTION.wav", {
@@ -265,6 +296,32 @@ describe("ordered selector", () => {
     if (coverOnly.outcome === "no_suitable_result") expect(coverOnly.removed.tribute_or_cover).toBe(1);
     if (medleyOnly.outcome === "no_suitable_result") expect(medleyOnly.removed.medley).toBe(1);
     expect(selected([titleFirst, cover, medley]).pick.peer).toBe("title-first");
+
+    const leadingCover = mp3("bachata", "Daft Punk - Get Lucky - ( LJ & Willy William Bachata Version ) Cover.mp3");
+    const silver = mp3("silver", "Daft Punk - Get Lucky (Silver Nail Cover Mix).mp3");
+    const barnett = mp3("barnett", "Daft Punk- Get Lucky  George Barnett cover.mp3");
+    const kaevohia = mp3("kaevohia", "daft_punk-get_lucky_(kaevohia_cover's_remix_edit).m4a");
+    const stepkids = mp3("stepkids", "Get Lucky - Daft Punk (The Stepkids' Cover).mp3");
+    for (const file of [leadingCover, silver, barnett, kaevohia, stepkids]) {
+      const decision = selectTracks([file], { query });
+      expect(decision.outcome).toBe("no_suitable_result");
+      if (decision.outcome === "no_suitable_result") expect(decision.removed.tribute_or_cover).toBe(1);
+    }
+    expect(fileVersionClass(leadingCover)).toBe("remix");
+    const inCoverFolder = mp3("album", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\cover\\Daft Punk - Get Lucky.mp3",
+    });
+    const image = mp3("image", "cover.jpg", { path: "music\\Daft Punk - Get Lucky\\cover.jpg" });
+    const withImage = selectTracks([inCoverFolder, image], {
+      query,
+      allowedExtensions: [".mp3", ".flac", ".m4a", ".ogg", ".wav"],
+    });
+    expect(withImage.outcome).toBe("selected");
+    if (withImage.outcome === "selected") {
+      expect(withImage.pick.peer).toBe("album");
+      expect(withImage.removed.tribute_or_cover).toBe(0);
+      expect(withImage.removed.extensions).toBe(1);
+    }
   });
 
   it("ranks acceptable above poor, then format, then peer, then username", () => {
