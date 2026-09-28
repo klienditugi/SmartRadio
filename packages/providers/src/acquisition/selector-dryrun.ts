@@ -27,7 +27,7 @@ export type DryRunRow = {
   bitrateKbps?: number;
   titleMatch?: number;
   artistInPath?: number;
-  removed?: SearchSelection extends { removed: infer R } ? R : never;
+  removed?: Extract<SearchSelection, { removed: unknown }>["removed"];
   reason?: string;
   queryTitle?: string;
 };
