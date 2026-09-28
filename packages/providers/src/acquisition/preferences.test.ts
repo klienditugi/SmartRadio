@@ -159,7 +159,10 @@ describe("real artist and title rows", () => {
     return only((response, file) => response.username === username && file.filename.includes(needle));
   }
 
-  function rejectedAs(payload: SearchPayload, reason: "medley" | "tribute_or_cover" | "stem" | "short_recording" | "max_file_size") {
+  function rejectedAs(
+    payload: SearchPayload,
+    reason: "title_mismatch" | "medley" | "tribute_or_cover" | "stem" | "short_recording" | "max_file_size",
+  ) {
     const decision = run(payload);
     expect(decision.outcome).toBe("no_suitable_result");
     if (decision.outcome !== "no_suitable_result") return;
@@ -177,7 +180,7 @@ describe("real artist and title rows", () => {
   }
 
   it("rejects the tribute medley, the Daughter covers, a stem, and a short file", () => {
-    rejectedAs(one("peer-192", "Nu Deco Ensemble"), "medley");
+    rejectedAs(one("peer-192", "Nu Deco Ensemble"), "title_mismatch");
     rejectedAs(one("peer-013", "Daughter - Get Lucky"), "tribute_or_cover");
     rejectedAs(one("peer-097", "Daughter - Get Lucky"), "tribute_or_cover");
     rejectedAs(one("peer-018", "Daughter - Get Lucky"), "tribute_or_cover");

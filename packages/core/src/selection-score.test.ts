@@ -199,21 +199,37 @@ describe("ordered selector", () => {
     expect(decision.removed.under_bitrate).toBe(1);
   });
 
-  it("requires the title as a phrase and two other medley titles", () => {
+  it("requires the title phrase to start at a boundary in the original basename", () => {
     const leadingYou = mp3("you", "Tom Petty X Daft Punk - You Get Lucky (Adam Dutch Segue).mp3");
+    const woman = mp3("woman", "Destiny's Child X Daft Punk - Independant Woman X Get Lucky.mp3");
+    const gluedMashup = mp3("glued", "Daft Punk and Someone _Other Song and Get Lucky_ Remix Mashup.mp3");
+    const djEdit = mp3("dj-edit", "DJ Example Get Lucky.mp3");
+    const spacedArtist = mp3("spaced", "Daft Punk get lucky.mp3");
+    const afterBracket = mp3("bracket", "08 [Daft Punk, Pharrell Williams] Get Lucky.flac");
+    for (const wrong of [leadingYou, woman, gluedMashup, djEdit, spacedArtist, afterBracket]) {
+      const decision = selectTracks([wrong], { query });
+      expect(decision.outcome).toBe("no_suitable_result");
+      if (decision.outcome === "no_suitable_result") expect(decision.removed.title_mismatch).toBe(1);
+    }
+
     const mind = mp3("mind", "Get Lucky Mind Control (HALFSTEP Mashup).mp3");
     const forTheMusic = mp3("music", "Daft Punk - Get Lucky For The Music.mp3");
     const skeletons = mp3("gold", "Andrew Gold - Spooky Scary Skeletons (Remixed with Daft Punk - Get Lucky).mp3");
+    const luckyMusic = mp3("lucky-music", "Get Lucky Music.mp3");
+    expect(scoreTrack(mind, { query }).breakdown.titleMatch).toBe(1);
+    expect(fileVersionClass(mind)).toBe("remix");
+    expect(scoreTrack(forTheMusic, { query }).breakdown.titleMatch).toBe(1);
+    expect(fileVersionClass(forTheMusic)).toBe("original");
+    expect(scoreTrack(skeletons, { query }).breakdown.titleMatch).toBe(1);
+    expect(fileVersionClass(skeletons)).toBe("original");
+    expect(scoreTrack(luckyMusic, { query }).breakdown.titleMatch).toBe(1);
+    expect(fileVersionClass(luckyMusic)).toBe("original");
+
     const oneJoin = mp3("allan", "06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg).mp3");
     const pantelis = mp3("pantelis", "Get Lucky (Dj Pantelis Private Mix) - Dj Pantelis Does Daft Punk.mp3");
     const folderTitle = mp3("folder-title", "1 - remix.flac", {
       path: "@@share\\Daft Punk\\Get Lucky (Daft Punk remix)\\1 - remix.flac",
     });
-    for (const wrong of [leadingYou, mind, forTheMusic, skeletons]) {
-      const decision = selectTracks([wrong], { query });
-      expect(decision.outcome).toBe("no_suitable_result");
-      if (decision.outcome === "no_suitable_result") expect(decision.removed.title_mismatch).toBe(1);
-    }
     expect(fileVersionClass(oneJoin)).toBe("remix");
     expect(selected([oneJoin]).pick.peer).toBe("allan");
     expect(selected([pantelis]).pick.peer).toBe("pantelis");
@@ -228,6 +244,15 @@ describe("ordered selector", () => {
       "06-daft_punk_(feat._pharrell_williams)-get_lucky_(116_bpm).mp3",
       "Get_Lucky_(feat._Pharrell_Williams_and_Nile_Rodgers).flac",
       "Daft Punk_Random Access Memories_08_Get Lucky.flac",
+      "16. Get Lucky (Radio Edit) [Daft Punk ft. Pharrell Williams] iskal.mp3",
+      "DAFT PUNK - GET LUCKY SFM REMIX.mp3",
+      "Daft Punk - Get Lucky Remix Electro R5.mp3",
+      "Daft Punk-Get Lucky (dj Ko Remix) www.my-free-mp3.net .mp3",
+      "10A - 117 - Get Lucky.mp3",
+      "1-08 Get Lucky.mp3",
+      "1.08. Get Lucky.flac",
+      "1 8 Get Lucky.flac",
+      "Daft Punk_Random Access Memories_01-08_Get Lucky.flac",
     ];
     for (const name of scene) {
       const file = mp3(name, name);
@@ -236,20 +261,10 @@ describe("ordered selector", () => {
         expect(scoreTrack(file, { query }).breakdown.artistInPath).toBe(1);
       }
     }
-    const djEdit = mp3("dj-edit", "DJ Example Get Lucky.mp3");
     const unclosed = mp3("unclosed", "Daft Punk (Feat. Name - Get Lucky (Remix).mp3");
-    expect(scoreTrack(djEdit, { query }).breakdown.titleMatch).toBe(1);
     expect(scoreTrack(unclosed, { query }).breakdown.titleMatch).toBe(1);
     const underscoredArtist = mp3("artist", "daft_punk-get_lucky.mp3");
     expect(scoreTrack(underscoredArtist, { query }).breakdown.artistInPath).toBe(1);
-    const gluedMashup = mp3("glued", "Daft Punk and Someone _Other Song and Get Lucky_ Remix Mashup.mp3");
-    const woman = mp3("woman", "Destiny's Child X Daft Punk - Independant Woman X Get Lucky.mp3");
-    const luckyMusic = mp3("lucky-music", "Get Lucky Music.mp3");
-    for (const wrong of [woman, luckyMusic, gluedMashup]) {
-      const decision = selectTracks([wrong], { query });
-      expect(decision.outcome).toBe("no_suitable_result");
-      if (decision.outcome === "no_suitable_result") expect(decision.removed.title_mismatch).toBe(1);
-    }
 
     const singleOther = mp3("single", "Get Lucky _ Contact.mp3");
     expect(selected([singleOther]).pick.peer).toBe("single");
@@ -287,14 +302,18 @@ describe("ordered selector", () => {
 
   it("rejects a tribute or cover and a medley, and keeps a title-first file", () => {
     const cover = mp3("cover", "Daughter - Get Lucky (Daft Punk Cover).mp3");
-    const medley = mp3("medley", "Nu Deco Ensemble - Giorgio by Moroder _ Get Lucky _ Contact.flac");
+    const medley = mp3("medley", "Daft Punk - Get Lucky _ Giorgio by Moroder _ Contact.flac");
+    const nuDeco = mp3("nu-deco", "Nu Deco Ensemble - Giorgio by Moroder _ Get Lucky _ Contact.flac");
     const titleFirst = mp3("title-first", "Get Lucky Feat. Pharrell Williams (Radio Edit) - Daft Punk.mp3");
     const coverOnly = selectTracks([cover], { query });
     const medleyOnly = selectTracks([medley], { query });
+    const nuDecoOnly = selectTracks([nuDeco], { query });
     expect(coverOnly.outcome).toBe("no_suitable_result");
     expect(medleyOnly.outcome).toBe("no_suitable_result");
+    expect(nuDecoOnly.outcome).toBe("no_suitable_result");
     if (coverOnly.outcome === "no_suitable_result") expect(coverOnly.removed.tribute_or_cover).toBe(1);
     if (medleyOnly.outcome === "no_suitable_result") expect(medleyOnly.removed.medley).toBe(1);
+    if (nuDecoOnly.outcome === "no_suitable_result") expect(nuDecoOnly.removed.title_mismatch).toBe(1);
     expect(selected([titleFirst, cover, medley]).pick.peer).toBe("title-first");
 
     const leadingCover = mp3("bachata", "Daft Punk - Get Lucky - ( LJ & Willy William Bachata Version ) Cover.mp3");
