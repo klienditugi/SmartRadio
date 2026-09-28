@@ -1,4 +1,3 @@
-import { SCORE_WEIGHTS } from "@subwave-ai/core";
 import { describe, expect, it } from "vitest";
 import { isSearchComplete, selectSearch, selectSearchResult } from "./select.js";
 
@@ -200,21 +199,15 @@ describe("slskd search ranking", () => {
     expect(first.outcome).toBe("selected");
     if (first.outcome !== "selected") return;
     expect(first.file).toMatchObject({ username: "remix-fast", filename: REMIX, extension: ".flac" });
-    expect(first.breakdown.versionPreference).toBe(SCORE_WEIGHTS.versionSecondary);
+    expect(first.versionClass).toBe("remix");
+    expect(first.breakdown.versionPreference).toBe(1);
     expect(first.total).toBe(Object.values(first.breakdown).reduce((sum, value) => sum + value, 0));
 
     const balanced = selectSearch(PHASE_C, { ...phaseOpts, versionPreference: "balanced" });
     expect(balanced.outcome).toBe("selected");
     if (balanced.outcome !== "selected") return;
-    expect(balanced.file).toEqual({
-      username: "slot-album",
-      filename: MP3,
-      size: 8 * MIB,
-      extension: ".mp3",
-      bitRate: 320,
-    });
-    expect(balanced.breakdown.versionPreference).toBe(0);
-    expect(balanced.breakdown.format).toBeGreaterThan(0);
+    expect(balanced.file).toMatchObject({ username: "remix-fast", filename: REMIX, extension: ".flac" });
+    expect(balanced.breakdown.versionPreference).toBe(1);
 
     const remix = selectSearch(PHASE_C, { ...phaseOpts, versionPreference: "remix" });
     expect(remix.outcome).toBe("selected");
@@ -492,7 +485,7 @@ describe("slskd search ranking", () => {
     expect(extreme?.username).toBe("zzz-short");
   });
 
-  it("prefers an equal-quality file under the preferred size over a larger overshoot", () => {
+  it("rejects files over the hard size cap and does not rank the survivors by size", () => {
     const peer = (username: string, filename: string, size: number) => ({
       username,
       hasFreeUploadSlot: true,
@@ -510,7 +503,19 @@ describe("slskd search ranking", () => {
       },
       { allowedExtensions: AUDIO, maxFileSizeMb: 200 },
     );
-    expect(pick).toMatchObject({ username: "mmm-small", size: 10 * MIB });
+    expect(pick).toMatchObject({ username: "aaa-large", size: 70 * MIB });
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            peer("aaa-large", "\\\\album\\\\large.flac", 70 * MIB),
+            peer("mmm-small", "\\\\album\\\\small.flac", 10 * MIB),
+            peer("zzz-typical", "\\\\album\\\\typical.flac", 40 * MIB),
+          ],
+        },
+        { allowedExtensions: AUDIO },
+      ),
+    ).toMatchObject({ username: "mmm-small", size: 10 * MIB });
   });
 
   it("drops files above the hard size cap before scoring the rest", () => {
@@ -532,7 +537,20 @@ describe("slskd search ranking", () => {
       },
       { allowedExtensions: AUDIO, maxFileSizeMb: 200 },
     );
-    expect(pick).toMatchObject({ username: "mmm-small", size: 10 * MIB });
+    expect(pick).toMatchObject({ username: "aaa-near", size: 50 * MIB });
+    const dropped = selectSearch(
+      {
+        responses: [
+          peer("zzz-typical", "\\\\album\\\\typical.flac", 40 * MIB),
+          peer("aaa-near", "\\\\album\\\\near.flac", 50 * MIB),
+          peer("mmm-small", "\\\\album\\\\small.flac", 10 * MIB),
+          peer("huge-peer", "\\\\album\\\\huge.flac", 400 * MIB),
+        ],
+      },
+      { allowedExtensions: AUDIO, maxFileSizeMb: 200 },
+    );
+    expect(dropped.outcome).toBe("selected");
+    if (dropped.outcome === "selected") expect(dropped.removed.max_file_size).toBe(1);
   });
 
   it("gives a normal-length remix the extended bonus unless the request is what made the word match", () => {
@@ -650,14 +668,14 @@ describe("slskd search ranking", () => {
         peer("mmm-cd", cd, cdFile),
       ],
     };
-    const opts = { allowedExtensions: AUDIO };
+    const opts = { allowedExtensions: AUDIO, maxFileSizeMb: 200 };
     expect(selectSearchResult(payload, opts)).toMatchObject({ username: "mmm-cd", filename: cd, size: 40 * MIB });
     expect(selectSearchResult({ responses: [payload.responses[0]!] }, opts)).toBeNull();
     expect(selectSearchResult({ responses: [payload.responses[0]!, payload.responses[1]!] }, opts)).toMatchObject({
       username: "zzz-bare",
       filename: bare,
     });
-    // 16/44.1 is a reported good master. A lossless file with no sample rate or bit depth is unknown, not guessed.
+    // Lossless files are equally acceptable, tagged or not. The earlier username wins.
     expect(
       selectSearchResult(
         {
@@ -665,7 +683,7 @@ describe("slskd search ranking", () => {
         },
         opts,
       )?.username,
-    ).toBe("zzz-cd");
+    ).toBe("aaa-bare");
     // 24/48 is inside the cap and scores the same quality as 16/44.1. The earlier username wins the tie. 192 kHz does not, unless the cap is raised.
     expect(
       selectSearchResult(
@@ -731,12 +749,19 @@ describe("slskd search ranking", () => {
       max_sample_rate: 1,
       max_bit_depth: 1,
       title_mismatch: 0,
+      medley: 0,
+      tribute_or_cover: 0,
+      artist_mismatch: 0,
+      stem: 0,
+      long_recording: 0,
+      under_bitrate: 0,
+      short_recording: 0,
     };
     expect(selectSearch(payload, opts)).toEqual({
       outcome: "no_suitable_result",
       removed,
       reason:
-        "no_suitable_result: locked=2, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0",
+        "no_suitable_result: locked=2, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, long_recording=0, under_bitrate=0, short_recording=0",
     });
     expect(selectSearchResult(payload, opts)).toBeNull();
     expect(selectSearch({ responses: [] }, opts)).toEqual({ outcome: "no_responses" });
@@ -801,7 +826,7 @@ describe("slskd search ranking", () => {
     expect(pick?.username).toBe("remix-peer");
   });
 
-  it("prefers a path that contains the artist above a better peer", () => {
+  it("prefers a free upload slot over an artist name that is only in the path", () => {
     const named = {
       username: "queued",
       hasFreeUploadSlot: false,
@@ -810,7 +835,7 @@ describe("slskd search ranking", () => {
       files: [
         {
           filename: "\\\\music\\\\Daft Punk\\\\Album\\\\Get Lucky.flac",
-          size: 40 * MIB,
+          size: 20 * MIB,
           extension: "flac",
           bitDepth: 16,
           sampleRate: 44100,
@@ -825,7 +850,7 @@ describe("slskd search ranking", () => {
       files: [
         {
           filename: "\\\\music\\\\Album\\\\Get Lucky.flac",
-          size: 40 * MIB,
+          size: 20 * MIB,
           extension: "flac",
           bitDepth: 16,
           sampleRate: 44100,
@@ -837,7 +862,7 @@ describe("slskd search ranking", () => {
         { responses: [anon, named] },
         { allowedExtensions: AUDIO, query: { artist: "Daft Punk", title: "Get Lucky" } },
       )?.username,
-    ).toBe("queued");
+    ).toBe("free");
   });
 
   it("excludes __MACOSX and ._ files and files under the minimum size", () => {
@@ -934,11 +959,18 @@ describe("slskd search ranking", () => {
         max_sample_rate: 0,
         max_bit_depth: 0,
         title_mismatch: 1,
+        medley: 0,
+        tribute_or_cover: 0,
+        artist_mismatch: 0,
+        stem: 0,
+        long_recording: 0,
+        under_bitrate: 0,
+        short_recording: 0,
       },
       reason:
-        "no_suitable_result: locked=0, junk=0, extensions=0, format_preference=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=1",
+        "no_suitable_result: locked=0, junk=0, extensions=0, format_preference=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=1, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, long_recording=0, under_bitrate=0, short_recording=0",
     });
-    expect(selectSearchResult(drumsOnly, { allowedExtensions: [".ogg"] })?.filename).toBe(drums);
+    expect(selectSearchResult(drumsOnly, { allowedExtensions: [".ogg"] })).toBeNull();
     expect(
       selectSearchResult(
         {
@@ -958,7 +990,7 @@ describe("slskd search ranking", () => {
     ).toMatchObject({ username: "album", filename: song });
   });
 
-  it("penalizes an instrument-part basename without excluding it", () => {
+  it("rejects an instrument-part basename unless the request asked for that part", () => {
     const folder = "\\\\music\\\\Daft Punk ft. Pharrell Williams - Get Lucky\\\\";
     const drums = `${folder}drums.ogg`;
     const track = `${folder}get lucky.ogg`;
@@ -983,10 +1015,8 @@ describe("slskd search ranking", () => {
         opts,
       )?.filename,
     ).toBe(track);
-    expect(selectSearchResult({ responses: [{ username: "peer", files: [{ filename: drums, size: 8 * MIB, extension: "ogg" }] }] }, opts)?.filename).toBe(
-      drums,
-    );
-    const stems = "\\\\stems\\\\drums\\\\";
+    expect(selectSearchResult({ responses: [{ username: "peer", files: [{ filename: drums, size: 8 * MIB, extension: "ogg" }] }] }, opts)).toBeNull();
+    const parts = "\\\\music\\\\parts\\\\";
     expect(
       selectSearchResult(
         {
@@ -994,15 +1024,28 @@ describe("slskd search ranking", () => {
             {
               username: "peer",
               files: [
-                { filename: `${stems}bass.ogg`, size: 8 * MIB, extension: "ogg" },
-                { filename: `${stems}drums.ogg`, size: 8 * MIB, extension: "ogg" },
+                { filename: `${parts}bass.ogg`, size: 8 * MIB, extension: "ogg" },
+                { filename: `${parts}drums.ogg`, size: 8 * MIB, extension: "ogg" },
               ],
             },
           ],
         },
         { allowedExtensions: [".ogg"], minFileSizeMb: null, query: { title: "drums" } },
       )?.filename,
-    ).toBe(`${stems}drums.ogg`);
+    ).toBe(`${parts}drums.ogg`);
+    expect(
+      selectSearchResult(
+        {
+          responses: [
+            {
+              username: "peer",
+              files: [{ filename: "\\\\stems\\\\drums\\\\drums.ogg", size: 8 * MIB, extension: "ogg" }],
+            },
+          ],
+        },
+        { allowedExtensions: [".ogg"], minFileSizeMb: null, query: { title: "drums" } },
+      ),
+    ).toBeNull();
   });
 
   it("ranks a remix above an instrument part even when the drums peer has the better queue", () => {
@@ -1167,6 +1210,13 @@ describe("slskd search ranking", () => {
       max_sample_rate: 1,
       max_bit_depth: 1,
       title_mismatch: 1,
+      medley: 0,
+      tribute_or_cover: 0,
+      artist_mismatch: 0,
+      stem: 0,
+      long_recording: 0,
+      under_bitrate: 0,
+      short_recording: 0,
     };
     expect(
       selectSearch(payload, {
@@ -1178,7 +1228,7 @@ describe("slskd search ranking", () => {
     ).toEqual({
       outcome: "no_suitable_result",
       removed,
-      reason: `no_suitable_result: locked=1, junk=1, extensions=1, format_preference=0, min_file_size=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=1`,
+      reason: `no_suitable_result: locked=1, junk=1, extensions=1, format_preference=0, min_file_size=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=1, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, long_recording=0, under_bitrate=0, short_recording=0`,
     });
   });
 
@@ -1302,13 +1352,12 @@ describe("slskd score adapter", () => {
       },
       opts,
     );
-    expect(junkRate.outcome).toBe("selected");
+    expect(junkRate.outcome).toBe("no_suitable_result");
+    if (junkRate.outcome === "no_suitable_result") expect(junkRate.removed.under_bitrate).toBe(1);
     expect(missingRate.outcome).toBe("selected");
-    if (junkRate.outcome !== "selected" || missingRate.outcome !== "selected" || outrageous.outcome !== "selected") return;
-    expect(junkRate.signals).toEqual({ quality: "unknown" });
+    if (missingRate.outcome !== "selected" || outrageous.outcome !== "selected") return;
     expect(missingRate.signals).toEqual({ quality: "unknown" });
-    expect(junkRate.breakdown.quality).toBe(0);
-    expect(junkRate.file.bitRate).toBe(8);
+    expect(missingRate.breakdown.quality).toBe(0);
     expect(outrageous.file.username).toBe("real");
     expect(outrageous.signals.quality).toBe("reported");
 
@@ -1325,7 +1374,7 @@ describe("slskd score adapter", () => {
           }),
         ],
       },
-      opts,
+      { ...opts, maxFileSizeMb: 50 },
     );
     expect(junkExt.outcome).toBe("selected");
     if (junkExt.outcome !== "selected") return;
@@ -1371,11 +1420,8 @@ describe("slskd score adapter", () => {
       },
       opts,
     );
-    expect(junk.outcome).toBe("selected");
-    if (junk.outcome !== "selected") return;
-    expect(junk.signals).toEqual({ quality: "unknown" });
-    expect(junk.breakdown.quality).toBe(0);
-    expect(junk.file.bitRate).toBe(8);
+    expect(junk.outcome).toBe("no_suitable_result");
+    if (junk.outcome === "no_suitable_result") expect(junk.removed.under_bitrate).toBe(1);
 
     const decision = selectSearch(
       {
@@ -1395,9 +1441,6 @@ describe("slskd score adapter", () => {
     expect(decision.signals.quality).toBe("derived");
     expect(decision.signals.derivedBitrateKbps).toBeGreaterThan(32);
     expect(decision.signals.derivedBitrateKbps).toBeLessThanOrEqual(320);
-    expect(decision.breakdown.quality).toBeGreaterThan(0);
-    expect(decision.breakdown.quality).toBeLessThanOrEqual(
-      Math.round(SCORE_WEIGHTS.qualityGood * SCORE_WEIGHTS.qualityDerivedScale),
-    );
+    expect(decision.breakdown.quality).toBe(1);
   });
 });

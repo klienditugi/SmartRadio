@@ -15,7 +15,7 @@ export const ACQUISITION_CONNECTION_STATES = [
 export type AcquisitionConnectionState = (typeof ACQUISITION_CONNECTION_STATES)[number];
 
 export const VERSION_PREFERENCE_OPTIONS = [
-  { value: "balanced", label: "Balanced — no version bonus" },
+  { value: "balanced", label: "Balanced — remix, club, and extended first" },
   { value: "radio_edit", label: "Radio edit" },
   { value: "original", label: "Original / album version" },
   { value: "extended", label: "Extended / club mix" },

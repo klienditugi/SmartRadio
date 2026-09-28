@@ -13,12 +13,14 @@ export type { PolicyDecision } from "./policy.js";
 export type { CandidateTrack, TrackAvailability, TrackFormat } from "./candidate.js";
 export {
   SCORE_COMPONENTS,
-  SCORE_WEIGHTS,
+  classifyVersionText,
+  fileVersionClass,
   matchesLongRecording,
   removalReason,
   resolveSelectionPolicy,
   scoreTrack,
   selectTracks,
+  versionClassRank,
 } from "./selection-score.js";
 export type {
   FilterRemovalCounts,
@@ -29,5 +31,6 @@ export type {
   SelectionQuery,
   TrackScore,
   TrackSelection,
+  VersionClass,
 } from "./selection-score.js";
 export { jobTypeForStatus, restartStatusForJob } from "./jobs.js";

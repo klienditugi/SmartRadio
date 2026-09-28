@@ -18,15 +18,15 @@ const optionalSetting = z.preprocess((value) => {
   return value;
 }, z.string().trim());
 
-/** MiB (1 MiB = 1,048,576 bytes). Default search-hit size cap. */
-export const DEFAULT_MAX_FILE_SIZE_MB = 200;
+/** MiB (1 MiB = 1,048,576 bytes). Default hard cap. Larger files are rejected. */
+export const DEFAULT_MAX_FILE_SIZE_MB = 30;
 
 /** MiB (1 MiB = 1,048,576 bytes). Default search-hit size floor. */
 export const DEFAULT_MIN_FILE_SIZE_MB = 1;
 
 /**
- * MiB (1 MiB = 1,048,576 bytes). Gradual size penalty starts above this. A normal-duration file
- * may still win when it is a little larger. Not a hard exclusion.
+ * MiB (1 MiB = 1,048,576 bytes). Kept so older config files still load.
+ * The selector does not grade size. `max_file_size_mb` is the size gate.
  */
 export const DEFAULT_PREFERRED_MAX_FILE_SIZE_MB = 30;
 
@@ -39,16 +39,20 @@ export const DEFAULT_MAX_BIT_DEPTH = 24;
 /** Hard duration cap in seconds. Files that report a longer `length` are excluded. Null disables it. */
 export const DEFAULT_MAX_DURATION_SECONDS = 1200;
 
-/** Duration penalty starts above this many seconds. Shorter files are a normal length. */
+/**
+ * Kept so older config files still load. The selector does not penalize duration.
+ * `max_duration_seconds` is the duration gate. A long-recording phrase is a reject.
+ */
 export const DEFAULT_PREFERRED_MAX_DURATION_SECONDS = 720;
 
 /**
- * Saved version taste. A ranking bonus only, never a filter.
- * Owner decision: the default is `extended` (club and extended mixes outrank radio edits).
+ * Saved version taste. Never a filter.
+ * `balanced` is the default order: remix, club, and extended together, then album
+ * or original, then radio edit. Any other value moves that class to the front.
  */
 export const VERSION_PREFERENCES = ["balanced", "radio_edit", "original", "extended", "remix"] as const;
 export type VersionPreference = (typeof VERSION_PREFERENCES)[number];
-export const DEFAULT_VERSION_PREFERENCE: VersionPreference = "extended";
+export const DEFAULT_VERSION_PREFERENCE: VersionPreference = "balanced";
 
 /**
  * Saved format taste, separate from the quality tier.
@@ -171,18 +175,19 @@ const acquisitionSelectionSchema = z
      */
     max_duration_seconds: z.number().positive().nullable().default(DEFAULT_MAX_DURATION_SECONDS),
     /**
-     * Gradual penalty above this size (MiB). Default 30.
-     * Must be less than or equal to max_file_size_mb. Not a hard exclusion.
+     * Unused by the selector. Kept so older yaml still parses.
+     * Must be less than or equal to max_file_size_mb.
      */
     preferred_max_file_size_mb: z.number().positive().default(DEFAULT_PREFERRED_MAX_FILE_SIZE_MB),
     /**
-     * Penalty above this duration (seconds). Default 720.
+     * Unused by the selector. Kept so older yaml still parses.
      * Must be less than or equal to max_duration_seconds when that cap is set.
      */
     preferred_max_duration_seconds: z.number().positive().default(DEFAULT_PREFERRED_MAX_DURATION_SECONDS),
     /**
-     * Ranking bonus for a version kind. Default `extended` (owner decision).
-     * Never a filter. An explicit version in the request outranks this.
+     * Version class order. Default `balanced`: remix, club, and extended first,
+     * then album or original, then radio edit. A saved class moves to the front.
+     * An explicit version in the request turns this off.
      */
     version_preference: z.enum(VERSION_PREFERENCES).default(DEFAULT_VERSION_PREFERENCE),
     /**
@@ -202,7 +207,7 @@ const acquisitionSelectionSchema = z
     short_recording_min_samples: z.number().int().positive().default(DEFAULT_SHORT_RECORDING_MIN_SAMPLES),
     /** Known duration below this (seconds) is short even with no median. Default 90. */
     short_recording_floor_seconds: z.number().positive().default(DEFAULT_SHORT_RECORDING_FLOOR_SECONDS),
-    /** Most negative short-track score. Default −280. Zero disables the penalty. */
+    /** Zero disables the short-recording reject. Any other value keeps it. Default −1900. */
     short_recording_penalty: z.number().max(0).default(DEFAULT_SHORT_RECORDING_PENALTY),
     extended_version_terms: z.array(z.string().min(1)).default(() => [...DEFAULT_EXTENDED_VERSION_TERMS]),
     long_recording_phrases: z.array(z.string().min(1)).default(() => [...DEFAULT_LONG_RECORDING_PHRASES]),

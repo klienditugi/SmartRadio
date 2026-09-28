@@ -276,7 +276,7 @@ acquisition:
     expect(serializeAppConfig(saved)).not.toContain("api_key");
   });
 
-  it("defaults search selection to 200 MiB, 30 MiB preferred, 48 kHz, 24-bit, a 1200s cap, and the version-term list", () => {
+  it("defaults search selection to a 30 MiB cap, 48 kHz, 24-bit, a 1200s cap, and the version-term list", () => {
     const cfg = parseAppConfig(exampleYamlObject);
     expect(cfg.acquisition.selection.max_file_size_mb).toBe(DEFAULT_MAX_FILE_SIZE_MB);
     expect(cfg.acquisition.selection.min_file_size_mb).toBe(DEFAULT_MIN_FILE_SIZE_MB);
@@ -297,7 +297,7 @@ acquisition:
     expect(cfg.acquisition.selection.long_recording_phrases).toEqual([...DEFAULT_LONG_RECORDING_PHRASES]);
     expect(cfg.acquisition.selection.instrument_part_basenames).toEqual([...DEFAULT_INSTRUMENT_PART_BASENAMES]);
     const settings = publicSettings({ ...cfg, secrets: {} }).acquisition.selection;
-    expect(settings.max_file_size_mb).toBe(200);
+    expect(settings.max_file_size_mb).toBe(30);
     expect(settings.preferred_max_file_size_mb).toBe(30);
     expect(settings.min_file_size_mb).toBe(1);
     expect(settings.max_duration_seconds).toBe(1200);
@@ -441,7 +441,7 @@ acquisition:
         selection: { extended_version_bonus: false, lossless_preference: 36 },
       },
     });
-    expect(onlyOld.acquisition.selection.version_preference).toBe("extended");
+    expect(onlyOld.acquisition.selection.version_preference).toBe("balanced");
     expect(onlyOld.acquisition.selection.format_preference).toBe("prefer_mp3");
 
     const envOnly = applyEnvOverrides(structuredClone(exampleYamlObject), {
@@ -489,7 +489,7 @@ acquisition:
       configPath: cfgPath,
       env: { ...process.env, SLSKD_EXTENDED_VERSION_BONUS: "false", SLSKD_LOSSLESS_PREFERENCE: "12" },
     });
-    expect(loaded.acquisition.selection.version_preference).toBe("extended");
+    expect(loaded.acquisition.selection.version_preference).toBe("balanced");
     expect(loaded.acquisition.selection.format_preference).toBe("prefer_mp3");
     const doctorNotes = (loaded.deprecation_notes ?? []).join("\n");
     expect(doctorNotes).toContain("version_preference");

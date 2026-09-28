@@ -1,55 +1,43 @@
 /**
- * Deterministic, explainable pick among CandidateTrack values.
+ * Deterministic pick among CandidateTrack values.
  * No provider types and no LLM. Same tracks and policy always return the same pick.
  *
- * Hard filters run once and are never relaxed. Survivors get a sum of named
- * components. Higher total wins. Ties break on peer username, then path.
+ * Hard rejects run first. Survivors are compared in order, and the comparison
+ * stops at the first difference. There is no summed score and no size curve.
  *
- * Priority, high to low. A higher item is not outweighed by the sum of the
- * realistic ranges below it. Hard filters remove a file before it can score.
- * Stems stay last unless the request asked for that part.
+ * Rejects, before any ranking:
+ *   locked, junk paths, extensions, mp3_only / flac_only,
+ *   files under min_file_size_mb,
+ *   wrong title, a medley that names another song, a tribute/cover basename,
+ *   a different artist leading the basename when this artist is only in folders,
+ *   stems, long-recording phrases, bitrate under 128 kbps,
+ *   files over max_file_size_mb (default 30 MiB), duration, sample rate, bit depth,
+ *   and a short recording (same detector as before: under 90s, or under 0.6 of the
+ *   median once five lengths are known).
  *
- *  1. correct artist/title — title tokens are a hard filter
- *  2. explicit requested version
- *  3. saved version preference (basename, parent, clean original, and the fun-style second bonus).
- *     Off for every file when the request names a version.
- *  4. avoid bad results: long recording, short or incomplete recording, a large
- *     duration overshoot, a stem, and a known bitrate under 128 kbps.
- *     Those files get no version bonus, plus a penalty.
- *  5. file size, for a known normal duration. Listeners should hear the song soon.
- *  6. audio quality for 128 kbps and up: poor, acceptable, and good. All of it
- *     sits below size.
- *  7. saved format preference. It does not override a real size gap.
- *  8. peer availability
- *  9. username, then path
+ * Ranking of whoever is left:
+ *   1. explicit requested version (this turns the saved preference off)
+ *   2. version class
+ *   3. acceptable quality over poor
+ *   4. format preference
+ *   5. free upload slot, then shorter queue, then higher upload speed
+ *   6. username, then path
  *
- * Known-duration size is 0 through the preferred size (30 MiB). It is gentle up to
- * 1.5× that target (about 45 MiB). That band stays under the full quality range,
- * so a clearly better version can still win there. From 2× the target (60 MiB)
- * the penalty exceeds the full quality range (128 kbps through good), format, and
- * the full normal peer span, so a 60–70 MiB FLAC loses to a normal-size MP3 of
- * the same version, including a 128 kbps MP3. The curve keeps growing through
- * the hard maximum. Past that maximum the file is filtered; if the cap is raised,
- * a larger file still loses to a smaller one of the same style and format.
- * Unknown duration, a long-recording phrase, or a duration past the preferred max
- * uses a steeper curve and counts in the bad-result tier.
+ * Default version order (`balanced`, also the default of `version_preference`):
+ * remix, club, and extended are equal and first; then album or original
+ * (an unmarked file counts here); then radio edit; then anything else.
+ * A saved original, radio_edit, extended, or remix value moves that class to
+ * the front. The rest stay in the default order. Club mix is the extended class.
+ * A hybrid title keeps the most derived marker, so a club remix is a remix.
  *
- * Version steps clear the known-duration penalty through the default hard maximum,
- * plus quality from 128 kbps through good, format, peer, and a mild duration
- * overshoot. A 70 MiB Club Mix wins under `extended` only when no normal-size
- * club or extended file is present. `prefer_flac` only decides between same-style
- * files in about the same size range.
+ * Acceptable quality is 192 kbps or more CBR, an MP3 VBR average around 170 kbps
+ * or more, or lossless FLAC. 128–191 kbps CBR is poor. An MP3 with no usable
+ * bitrate uses size and length when both are known, and is poor otherwise.
+ * A file with no positive size never reaches this module: the adapter drops it.
+ * Unknown duration is not short and is not over the duration cap.
  *
- * When the request names a version, the saved preference is off for every file,
- * including the fun-style second bonus. A hybrid such as "Radio Edit - X Remix"
- * does not collect a remix bonus on a radio-edit request.
- *
- * A mild duration overshoot (a 13-minute extended mix under the 20-minute hard cap)
- * still keeps the version bonus. The bonus stops when the overshoot reaches the
- * duration penalty cap, which is separate from the long-recording phrase penalty.
- * Under `extended`, a named remix gets the second bonus. Under `remix`, an
- * extended or club mix gets it. Queues over 1000 (−60) are an abandoned peer and
- * are not part of the peer span.
+ * If nothing survives, the result is no_suitable_result. The worker fails the
+ * request with that reason. It does not enqueue.
  */
 
 import {
@@ -66,8 +54,6 @@ import {
   DEFAULT_MAX_FILE_SIZE_MB,
   DEFAULT_MAX_SAMPLE_RATE,
   DEFAULT_MIN_FILE_SIZE_MB,
-  DEFAULT_PREFERRED_MAX_DURATION_SECONDS,
-  DEFAULT_PREFERRED_MAX_FILE_SIZE_MB,
   DEFAULT_VERSION_PENALTY_TERMS,
   DEFAULT_VERSION_PREFERENCE,
   type FormatPreference,
@@ -76,179 +62,16 @@ import {
 import type { CandidateTrack } from "./candidate.js";
 
 const MIB = 1024 * 1024;
-
-/**
- * Named component weights. Version and format preferences are the configurable
- * policy. Every other number is fixed.
- *
- * Equal-peer files, default `prefer_mp3` / `extended`:
- * a 14 MiB 320 kbps MP3 is the normal target (size 0, quality good, format bonus).
- * a 42 MiB FLAC of the same version pays a size penalty larger than the format bonus,
- * so prefer_flac does not take it. From 60 MiB the size penalty also beats a
- * 128 kbps file of the same version. A preferred club or extended version still
- * outranks a radio edit, including a large FLAC when that is the only preferred file.
- */
-export const SCORE_WEIGHTS = {
-  requestedVersion: 12400,
-  /** Filename contains the title tokens. Path-only matches score `titleMatchPath`. */
-  titleMatchBasename: 36,
-  titleMatchPath: 8,
-  artistInPath: 48,
-  /**
-   * Bonus for prefer_mp3 / prefer_flac. auto and the _only modes add 0.
-   * Clears a normal peer. It does not clear a real size gap. The _only modes are filters.
-   */
-  formatPreference: 48,
-  /**
-   * 256–320 kbps CBR, reported MP3 VBR at `bitrateVbrGoodMin` or higher, and in-cap
-   * FLAC including hi-res. Hi-res gets no extra on top of this. VBR on other
-   * formats, such as ogg, does not enter this tier. Good, acceptable, and poor
-   * (128 kbps up to the floor) are one tier, and that whole tier sits below file size.
-   */
-  qualityGood: 160,
-  /** Lossy from the floor (default 192) up to 255, and MP3 VBR below `bitrateVbrGoodMin`. */
-  qualityAcceptable: 40,
-  /** Derived bitrate contributes this fraction of the reported lossy score, and no more. */
-  qualityDerivedScale: 0.5,
-  /**
-   * Below-floor scores from 128 kbps up to the floor. This is the poor step of the
-   * quality tier. It beats format and a normal peer, and it loses to the size
-   * penalty from 2× the preferred size.
-   * −(base + round(scale × fraction ^ power)), where fraction is the distance
-   * from the floor down to 128 kbps.
-   */
-  qualityPoorBase: 80,
-  qualityPoorScale: 40,
-  /**
-   * Known bitrate under 128 kbps. A bad result, above file size: 0 version points
-   * and a penalty that clears the known-duration size range through the hard
-   * maximum, plus quality from 128 kbps through good, format, and a normal peer.
-   * Fraction runs from 128 kbps down to 32 kbps.
-   */
-  qualityUnderMinBase: 1700,
-  qualityUnderScale: 64,
-  qualityLossyPenaltyPower: 0.5,
-  /**
-   * Basename matches the saved version kind. Clears quality from 128 kbps through
-   * good, the known-duration size penalty through the default hard maximum,
-   * format, a normal peer, and a mild duration overshoot. Clears the parent
-   * step by that same amount.
-   */
-  versionBasename: 7800,
-  /**
-   * Clean title (no version term) when the preference is original, and the parent is clean too.
-   * Same height as the fun-style second bonus. Each clears the lower range on its own.
-   */
-  versionCleanOriginal: 2600,
-  /**
-   * Immediate parent folder only. Weaker than the basename and stronger than the
-   * fun-style second bonus, each by more than the version lower bound.
-   */
-  versionParent: 5200,
-  /**
-   * Under `extended`, a basename remix. Under `remix`, a basename extended or club mix.
-   * Above radio edits and originals. Below a parent-folder primary match.
-   * Not applied when the request itself names a version.
-   */
-  versionSecondary: 2600,
-  /**
-   * Known normal duration. Ratios are size / preferredMaxFileSizeMb.
-   * Penalty is 0 at ratio 1. It reaches `sizeGentleMax` at `sizeGentleUntilRatio`
-   * (1.5×, about 45 MiB when the target is 30). That band stays under the full
-   * quality range, so a better version, and a much better encode, can still win.
-   */
-  sizeGentleUntilRatio: 1.5,
-  sizeGentleMax: 96,
-  /**
-   * At `sizeStrongFromRatio` (2× the preferred size) the penalty is
-   * `sizeStrongAtDouble`, which clears the full quality range from 128 kbps
-   * through good, format, and a normal peer.
-   * Past that, each extra 1.0 of size/preferred adds `sizeStrongPerRatio`.
-   * No cap: the score keeps growing through the hard maximum and beyond it
-   * when that filter is raised.
-   */
-  sizeStrongFromRatio: 2,
-  sizeStrongAtDouble: 480,
-  sizeStrongPerRatio: 64,
-  /**
-   * Points per 1.0 of (size/preferred − 1) when duration is unknown, the file is
-   * a long recording, or duration is past the preferred max. Steeper than the
-   * known-duration curve. Counted in the bad-result tier, not under format.
-   */
-  sizeSteepPerRatio: 400,
-  /** Coefficient for duration overshoot. 15 min against a 12 min preferred max is −125. */
-  durationPenaltyScale: 400,
-  durationPenaltyCap: 400,
-  /**
-   * Duration overshoot at or below this drops the version bonus. Equal to the
-   * duration penalty cap, not to `longRecording`, so a harsher long-phrase penalty
-   * does not make every mild overshoot lose the bonus.
-   */
-  versionOvershootCutoff: -400,
-  longRecording: -1900,
-  /** Default ceiling for `shortRecording`. Config `short_recording_penalty` overrides it. */
-  shortRecording: DEFAULT_SHORT_RECORDING_PENALTY,
-  /** Larger than requestedVersion plus every positive component, so a stem stays last. */
-  stem: -22000,
-  availabilityFreeSlot: 6,
-  availabilityNoSlot: -4,
-  availabilityExtremeQueue: -60,
-  availabilityExtremeQueueAbove: 1000,
-  availabilityQueueStep: 25,
-  availabilityQueueCap: 12,
-  availabilitySpeedCap: 5,
-  /** Known lossy bitrates are 32–320 inclusive. 321+ and anything outside 32–500 are unknown. */
-  /** A known lossy rate below this gets no version-preference bonus. 128 itself still can. */
-  bitrateVersionMin: 128,
-  bitratePlausibleMin: 32,
-  /** CBR, and any lossy file that is not a reported MP3 VBR, enters the good tier here. */
-  bitrateGoodMin: 256,
-  bitrateGoodMax: 320,
-  /**
-   * Reported MP3 VBR only (`track.vbr` from slskd `isVariableBitRate`, extension `.mp3`).
-   * A missing flag is not VBR. The same flag on ogg or any other format does not
-   * promote the file. CBR between this and `bitrateGoodMin` stays acceptable.
-   */
-  bitrateVbrGoodMin: 220,
-  bitratePlausibleMax: 500,
-} as const;
-
-export const SCORE_COMPONENTS = [
-  "requestedVersion",
-  "titleMatch",
-  "artistInPath",
-  "format",
-  "quality",
-  "versionPreference",
-  "sizeOvershoot",
-  "durationOvershoot",
-  "longRecording",
-  "shortRecording",
-  "stem",
-  "availability",
-] as const;
-
-export type ScoreComponent = (typeof SCORE_COMPONENTS)[number];
-
-export type ScoreBreakdown = Record<ScoreComponent, number>;
-
-export type QualitySignal = {
-  /** `derived` is size/duration only, and only when no reported quality field was usable. */
-  quality: "reported" | "derived" | "unknown";
-  derivedBitrateKbps?: number;
-};
-
-export type TrackScore = {
-  pick: CandidateTrack;
-  breakdown: ScoreBreakdown;
-  total: number;
-  signals: QualitySignal;
-};
+const BITRATE_REJECT_BELOW = 128;
+const BITRATE_VBR_ACCEPTABLE = 170;
+const BITRATE_KNOWN_MIN = 32;
+const BITRATE_KNOWN_MAX = 320;
 
 /** Version terms that mean "this is not a full mix" rather than a desirable remix. */
 const STEM_VERSION_TERMS = ["stem", "stems", "multitrack", "acapella", "a cappella", "acappella"] as const;
 
 const TITLE_STOPWORDS = new Set(["a", "an", "the", "and", "of", "feat", "ft"]);
+const CREDIT_WORDS = new Set(["feat", "ft", "featuring", "and"]);
 
 const DISC_NUMBER = /^(?:cd|disc|disk)\s*\d*$/i;
 
@@ -322,6 +145,45 @@ const TITLE_STRIP_PHRASES = [
 /** Legacy request terms skipped once a version kind was recognized, so "radio edit" does not also mean every "edit". */
 const CLASSIFIED_OVERLAP = new Set(["remix", "edit", "extended", "radio edit"]);
 
+/** Spaced joins only. A bare underscore is a space, not a medley separator. ` - ` is not one either. */
+const MEDLEY_SPLIT = / _ | \/ | \| | \+ |\b(?:medley|megamix)\b/i;
+
+export const SCORE_COMPONENTS = [
+  "requestedVersion",
+  "titleMatch",
+  "artistInPath",
+  "format",
+  "quality",
+  "versionPreference",
+  "sizeOvershoot",
+  "durationOvershoot",
+  "longRecording",
+  "shortRecording",
+  "stem",
+  "availability",
+] as const;
+
+export type ScoreComponent = (typeof SCORE_COMPONENTS)[number];
+
+/** Diagnostic flags. Ranking does not add these up. 1 means the file has that property. */
+export type ScoreBreakdown = Record<ScoreComponent, number>;
+
+export type QualitySignal = {
+  /** `derived` is size/duration only, and only when no reported quality field was usable. */
+  quality: "reported" | "derived" | "unknown";
+  derivedBitrateKbps?: number;
+};
+
+export type VersionClass = "remix" | "extended" | "original" | "radio_edit" | "other";
+
+export type TrackScore = {
+  pick: CandidateTrack;
+  breakdown: ScoreBreakdown;
+  total: number;
+  signals: QualitySignal;
+  versionClass: VersionClass;
+};
+
 export type FilterRemovalCounts = {
   locked: number;
   junk: number;
@@ -333,6 +195,13 @@ export type FilterRemovalCounts = {
   max_sample_rate: number;
   max_bit_depth: number;
   title_mismatch: number;
+  medley: number;
+  tribute_or_cover: number;
+  artist_mismatch: number;
+  stem: number;
+  long_recording: number;
+  under_bitrate: number;
+  short_recording: number;
 };
 
 const REMOVAL_ORDER = [
@@ -346,6 +215,13 @@ const REMOVAL_ORDER = [
   "max_sample_rate",
   "max_bit_depth",
   "title_mismatch",
+  "medley",
+  "tribute_or_cover",
+  "artist_mismatch",
+  "stem",
+  "long_recording",
+  "under_bitrate",
+  "short_recording",
 ] as const satisfies readonly (keyof FilterRemovalCounts)[];
 
 export type SelectionQuery = {
@@ -358,7 +234,7 @@ export type SelectionPolicyInput = {
   allowedExtensions?: readonly string[];
   /** Mebibytes. Omit for 1. `null` disables the floor. */
   minFileSizeMb?: number | null;
-  /** Mebibytes. Omit for 200. `null` disables the cap. */
+  /** Mebibytes. Omit for 30. `null` disables the cap. */
   maxFileSizeMb?: number | null;
   /** Seconds. Omit for 1200. `null` disables the hard cap. Missing duration stays eligible. */
   maxDurationSeconds?: number | null;
@@ -366,15 +242,18 @@ export type SelectionPolicyInput = {
   maxSampleRate?: number | null;
   /** Omit for 24. `null` disables the cap. A missing bit depth stays eligible. */
   maxBitDepth?: number | null;
-  /** Mebibytes. Omit for 30. `null` disables the size penalty. */
+  /**
+   * Accepted so older callers still compile. The selector does not grade size.
+   * The hard max is the only size gate.
+   */
   preferredMaxFileSizeMb?: number | null;
-  /** Seconds. Omit for 720. `null` disables the duration penalty. */
+  /** Accepted so older callers still compile. Not used for ranking or rejection. */
   preferredMaxDurationSeconds?: number | null;
-  /** Omit for `balanced`. Ranking bonus only. */
+  /** Omit for `balanced`, which is the default class order. */
   versionPreference?: VersionPreference;
   /** Omit for `prefer_mp3`. `mp3_only` / `flac_only` filter after the extension allowlist. */
   formatPreference?: FormatPreference;
-  /** kbps. Omit for 192. Lossy rates below this are penalized. */
+  /** kbps. Omit for 192. CBR at or above this is acceptable. */
   bitrateFloorKbps?: number;
   /** Fraction of the search median. Omit for 0.6. */
   shortRecordingFraction?: number;
@@ -382,11 +261,11 @@ export type SelectionPolicyInput = {
   shortRecordingMinSamples?: number;
   /** Seconds. Omit for 90. Known durations below this are short without a median. */
   shortRecordingFloorSeconds?: number;
-  /** Most negative short-track score. Omit for −280. Zero disables it. */
+  /** Zero disables the short-recording reject. Any other value keeps the reject. */
   shortRecordingPenalty?: number;
   /**
    * Known durations of the correlated candidates in this search, including this file.
-   * `selectTracks` fills this from the files that passed the hard filters.
+   * `selectTracks` fills this from the files that passed the other hard filters.
    */
   cohortDurationSeconds?: readonly number[];
   versionPenaltyTerms?: readonly string[];
@@ -403,8 +282,6 @@ type ResolvedPolicy = {
   maxDurationSeconds: number | null;
   maxSampleRate: number | null;
   maxBitDepth: number | null;
-  preferredMaxFileSizeMb: number | null;
-  preferredMaxDurationSeconds: number | null;
   versionPreference: VersionPreference;
   formatPreference: FormatPreference;
   bitrateFloorKbps: number;
@@ -439,12 +316,6 @@ function resolveOptionalCap(value: number | null | undefined, fallback: number):
   return cap;
 }
 
-function resolveNonNegative(value: number | null | undefined, fallback: number): number {
-  if (value === undefined || value === null) return fallback;
-  if (!Number.isFinite(value) || value < 0) return fallback;
-  return value;
-}
-
 export function resolveSelectionPolicy(input: SelectionPolicyInput = {}): ResolvedPolicy {
   return {
     allowedExtensions: input.allowedExtensions,
@@ -453,11 +324,6 @@ export function resolveSelectionPolicy(input: SelectionPolicyInput = {}): Resolv
     maxDurationSeconds: resolveOptionalCap(input.maxDurationSeconds, DEFAULT_MAX_DURATION_SECONDS),
     maxSampleRate: resolveOptionalCap(input.maxSampleRate, DEFAULT_MAX_SAMPLE_RATE),
     maxBitDepth: resolveOptionalCap(input.maxBitDepth, DEFAULT_MAX_BIT_DEPTH),
-    preferredMaxFileSizeMb: resolveOptionalCap(input.preferredMaxFileSizeMb, DEFAULT_PREFERRED_MAX_FILE_SIZE_MB),
-    preferredMaxDurationSeconds: resolveOptionalCap(
-      input.preferredMaxDurationSeconds,
-      DEFAULT_PREFERRED_MAX_DURATION_SECONDS,
-    ),
     versionPreference: input.versionPreference ?? DEFAULT_VERSION_PREFERENCE,
     formatPreference: input.formatPreference ?? DEFAULT_FORMAT_PREFERENCE,
     bitrateFloorKbps: resolveOptionalCap(input.bitrateFloorKbps, DEFAULT_BITRATE_FLOOR_KBPS) ?? DEFAULT_BITRATE_FLOOR_KBPS,
@@ -501,6 +367,13 @@ function emptyRemovals(): FilterRemovalCounts {
     max_sample_rate: 0,
     max_bit_depth: 0,
     title_mismatch: 0,
+    medley: 0,
+    tribute_or_cover: 0,
+    artist_mismatch: 0,
+    stem: 0,
+    long_recording: 0,
+    under_bitrate: 0,
+    short_recording: 0,
   };
 }
 
@@ -569,9 +442,17 @@ function basenameText(track: CandidateTrack): string {
   return normalizeMatchText(track.basename.replace(/\.[^.]+$/, ""));
 }
 
+function rawBasename(track: CandidateTrack): string {
+  return track.basename.replace(/\.[^.]+$/, "");
+}
+
 function parentText(track: CandidateTrack): string {
   const parent = track.folders[track.folders.length - 1];
   return parent ? normalizeMatchText(parent) : "";
+}
+
+function albumFolderRaw(track: CandidateTrack): string {
+  return track.folders[track.folders.length - 1] ?? "";
 }
 
 function requestedBlob(query: SelectionQuery): string {
@@ -595,6 +476,15 @@ function requiredTitleTokens(query: SelectionQuery, terms: readonly string[]): s
 function artistTokenList(query: SelectionQuery): string[] {
   if (typeof query.artist !== "string" || !query.artist.trim()) return [];
   return significantTokens(normalizeMatchText(query.artist));
+}
+
+function artistPhrasePattern(artist: string): string {
+  return artist
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0)
+    .map((part) => escapeRegExp(part))
+    .join("\\s+");
 }
 
 function isJunkPath(path: string): boolean {
@@ -621,28 +511,6 @@ function withinHardDuration(track: CandidateTrack, maxSeconds: number | null): b
   if (maxSeconds === null) return true;
   if (track.durationSeconds === undefined) return true;
   return track.durationSeconds <= maxSeconds;
-}
-
-function firstRejection(
-  track: CandidateTrack,
-  policy: ResolvedPolicy,
-  titleTokens: readonly string[] | null,
-): keyof FilterRemovalCounts | null {
-  if (track.locked) return "locked";
-  if (isJunkPath(track.path)) return "junk";
-  if (!extensionAllowed(track, policy.allowedExtensions)) return "extensions";
-  if (formatRejected(track, policy.formatPreference)) return "format_preference";
-  if (policy.minFileSizeMb !== null && track.sizeBytes < policy.minFileSizeMb * MIB) return "min_file_size";
-  if (policy.maxFileSizeMb !== null && track.sizeBytes > policy.maxFileSizeMb * MIB) return "max_file_size";
-  if (!withinHardDuration(track, policy.maxDurationSeconds)) return "max_duration";
-  if (policy.maxSampleRate !== null && track.sampleRateHz !== undefined && track.sampleRateHz > policy.maxSampleRate) {
-    return "max_sample_rate";
-  }
-  if (policy.maxBitDepth !== null && track.bitDepth !== undefined && track.bitDepth > policy.maxBitDepth) {
-    return "max_bit_depth";
-  }
-  if (titleTokens && !hasEveryToken(pathText(track), titleTokens)) return "title_mismatch";
-  return null;
 }
 
 function isDiscNumberPhrase(phrase: string): boolean {
@@ -728,110 +596,178 @@ function isCleanTitle(marks: VersionMarks): boolean {
   return !marks.radio_edit && !marks.extended && !marks.remix && !marks.original && !marks.other;
 }
 
-function marksMatch(marks: VersionMarks, preference: VersionPreference): boolean {
-  if (preference === "balanced") return false;
-  return marks[preference];
+function versionClassFromMarks(marks: VersionMarks): VersionClass {
+  if (marks.remix) return "remix";
+  if (marks.extended) return "extended";
+  if (marks.radio_edit) return "radio_edit";
+  if (marks.original || isCleanTitle(marks)) return "original";
+  return "other";
 }
 
-function knownLossy(kbps: number): boolean {
-  return kbps >= SCORE_WEIGHTS.bitratePlausibleMin && kbps <= SCORE_WEIGHTS.bitrateGoodMax;
-}
-
-function lossyPoints(kbps: number, floor: number, vbr: boolean | undefined, ext: string): number {
-  const inRange = kbps <= SCORE_WEIGHTS.bitrateGoodMax;
-  const cbrGood = kbps >= SCORE_WEIGHTS.bitrateGoodMin && inRange;
-  const vbrGood = ext === ".mp3" && vbr === true && kbps >= SCORE_WEIGHTS.bitrateVbrGoodMin && inRange;
-  if (cbrGood || vbrGood) return SCORE_WEIGHTS.qualityGood;
-  if (kbps >= floor) return SCORE_WEIGHTS.qualityAcceptable;
-  const power = SCORE_WEIGHTS.qualityLossyPenaltyPower;
-  if (kbps >= SCORE_WEIGHTS.bitrateVersionMin) {
-    const span = Math.max(1, floor - SCORE_WEIGHTS.bitrateVersionMin);
-    const fraction = (floor - kbps) / span;
-    const extra = Math.round(Math.pow(fraction, power) * SCORE_WEIGHTS.qualityPoorScale);
-    return -(SCORE_WEIGHTS.qualityPoorBase + extra);
-  }
-  const span = Math.max(1, SCORE_WEIGHTS.bitrateVersionMin - SCORE_WEIGHTS.bitratePlausibleMin);
-  const fraction = (SCORE_WEIGHTS.bitrateVersionMin - kbps) / span;
-  const extra = Math.round(Math.pow(fraction, power) * SCORE_WEIGHTS.qualityUnderScale);
-  return -(SCORE_WEIGHTS.qualityUnderMinBase + extra);
-}
-
-function qualityOf(track: CandidateTrack, floor: number): { points: number; signal: QualitySignal } {
-  if (track.format.lossless) {
-    const depth = track.bitDepth;
-    const rate = track.sampleRateHz;
-    if (depth === undefined && rate === undefined) return { points: 0, signal: { quality: "unknown" } };
-    const hiRes = (depth !== undefined && depth > 16) || (rate !== undefined && rate > 48_000);
-    const standardDepth = depth === undefined || depth === 16;
-    const standardRate = rate === undefined || rate === 44_100 || rate === 48_000;
-    if (hiRes || (standardDepth && standardRate)) {
-      return { points: SCORE_WEIGHTS.qualityGood, signal: { quality: "reported" } };
-    }
-    return { points: 0, signal: { quality: "reported" } };
-  }
-
-  if (track.bitrateKbps !== undefined) {
-    if (!knownLossy(track.bitrateKbps)) return { points: 0, signal: { quality: "unknown" } };
-    return { points: lossyPoints(track.bitrateKbps, floor, track.vbr, track.format.ext), signal: { quality: "reported" } };
-  }
-  if (track.durationSeconds !== undefined && track.durationSeconds > 0 && track.sizeBytes > 0) {
-    const derived = (track.sizeBytes * 8) / track.durationSeconds / 1000;
-    const derivedBitrateKbps = Math.round(derived);
-    if (knownLossy(derived)) {
-      return {
-        // No reported bitrate, so the VBR flag cannot promote this into the good tier.
-        points: Math.round(lossyPoints(derived, floor, undefined, track.format.ext) * SCORE_WEIGHTS.qualityDerivedScale),
-        signal: { quality: "derived", derivedBitrateKbps },
-      };
-    }
-    return { points: 0, signal: { quality: "derived", derivedBitrateKbps } };
-  }
-  return { points: 0, signal: { quality: "unknown" } };
+/** Basename class. A clean basename inherits the album folder. An unmarked file is original. */
+export function fileVersionClass(track: CandidateTrack): VersionClass {
+  const base = classifyVersionText(basenameText(track));
+  if (!isCleanTitle(base)) return versionClassFromMarks(base);
+  const parent = classifyVersionText(parentText(track));
+  if (!isCleanTitle(parent)) return versionClassFromMarks(parent);
+  return "original";
 }
 
 /**
- * Known, normal duration. Thresholds are ratios of the preferred size, not fixed
- * MiB literals. 0 through the preferred size, gentle until 1.5×, then a
- * stronger slope from 2× that does not flatten before the hard maximum.
+ * Lower is better. `balanced` is remix = extended, then original, then radio edit, then other.
+ * A specific saved class moves to the front. The remaining classes keep that order.
  */
-function knownDurationSizePenalty(sizeMb: number, preferredMb: number): number {
-  if (!(preferredMb > 0) || sizeMb <= preferredMb) return 0;
-  const ratio = sizeMb / preferredMb;
-  const gentleUntil = SCORE_WEIGHTS.sizeGentleUntilRatio;
-  const strongFrom = SCORE_WEIGHTS.sizeStrongFromRatio;
-  const gentleMax = SCORE_WEIGHTS.sizeGentleMax;
-  const strongAt = SCORE_WEIGHTS.sizeStrongAtDouble;
-  if (ratio <= gentleUntil) {
-    const t = (ratio - 1) / (gentleUntil - 1);
-    return Math.round(gentleMax * t);
+export function versionClassRank(versionClass: VersionClass, preference: VersionPreference): number {
+  const fun = versionClass === "remix" || versionClass === "extended";
+  if (preference === "remix") {
+    if (versionClass === "remix") return 0;
+    if (versionClass === "extended") return 1;
+    if (versionClass === "original") return 2;
+    if (versionClass === "radio_edit") return 3;
+    return 4;
   }
-  if (ratio <= strongFrom) {
-    const t = (ratio - gentleUntil) / (strongFrom - gentleUntil);
-    return Math.round(gentleMax + (strongAt - gentleMax) * t);
+  if (preference === "extended") {
+    if (versionClass === "extended") return 0;
+    if (versionClass === "remix") return 1;
+    if (versionClass === "original") return 2;
+    if (versionClass === "radio_edit") return 3;
+    return 4;
   }
-  return Math.round(strongAt + SCORE_WEIGHTS.sizeStrongPerRatio * (ratio - strongFrom));
+  if (preference === "original") {
+    if (versionClass === "original") return 0;
+    if (fun) return 1;
+    if (versionClass === "radio_edit") return 2;
+    return 3;
+  }
+  if (preference === "radio_edit") {
+    if (versionClass === "radio_edit") return 0;
+    if (fun) return 1;
+    if (versionClass === "original") return 2;
+    return 3;
+  }
+  if (fun) return 0;
+  if (versionClass === "original") return 1;
+  if (versionClass === "radio_edit") return 2;
+  return 3;
 }
 
-/** Unknown duration, a long-recording phrase, or a duration past the preferred max. */
-function sizeStandsInForDuration(track: CandidateTrack, policy: ResolvedPolicy): boolean {
-  if (track.durationSeconds === undefined) return true;
-  if (matchesLongRecording(track, policy.longRecordingPhrases)) return true;
-  if (policy.preferredMaxDurationSeconds !== null && track.durationSeconds > policy.preferredMaxDurationSeconds) {
-    return true;
+function mentionsTitle(text: string, titleTokens: readonly string[]): boolean {
+  const normalized = normalizeMatchText(text);
+  return titleTokens.length > 0 && hasEveryToken(normalized, titleTokens);
+}
+
+function medleyPieces(raw: string): string[] {
+  return raw
+    .split(MEDLEY_SPLIT)
+    .map((piece) => piece.trim())
+    .filter((piece) => piece.length > 0);
+}
+
+function leftoverTitleTokens(piece: string, titleTokens: readonly string[], artistTokens: readonly string[]): string[] {
+  const withoutCredit = piece.replace(/\b(?:feat|ft|featuring)\b[\s\S]*$/i, " ");
+  const withoutTrack = withoutCredit.replace(/^\s*\d{1,4}[._)\s-]+/, "").replace(/^\s*\d{1,4}\s*$/, "");
+  const normalized = stripVersionTerms(normalizeMatchText(withoutTrack), TITLE_STRIP_PHRASES);
+  return significantTokens(normalized).filter(
+    (token) => !titleTokens.includes(token) && !artistTokens.includes(token) && !CREDIT_WORDS.has(token) && !/^\d+$/.test(token),
+  );
+}
+
+/**
+ * Another song title joined to this one by ` _ `, ` / `, ` | `, ` + `, or the words medley / megamix.
+ * A repeated title, a track number, the artist, a feat credit, and a version marker are not another title.
+ */
+function isMedleyName(raw: string, titleTokens: readonly string[] | null, artistTokens: readonly string[]): boolean {
+  if (!titleTokens || titleTokens.length === 0 || !raw.trim()) return false;
+  const pieces = medleyPieces(raw);
+  if (pieces.length < 2) return false;
+  const others = pieces.filter((piece) => leftoverTitleTokens(piece, titleTokens, artistTokens).length > 0);
+  if (others.length === 0) return false;
+  const namesThisSong = pieces.some((piece) => mentionsTitle(piece, titleTokens));
+  const medleyWord = /\b(?:medley|megamix)\b/i.test(raw);
+  return namesThisSong || medleyWord;
+}
+
+function stripTributePhrases(raw: string, artist: string): string {
+  const phrase = artistPhrasePattern(artist);
+  if (!phrase) return raw;
+  const patterns = [
+    new RegExp(`\\btribute to\\s+${phrase}\\b`, "gi"),
+    new RegExp(`\\b${phrase}\\s+cover\\b`, "gi"),
+    new RegExp(`\\boriginally by\\s+${phrase}\\b`, "gi"),
+    new RegExp(`\\bin the style of\\s+${phrase}\\b`, "gi"),
+    new RegExp(`\\bmade famous by\\s+${phrase}\\b`, "gi"),
+  ];
+  let text = raw;
+  for (const pattern of patterns) text = text.replace(pattern, " ");
+  return text;
+}
+
+function differentArtistLeads(rawBase: string, artistTokens: readonly string[], titleTokens: readonly string[] | null): boolean {
+  const withoutTrack = rawBase.replace(/^\s*\d{1,4}[._)\s-]+/, "");
+  const parts = withoutTrack.split(/\s+[-–—]\s+/);
+  if (parts.length < 2) return false;
+  const lead = parts[0] ?? "";
+  if (!/[a-z]/i.test(lead)) return false;
+  const leadTokens = significantTokens(stripVersionTerms(normalizeMatchText(lead), TITLE_STRIP_PHRASES));
+  if (leadTokens.length === 0) return false;
+  if (titleTokens && titleTokens.length > 0 && titleTokens.every((token) => leadTokens.includes(token))) return false;
+  if (artistTokens.length > 0 && artistTokens.every((token) => leadTokens.includes(token))) return false;
+  return true;
+}
+
+function identityRejection(
+  track: CandidateTrack,
+  policy: ResolvedPolicy,
+  titleTokens: readonly string[] | null,
+): keyof FilterRemovalCounts | null {
+  const artists = artistTokenList(policy.query);
+  const artist = typeof policy.query.artist === "string" ? policy.query.artist : "";
+  const base = rawBasename(track);
+  if (titleTokens && !hasEveryToken(pathText(track), titleTokens)) return "title_mismatch";
+  if (isMedleyName(base, titleTokens, artists) || isMedleyName(albumFolderRaw(track), titleTokens, artists)) {
+    return "medley";
+  }
+  if (artists.length === 0) return null;
+  const artistInBasename = hasEveryToken(basenameText(track), artists);
+  const artistOutsideTribute = hasEveryToken(normalizeMatchText(stripTributePhrases(base, artist)), artists);
+  const otherLeads = differentArtistLeads(base, artists, titleTokens);
+  if (otherLeads && artistInBasename && !artistOutsideTribute) return "tribute_or_cover";
+  if (otherLeads && !artistInBasename) return "artist_mismatch";
+  return null;
+}
+
+function knownReportedKbps(kbps: number | undefined): number | undefined {
+  if (kbps === undefined || !Number.isFinite(kbps)) return undefined;
+  if (kbps >= BITRATE_KNOWN_MIN && kbps <= BITRATE_KNOWN_MAX) return kbps;
+  return undefined;
+}
+
+function derivedMp3Kbps(track: CandidateTrack): number | undefined {
+  if (track.format.ext !== ".mp3") return undefined;
+  if (track.durationSeconds === undefined || !(track.durationSeconds > 0) || !(track.sizeBytes > 0)) return undefined;
+  return Math.round((track.sizeBytes * 8) / track.durationSeconds / 1000);
+}
+
+function underBitrate(track: CandidateTrack): boolean {
+  if (track.format.lossless) return false;
+  const reported = track.bitrateKbps;
+  if (reported !== undefined && Number.isFinite(reported) && reported > 0 && reported < BITRATE_REJECT_BELOW) return true;
+  if (knownReportedKbps(reported) !== undefined) return false;
+  const derived = derivedMp3Kbps(track);
+  return derived !== undefined && derived > 0 && derived < BITRATE_REJECT_BELOW;
+}
+
+function isShort(track: CandidateTrack, policy: ResolvedPolicy, cohort: readonly number[]): boolean {
+  if (policy.shortRecordingPenalty === 0) return false;
+  const duration = track.durationSeconds;
+  if (duration === undefined || !Number.isFinite(duration) || duration <= 0) return false;
+  if (duration < policy.shortRecordingFloorSeconds) return true;
+  const known = cohort.filter((value) => Number.isFinite(value) && value > 0);
+  if (known.length >= policy.shortRecordingMinSamples) {
+    const relative = policy.shortRecordingFraction * medianOf(known);
+    if (duration < relative) return true;
   }
   return false;
-}
-
-function sizeOvershoot(track: CandidateTrack, policy: ResolvedPolicy): number {
-  if (policy.preferredMaxFileSizeMb === null) return 0;
-  const sizeMb = track.sizeBytes / MIB;
-  if (sizeMb <= policy.preferredMaxFileSizeMb) return 0;
-  const preferred = policy.preferredMaxFileSizeMb;
-  if (!sizeStandsInForDuration(track, policy)) {
-    return -knownDurationSizePenalty(sizeMb, preferred);
-  }
-  const over = sizeMb / preferred - 1;
-  return -Math.max(0, Math.round(SCORE_WEIGHTS.sizeSteepPerRatio * over));
 }
 
 function medianOf(values: readonly number[]): number {
@@ -841,137 +777,6 @@ function medianOf(values: readonly number[]): number {
   if (sorted.length % 2 === 1) return upper;
   const lower = sorted[mid - 1] ?? upper;
   return (lower + upper) / 2;
-}
-
-/**
- * Soft penalty for a known short duration. Missing duration is not short.
- * The line is the absolute floor, or (when enough lengths are known) the
- * fraction of the median, whichever is higher and still above this file.
- * The score scales from 0 at that line to `shortRecordingPenalty` at 0 seconds.
- */
-function shortRecordingPoints(track: CandidateTrack, policy: ResolvedPolicy, cohort: readonly number[]): number {
-  const duration = track.durationSeconds;
-  if (duration === undefined || !Number.isFinite(duration) || duration <= 0) return 0;
-  let line = 0;
-  if (duration < policy.shortRecordingFloorSeconds) line = policy.shortRecordingFloorSeconds;
-  const known = cohort.filter((value) => Number.isFinite(value) && value > 0);
-  if (known.length >= policy.shortRecordingMinSamples) {
-    const relative = policy.shortRecordingFraction * medianOf(known);
-    if (duration < relative) line = Math.max(line, relative);
-  }
-  if (!(line > duration)) return 0;
-  const ratio = (line - duration) / line;
-  const magnitude = Math.abs(policy.shortRecordingPenalty);
-  return -Math.min(magnitude, Math.round(magnitude * ratio));
-}
-
-function durationOvershoot(track: CandidateTrack, policy: ResolvedPolicy): number {
-  if (policy.preferredMaxDurationSeconds === null) return 0;
-  if (track.durationSeconds === undefined) return 0;
-  if (track.durationSeconds <= policy.preferredMaxDurationSeconds) return 0;
-  const overRatio = (track.durationSeconds - policy.preferredMaxDurationSeconds) / policy.preferredMaxDurationSeconds;
-  const penalty = Math.round(SCORE_WEIGHTS.durationPenaltyScale * overRatio * (1 + overRatio));
-  return -Math.min(SCORE_WEIGHTS.durationPenaltyCap, penalty);
-}
-
-function reportedOrDerivedKbps(track: CandidateTrack): number | undefined {
-  if (track.format.lossless) return undefined;
-  if (track.bitrateKbps !== undefined && knownLossy(track.bitrateKbps)) return track.bitrateKbps;
-  if (track.durationSeconds !== undefined && track.durationSeconds > 0 && track.sizeBytes > 0) {
-    const derived = Math.round((track.sizeBytes * 8) / track.durationSeconds / 1000);
-    if (knownLossy(derived)) return derived;
-  }
-  return undefined;
-}
-
-/**
- * Bad results get no saved-version bonus. A mild duration overshoot still can:
- * the file keeps the bonus until the overshoot reaches `versionOvershootCutoff`.
- */
-function versionBonusBlocked(
-  track: CandidateTrack,
-  policy: ResolvedPolicy,
-  cohort: readonly number[],
-  stem: boolean,
-): boolean {
-  if (stem) return true;
-  if (matchesLongRecording(track, policy.longRecordingPhrases)) return true;
-  if (shortRecordingPoints(track, policy, cohort) < 0) return true;
-  const kbps = reportedOrDerivedKbps(track);
-  if (kbps !== undefined && kbps < SCORE_WEIGHTS.bitrateVersionMin) return true;
-  if (durationOvershoot(track, policy) <= SCORE_WEIGHTS.versionOvershootCutoff) return true;
-  return false;
-}
-
-/** The request names a version kind or a version-penalty term, so the saved preference stays off. */
-function requestNamesVersion(policy: ResolvedPolicy): boolean {
-  const askedText = requestedBlob(policy.query);
-  if (!askedText) return false;
-  const asked = classifyVersionText(askedText);
-  if (asked.radio_edit || asked.extended || asked.remix || asked.original || asked.other) return true;
-  return matchedTerms(askedText, policy.versionPenaltyTerms).length > 0;
-}
-
-function availabilityScore(track: CandidateTrack): number {
-  const slot = track.availability?.freeSlot;
-  const queue = track.availability?.queueLength;
-  const speed = track.availability?.speedBps;
-  let score = 0;
-  if (slot === true) score += SCORE_WEIGHTS.availabilityFreeSlot;
-  else if (slot === false) score -= Math.abs(SCORE_WEIGHTS.availabilityNoSlot);
-  if (queue !== undefined && Number.isFinite(queue) && queue > 0) {
-    if (queue > SCORE_WEIGHTS.availabilityExtremeQueueAbove) score += SCORE_WEIGHTS.availabilityExtremeQueue;
-    else score -= Math.min(SCORE_WEIGHTS.availabilityQueueCap, Math.ceil(queue / SCORE_WEIGHTS.availabilityQueueStep));
-  }
-  if (speed !== undefined && Number.isFinite(speed) && speed > 1) {
-    const bonus = Math.round(Math.log10(speed) - 2);
-    score += Math.max(0, Math.min(SCORE_WEIGHTS.availabilitySpeedCap, bonus));
-  }
-  return score;
-}
-
-function versionPreferencePoints(
-  track: CandidateTrack,
-  policy: ResolvedPolicy,
-  cohort: readonly number[],
-  stem: boolean,
-): number {
-  if (policy.versionPreference === "balanced") return 0;
-  if (requestNamesVersion(policy)) return 0;
-  if (versionBonusBlocked(track, policy, cohort, stem)) return 0;
-  const base = classifyVersionText(basenameText(track));
-  const parent = classifyVersionText(parentText(track));
-  const preference = policy.versionPreference;
-  if (marksMatch(base, preference)) return SCORE_WEIGHTS.versionBasename;
-  if (preference === "original" && isCleanTitle(base) && isCleanTitle(parent)) return SCORE_WEIGHTS.versionCleanOriginal;
-  if (marksMatch(parent, preference)) return SCORE_WEIGHTS.versionParent;
-  if (preference === "extended" && base.remix) return SCORE_WEIGHTS.versionSecondary;
-  if (preference === "remix" && base.extended) return SCORE_WEIGHTS.versionSecondary;
-  return 0;
-}
-
-function explicitRequestMatches(fileText: string, policy: ResolvedPolicy): boolean {
-  const askedText = requestedBlob(policy.query);
-  if (!askedText) return false;
-  const asked = classifyVersionText(askedText);
-  const file = classifyVersionText(fileText);
-  if (asked.radio_edit && file.radio_edit) return true;
-  if (asked.extended && file.extended) return true;
-  if (asked.remix && file.remix) return true;
-  if (asked.original && file.original) return true;
-  const classified = asked.radio_edit || asked.extended || asked.remix || asked.original;
-  const terms = classified
-    ? policy.versionPenaltyTerms.filter((term) => !CLASSIFIED_OVERLAP.has(term.toLowerCase()))
-    : policy.versionPenaltyTerms;
-  const askedTerms = matchedTerms(askedText, terms);
-  const fileTerms = matchedTerms(fileText, terms);
-  return askedTerms.some((term) => fileTerms.some((found) => sameTerm(found, term)));
-}
-
-function formatPoints(track: CandidateTrack, preference: FormatPreference): number {
-  if (preference === "prefer_mp3" && track.format.ext === ".mp3") return SCORE_WEIGHTS.formatPreference;
-  if (preference === "prefer_flac" && track.format.ext === ".flac") return SCORE_WEIGHTS.formatPreference;
-  return 0;
 }
 
 function incidentalStem(
@@ -991,67 +796,165 @@ function incidentalStem(
   return fileStemTerms.some((term) => !asked.some((item) => sameTerm(item, term)));
 }
 
+function firstRejection(
+  track: CandidateTrack,
+  policy: ResolvedPolicy,
+  titleTokens: readonly string[] | null,
+): keyof FilterRemovalCounts | null {
+  if (track.locked) return "locked";
+  if (isJunkPath(track.path)) return "junk";
+  if (!extensionAllowed(track, policy.allowedExtensions)) return "extensions";
+  if (formatRejected(track, policy.formatPreference)) return "format_preference";
+  if (policy.minFileSizeMb !== null && track.sizeBytes < policy.minFileSizeMb * MIB) return "min_file_size";
+  const identity = identityRejection(track, policy, titleTokens);
+  if (identity) return identity;
+  const asked = matchedTerms(requestedBlob(policy.query), policy.versionPenaltyTerms);
+  if (incidentalStem(track, policy, titleTokens, asked)) return "stem";
+  if (matchesLongRecording(track, policy.longRecordingPhrases)) return "long_recording";
+  if (underBitrate(track)) return "under_bitrate";
+  if (policy.maxFileSizeMb !== null && track.sizeBytes > policy.maxFileSizeMb * MIB) return "max_file_size";
+  if (!withinHardDuration(track, policy.maxDurationSeconds)) return "max_duration";
+  if (policy.maxSampleRate !== null && track.sampleRateHz !== undefined && track.sampleRateHz > policy.maxSampleRate) {
+    return "max_sample_rate";
+  }
+  if (policy.maxBitDepth !== null && track.bitDepth !== undefined && track.bitDepth > policy.maxBitDepth) {
+    return "max_bit_depth";
+  }
+  return null;
+}
+
+/** The request names a version kind, so the saved preference stays off. */
+function requestNamesVersion(policy: ResolvedPolicy): boolean {
+  const askedText = requestedBlob(policy.query);
+  if (!askedText) return false;
+  const asked = classifyVersionText(askedText);
+  if (asked.radio_edit || asked.extended || asked.remix || asked.original || asked.other) return true;
+  return matchedTerms(askedText, policy.versionPenaltyTerms).length > 0;
+}
+
+function requestedVersionClass(policy: ResolvedPolicy): VersionClass | null {
+  if (!requestNamesVersion(policy)) return null;
+  const asked = classifyVersionText(requestedBlob(policy.query));
+  if (asked.remix) return "remix";
+  if (asked.extended) return "extended";
+  if (asked.radio_edit) return "radio_edit";
+  if (asked.original) return "original";
+  if (asked.other) return "other";
+  return null;
+}
+
+function explicitRequestMatches(track: CandidateTrack, policy: ResolvedPolicy): boolean {
+  const wanted = requestedVersionClass(policy);
+  if (!wanted) return false;
+  return fileVersionClass(track) === wanted;
+}
+
+function qualityOf(track: CandidateTrack, floor: number): { acceptable: boolean; signal: QualitySignal } {
+  if (track.format.lossless) {
+    const known = track.bitDepth !== undefined || track.sampleRateHz !== undefined;
+    return { acceptable: true, signal: { quality: known ? "reported" : "unknown" } };
+  }
+  const reported = knownReportedKbps(track.bitrateKbps);
+  if (reported !== undefined) {
+    const vbrAcceptable = track.format.ext === ".mp3" && track.vbr === true && reported >= BITRATE_VBR_ACCEPTABLE;
+    return { acceptable: vbrAcceptable || reported >= floor, signal: { quality: "reported" } };
+  }
+  const derived = derivedMp3Kbps(track);
+  if (derived !== undefined) {
+    const usable = derived >= BITRATE_KNOWN_MIN && derived <= BITRATE_KNOWN_MAX;
+    return {
+      acceptable: usable && derived >= floor,
+      signal: { quality: "derived", derivedBitrateKbps: derived },
+    };
+  }
+  return { acceptable: false, signal: { quality: "unknown" } };
+}
+
+function formatMatches(track: CandidateTrack, preference: FormatPreference): boolean {
+  if (preference === "prefer_mp3") return track.format.ext === ".mp3";
+  if (preference === "prefer_flac") return track.format.ext === ".flac";
+  return false;
+}
+
 export function scoreTrack(track: CandidateTrack, input: SelectionPolicyInput = {}): TrackScore {
   const policy = resolveSelectionPolicy(input);
   const titleTokens = requiredTitleTokens(policy.query, policy.versionPenaltyTerms);
   const artists = artistTokenList(policy.query);
-  const askedText = requestedBlob(policy.query);
-  const fileText = pathText(track);
-  const asked = matchedTerms(askedText, policy.versionPenaltyTerms);
+  const versionClass = fileVersionClass(track);
+  const namesVersion = requestNamesVersion(policy);
+  const activePreference = namesVersion ? "balanced" : policy.versionPreference;
   const breakdown = emptyBreakdown();
-
-  if (explicitRequestMatches(fileText, policy)) breakdown.requestedVersion = SCORE_WEIGHTS.requestedVersion;
-  if (titleTokens && titleTokens.length > 0) {
-    breakdown.titleMatch = hasEveryToken(basenameText(track), titleTokens)
-      ? SCORE_WEIGHTS.titleMatchBasename
-      : SCORE_WEIGHTS.titleMatchPath;
-  }
-  if (artists.length > 0 && hasEveryToken(fileText, artists)) breakdown.artistInPath = SCORE_WEIGHTS.artistInPath;
-  breakdown.format = formatPoints(track, policy.formatPreference);
-
   const quality = qualityOf(track, policy.bitrateFloorKbps);
-  breakdown.quality = quality.points;
-  const cohort = input.cohortDurationSeconds ?? [];
-  const stem = incidentalStem(track, policy, titleTokens, asked);
-  breakdown.versionPreference = versionPreferencePoints(track, policy, cohort, stem);
-  breakdown.sizeOvershoot = sizeOvershoot(track, policy);
-  breakdown.durationOvershoot = durationOvershoot(track, policy);
-  if (matchesLongRecording(track, policy.longRecordingPhrases)) breakdown.longRecording = SCORE_WEIGHTS.longRecording;
-  breakdown.shortRecording = shortRecordingPoints(track, policy, cohort);
-  if (stem) breakdown.stem = SCORE_WEIGHTS.stem;
-  breakdown.availability = availabilityScore(track);
+
+  breakdown.requestedVersion = explicitRequestMatches(track, policy) ? 1 : 0;
+  if (titleTokens && hasEveryToken(pathText(track), titleTokens)) breakdown.titleMatch = 1;
+  if (artists.length > 0 && hasEveryToken(pathText(track), artists)) breakdown.artistInPath = 1;
+  breakdown.format = formatMatches(track, policy.formatPreference) ? 1 : 0;
+  breakdown.quality = quality.acceptable ? 1 : 0;
+  breakdown.versionPreference = !namesVersion && versionClassRank(versionClass, activePreference) === 0 ? 1 : 0;
 
   const total = SCORE_COMPONENTS.reduce((sum, key) => sum + breakdown[key], 0);
-  return { pick: track, breakdown, total, signals: quality.signal };
+  return { pick: track, breakdown, total, signals: quality.signal, versionClass };
 }
 
-function compareScored(a: TrackScore, b: TrackScore): number {
-  if (a.total !== b.total) return b.total - a.total;
-  const peer = a.pick.peer.localeCompare(b.pick.peer);
+function compareSurvivors(a: CandidateTrack, b: CandidateTrack, policy: ResolvedPolicy): number {
+  const aExplicit = explicitRequestMatches(a, policy) ? 1 : 0;
+  const bExplicit = explicitRequestMatches(b, policy) ? 1 : 0;
+  if (aExplicit !== bExplicit) return bExplicit - aExplicit;
+
+  const preference = requestNamesVersion(policy) ? "balanced" : policy.versionPreference;
+  const versionGap = versionClassRank(fileVersionClass(a), preference) - versionClassRank(fileVersionClass(b), preference);
+  if (versionGap !== 0) return versionGap;
+
+  const aQuality = qualityOf(a, policy.bitrateFloorKbps).acceptable ? 1 : 0;
+  const bQuality = qualityOf(b, policy.bitrateFloorKbps).acceptable ? 1 : 0;
+  if (aQuality !== bQuality) return bQuality - aQuality;
+
+  const aFormat = formatMatches(a, policy.formatPreference) ? 0 : 1;
+  const bFormat = formatMatches(b, policy.formatPreference) ? 0 : 1;
+  if (aFormat !== bFormat) return aFormat - bFormat;
+
+  const aFree = a.availability?.freeSlot === true ? 0 : 1;
+  const bFree = b.availability?.freeSlot === true ? 0 : 1;
+  if (aFree !== bFree) return aFree - bFree;
+
+  const aQueue = a.availability?.queueLength ?? 0;
+  const bQueue = b.availability?.queueLength ?? 0;
+  if (aQueue !== bQueue) return aQueue - bQueue;
+
+  const aSpeed = a.availability?.speedBps ?? 0;
+  const bSpeed = b.availability?.speedBps ?? 0;
+  if (aSpeed !== bSpeed) return bSpeed - aSpeed;
+
+  const peer = a.peer.localeCompare(b.peer);
   if (peer !== 0) return peer;
-  return a.pick.path.localeCompare(b.pick.path);
+  return a.path.localeCompare(b.path);
 }
 
 /**
- * Filter, score, and pick. Filters are not relaxed when every track is removed.
+ * Filter, then pick the first survivor in the ordered comparison.
+ * Filters are not relaxed when every track is removed.
  */
 export function selectTracks(tracks: readonly CandidateTrack[], input: SelectionPolicyInput = {}): TrackSelection {
   const policy = resolveSelectionPolicy(input);
   const titleTokens = requiredTitleTokens(policy.query, policy.versionPenaltyTerms);
   const removed = emptyRemovals();
-  const kept: CandidateTrack[] = [];
+  const pending: CandidateTrack[] = [];
   for (const track of tracks) {
     const rejection = firstRejection(track, policy, titleTokens);
     if (rejection) removed[rejection] += 1;
+    else pending.push(track);
+  }
+  const cohort = pending
+    .map((track) => track.durationSeconds)
+    .filter((value): value is number => value !== undefined && Number.isFinite(value) && value > 0);
+  const kept: CandidateTrack[] = [];
+  for (const track of pending) {
+    if (isShort(track, policy, cohort)) removed.short_recording += 1;
     else kept.push(track);
   }
   if (kept.length === 0) return { outcome: "no_suitable_result", removed, reason: removalReason(removed) };
-  const cohortDurationSeconds = kept
-    .map((track) => track.durationSeconds)
-    .filter((value): value is number => value !== undefined && Number.isFinite(value) && value > 0);
-  const scored = kept.map((track) => scoreTrack(track, { ...input, cohortDurationSeconds }));
-  scored.sort(compareScored);
-  const best = scored[0];
+  const best = [...kept].sort((a, b) => compareSurvivors(a, b, policy))[0];
   if (!best) return { outcome: "no_suitable_result", removed, reason: removalReason(removed) };
-  return { outcome: "selected", ...best, removed };
+  return { outcome: "selected", ...scoreTrack(best, input), removed };
 }

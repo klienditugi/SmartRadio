@@ -381,10 +381,10 @@ describe("A6 acquisition settings", () => {
     expect(before.statusCode).toBe(200);
     expect(before.json().selection).toMatchObject({
       preferred_max_file_size_mb: 30,
-      max_file_size_mb: 200,
+      max_file_size_mb: 30,
       preferred_max_duration_seconds: 720,
       max_duration_seconds: 1200,
-      version_preference: "extended",
+      version_preference: "balanced",
       format_preference: "prefer_mp3",
     });
     expect(before.json().sources["acquisition.selection.preferred_max_file_size_mb"]).toEqual({ source: "default" });
@@ -397,7 +397,7 @@ describe("A6 acquisition settings", () => {
       headers: ctx.headers,
       payload: {
         selection: {
-          preferred_max_file_size_mb: 40,
+          preferred_max_file_size_mb: 20,
           preferred_max_duration_seconds: 600,
           max_duration_seconds: 900,
           version_preference: "radio_edit",
@@ -407,7 +407,7 @@ describe("A6 acquisition settings", () => {
     });
     expect(saved.statusCode).toBe(200);
     expect(saved.json().selection).toMatchObject({
-      preferred_max_file_size_mb: 40,
+      preferred_max_file_size_mb: 20,
       preferred_max_duration_seconds: 600,
       max_duration_seconds: 900,
       version_preference: "radio_edit",
@@ -436,7 +436,7 @@ describe("A6 acquisition settings", () => {
     });
     expect(tooBig.statusCode).toBe(400);
     expect(tooBig.json().error).toMatch(/preferred_max_file_size_mb/);
-    expect(ctx.app.config.acquisition.selection.preferred_max_file_size_mb).toBe(40);
+    expect(ctx.app.config.acquisition.selection.preferred_max_file_size_mb).toBe(20);
 
     const tooLong = await ctx.app.inject({
       method: "PUT",
@@ -477,7 +477,7 @@ describe("A6 acquisition settings", () => {
       method: "PUT",
       url: "/api/v1/acquisition/settings",
       headers: ctx.headers,
-      payload: { selection: { preferred_max_file_size_mb: 32 } },
+      payload: { selection: { preferred_max_file_size_mb: 20 } },
     });
     expect(rejected.statusCode).toBe(409);
     expect(rejected.json().error).toContain("SLSKD_PREFERRED_MAX_FILE_SIZE_MB");
@@ -573,7 +573,7 @@ acquisition:
       else process.env.SLSKD_LOSSLESS_PREFERENCE = previousFormat;
       rmSync(dir, { recursive: true, force: true });
     });
-    expect(config.acquisition.selection.version_preference).toBe("extended");
+    expect(config.acquisition.selection.version_preference).toBe("balanced");
     expect(config.acquisition.selection.format_preference).toBe("prefer_mp3");
     const doctor = await app.inject({ method: "GET", url: "/api/v1/doctor" });
     expect(doctor.statusCode).toBe(200);

@@ -16,10 +16,10 @@ import { isEnvPinned, pinNote, type FieldSources } from "../types";
 
 const SELECTION_DEFAULTS: AcquisitionSelectionSettings = {
   preferred_max_file_size_mb: 30,
-  max_file_size_mb: 200,
+  max_file_size_mb: 30,
   preferred_max_duration_seconds: 720,
   max_duration_seconds: 1200,
-  version_preference: "extended",
+  version_preference: "balanced",
   format_preference: "prefer_mp3",
 };
 
@@ -388,9 +388,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
         <>
           <h3>Which file to download</h3>
           <p className="muted">
-            Sizes are MiB (1 MiB = 1,048,576 bytes). Hard max file size is {hardFileMb} MiB. A file above the
-            preferred size is penalized, not dropped, until it hits that hard max. Preferred size and preferred
-            duration must stay at or under the hard limits.
+            Sizes are MiB (1 MiB = 1,048,576 bytes). Files larger than the hard max ({hardFileMb} MiB) are rejected.
+            The selector does not grade size below that cap. A file with no size never reaches it.
           </p>
           <label className="field">
             <span>Preferred max file size (MiB)</span>
@@ -421,8 +420,8 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
           </label>
           <SourceLine sources={fieldSources} path="acquisition.selection.version_preference" />
           <p className="muted">
-            A ranking bonus for a normal-length file. Balanced adds none. If the preferred version is missing, another
-            suitable file can still be chosen. A version named in the request outranks this.
+            Balanced ranks remix, club, and extended together, then an album or original, then a radio edit. A saved
+            class moves to the front. A version named in the request turns the saved choice off.
           </p>
           <label className="field">
             <span>Preferred max duration (seconds)</span>
@@ -468,9 +467,9 @@ export function AcquisitionForm(props: WizardProps | SettingsProps) {
           </label>
           <SourceLine sources={fieldSources} path="acquisition.selection.format_preference" />
           <p className="muted">
-            Separate from audio quality. Prefer keeps the other format eligible. MP3 only and FLAC only drop the other
-            format and do not relax if nothing remains. 256–320 kbps CBR, VBR MP3 at about 220 kbps or higher, and a
-            16/44.1 FLAC score as the same quality.
+            MP3 is preferred by default. Prefer FLAC only chooses among files that already passed the filters. MP3 only
+            and FLAC only drop the other format. Acceptable quality is 192 kbps or higher, MP3 VBR around 170 kbps or
+            higher, or FLAC. 128 kbps up to that line is a worse file, not a reject.
           </p>
         </>
       ) : null}
