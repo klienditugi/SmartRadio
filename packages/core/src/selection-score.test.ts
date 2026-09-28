@@ -380,6 +380,107 @@ describe("ordered selector", () => {
     const ftOnly = mp3("ft", "Daft Punk ft. Pharrell Williams - Get Lucky.mp3");
     expect(selected([bootleg, editOnly, remixOnly, xOnly, featOnly, ftOnly]).pick.peer).toBe("bootleg");
     expect(selected([bootleg]).removed.medley).toBe(0);
+
+    const oneTight = mp3("one-tight", "Daft Punk - Get Lucky-You Should Be Dancing.mp3");
+    const sceneHyphen = mp3("scene-hyphen", "Daft_Punk-Get_Lucky.mp3");
+    const jask = mp3("jask", "Daft Punk ft Pharrell Nile Rodgers-Get Lucky-Jask Rework2 7.mp3");
+    const urlHyphen = mp3("url", "Daft Punk-Get Lucky (dj Ko Remix) www.my-free-mp3.net .mp3");
+    for (const file of [oneTight, sceneHyphen, jask, urlHyphen]) {
+      const decision = selectTracks([file], { query });
+      expect(decision.outcome).toBe("selected");
+      if (decision.outcome === "selected") expect(decision.removed.medley).toBe(0);
+    }
+    const grammy = mp3(
+      "grammy",
+      "Daft Punk - Get Lucky-Freak Out-Another Star (with Stevie Wonder, Pharrell Williams & Nile Rodgers) (Grammy Awards 2014).mp3",
+      {
+        path: "@@share052\\MUSICA\\DAFT PUNK\\DAFT PUNK - COLLECTION\\Daft Punk - Get Lucky-Freak Out-Another Star (with Stevie Wonder, Pharrell Williams & Nile Rodgers) (Grammy Awards 2014).mp3",
+        sizeBytes: 13631033,
+        bitrateKbps: 320,
+        durationSeconds: 339,
+      },
+    );
+    const grammyOnly = selectTracks([grammy], { query });
+    expect(grammyOnly.outcome).toBe("no_suitable_result");
+    if (grammyOnly.outcome === "no_suitable_result") expect(grammyOnly.removed.medley).toBe(1);
+
+    const atk = mp3("atk", "Get Lucky For The Music (ATK 2024) - 11A - 126.mp3", {
+      path: "@@share002\\Música\\Media.localized\\Music\\Daft Punk vs Georgio Schultz & The Cube Guys\\Unknown Album\\Get Lucky For The Music (ATK 2024) - 11A - 126.mp3",
+      sizeBytes: 14533708,
+      bitrateKbps: 320,
+      durationSeconds: 363,
+    });
+    const artistInVsFolder = mp3("artist-in-vs", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Daft Punk vs Someone\\Daft Punk - Get Lucky.mp3",
+    });
+    const vsElsewhere = mp3("vs-elsewhere", "Get Lucky.mp3", {
+      path: "music\\vs\\Daft Punk\\Get Lucky.mp3",
+    });
+    const atkOnly = selectTracks([atk], { query });
+    expect(atkOnly.outcome).toBe("no_suitable_result");
+    if (atkOnly.outcome === "no_suitable_result") expect(atkOnly.removed.medley).toBe(1);
+    expect(selected([artistInVsFolder]).removed.medley).toBe(0);
+    expect(selected([vsElsewhere]).removed.medley).toBe(0);
+
+    const drumlessName = mp3(
+      "drumless-name",
+      "092 - Daft Punk - Get Lucky (Drumless Edition) (ft. Pharrell Williams and Nile Rodgers).mp3",
+      { bitrateKbps: 320, durationSeconds: 369, sizeBytes: 14813281 },
+    );
+    const drumlessFolder = mp3(
+      "drumless-folder",
+      "08 - Get Lucky (feat. Pharrell Williams and Nile Rodgers).mp3",
+      {
+        path: "music\\Daft Punk\\2023 - Random Access Memories (Drumless Edition)\\08 - Get Lucky (feat. Pharrell Williams and Nile Rodgers).mp3",
+        bitrateKbps: 320,
+        durationSeconds: 369,
+        sizeBytes: 14824630,
+      },
+    );
+    expect(fileVersionClass(drumlessName)).toBe("other");
+    expect(selected([drumlessName]).removed.stem).toBe(0);
+    const folderDecision = selectTracks([drumlessFolder], { query });
+    expect(folderDecision.outcome).toBe("selected");
+    if (folderDecision.outcome === "selected") {
+      expect(folderDecision.versionClass).toBe("original");
+      expect(folderDecision.removed.stem).toBe(0);
+    }
+    const slowOriginal = mp3("slow-original", "08 - Get lucky.mp3", {
+      bitrateKbps: 192,
+      availability: { freeSlot: false, queueLength: 40, speedBps: 1 },
+    });
+    const fastFolder = mp3("fast-folder", drumlessFolder.basename, {
+      ...drumlessFolder,
+      peer: "fast-folder",
+      availability: { freeSlot: true, queueLength: 0, speedBps: 9_000_000_000 },
+    });
+    expect(selected([fastFolder, slowOriginal], { versionPreference: "original" }).pick.peer).toBe("fast-folder");
+
+    const recut = mp3("recut", "Daft Punk - Get Lucky (Sgt Slick ReCut).mp3", {
+      path: "media\\Music\\Sgt Slick\\Discography\\Daft Punk - Get Lucky (Sgt Slick ReCut).mp3",
+      sizeBytes: 13954458,
+      bitrateKbps: 320,
+      durationSeconds: 339,
+      availability: { freeSlot: true, queueLength: 0, speedBps: 9_000_000_000 },
+    });
+    const bangerz = mp3(
+      "bangerz",
+      "Daft Punk - Get Lucky 2k17 (Ash Simons Bangerz) (Ft. AURI) (Intro Clean).mp3",
+      {
+        sizeBytes: 10544680,
+        bitrateKbps: 320,
+        durationSeconds: 262,
+        availability: { freeSlot: true, queueLength: 0, speedBps: 9_000_000_000 },
+      },
+    );
+    expect(fileVersionClass(recut)).toBe("other");
+    expect(fileVersionClass(bangerz)).toBe("other");
+    const plain = mp3("plain-original", "08 - Get lucky.mp3", {
+      bitrateKbps: 192,
+      availability: { freeSlot: false, queueLength: 40, speedBps: 1 },
+    });
+    expect(selected([recut, bangerz, plain], { versionPreference: "original" }).pick.peer).toBe("plain-original");
+    expect(selected([recut, bangerz, plain], { versionPreference: "remix" }).pick.peer).toBe("plain-original");
     const inCoverFolder = mp3("album", "Daft Punk - Get Lucky.mp3", {
       path: "music\\cover\\Daft Punk - Get Lucky.mp3",
     });

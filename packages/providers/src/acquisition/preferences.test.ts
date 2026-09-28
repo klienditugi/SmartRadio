@@ -356,3 +356,199 @@ describe("dry-run grid", () => {
     expect(explicit[1]?.versionClass).toBe("original");
   });
 });
+
+describe("wrong-song rows stay out of the pick", () => {
+  type Treatment =
+    | { kind: "reject"; reason: "medley" | "stem" }
+    | { kind: "class"; versionClass: "other" };
+
+  const rows: { filename: string; size: number; bitRate: number; length: number; treatment: Treatment }[] = [
+    {
+      filename:
+        "@@share052\\MUSICA\\DAFT PUNK\\DAFT PUNK - COLLECTION\\Daft Punk - Get Lucky-Freak Out-Another Star (with Stevie Wonder, Pharrell Williams & Nile Rodgers) (Grammy Awards 2014).mp3",
+      size: 13631033,
+      bitRate: 320,
+      length: 339,
+      treatment: { kind: "reject", reason: "medley" },
+    },
+    {
+      filename:
+        "@@share052\\MUSICA\\DAFT PUNK\\Daft Punk - MashUps\\Daft Punk - Get Lucky-Freak Out-Another Star (with Stevie Wonder, Pharrell Williams & Nile Rodgers) (Grammy Awards 2014).mp3",
+      size: 13631033,
+      bitRate: 320,
+      length: 339,
+      treatment: { kind: "reject", reason: "medley" },
+    },
+    {
+      filename:
+        "@@share052\\MUSICA\\STEVIE WONDER\\Stevie Wonder - Duets & Collaborations\\Stevie Wonder - Get Lucky-Freak Out-Another Star (with Daft Punk, Pharrell Williams & Nile Rodgers).mp3",
+      size: 13631033,
+      bitRate: 320,
+      length: 339,
+      treatment: { kind: "reject", reason: "medley" },
+    },
+    {
+      filename:
+        "@@share002\\Música\\Media.localized\\Music\\Daft Punk vs Georgio Schultz & The Cube Guys\\Unknown Album\\Get Lucky For The Music (ATK 2024) - 11A - 126.mp3",
+      size: 14533708,
+      bitRate: 320,
+      length: 363,
+      treatment: { kind: "reject", reason: "medley" },
+    },
+    {
+      filename:
+        "@@share002\\Música\\Media.localized\\Music\\Daft Punk vs Georgio Schultz & The Cube Guys\\Unknown Album\\Get Lucky Music (Abel The Kid 2013) - 11A - 126.mp3",
+      size: 14531633,
+      bitRate: 320,
+      length: 363,
+      treatment: { kind: "reject", reason: "medley" },
+    },
+    {
+      filename:
+        "@@share086\\MUSIC\\complete\\lwl\\2025-10\\Daft Punk - Get Lucky 2k17 (Ash Simons Bangerz) (Ft. AURI) (Intro Clean).mp3",
+      size: 10544680,
+      bitRate: 320,
+      length: 262,
+      treatment: { kind: "class", versionClass: "other" },
+    },
+    {
+      filename: "media\\Music\\Sgt Slick\\Discography\\Daft Punk - Get Lucky (Sgt Slick ReCut).mp3",
+      size: 13954458,
+      bitRate: 320,
+      length: 339,
+      treatment: { kind: "class", versionClass: "other" },
+    },
+    {
+      filename:
+        "@@share027\\~Essentials~\\Daft Punk - Essentials [2026] [MP3-320]-Sc4r3cr0w\\092 - Daft Punk - Get Lucky (Drumless Edition) (ft. Pharrell Williams and Nile Rodgers).mp3",
+      size: 14813281,
+      bitRate: 320,
+      length: 369,
+      treatment: { kind: "class", versionClass: "other" },
+    },
+    {
+      filename:
+        "@@share016\\Music\\Daft Punk\\Random Access Memories (Drumless Edition)\\08 Get Lucky (Drumless Edition) (feat. Pharrell Williams and Nile Rodgers).mp3",
+      size: 14868623,
+      bitRate: 320,
+      length: 369,
+      treatment: { kind: "class", versionClass: "other" },
+    },
+  ];
+
+  function basenameOf(filename: string): string {
+    return filename.split(/[/\\]/).pop() ?? filename;
+  }
+
+  function isKnownWrong(filename: string): boolean {
+    const base = basenameOf(filename);
+    if (/\bdrumless\b/i.test(base)) return true;
+    return rows.some((row) => basenameOf(row.filename) === base);
+  }
+
+  function asFile(row: { filename: string; size: number; bitRate: number; length: number }) {
+    return { filename: row.filename, size: row.size, bitRate: row.bitRate, length: row.length, extension: "", isLocked: false };
+  }
+
+  function solo(row: { filename: string; size: number; bitRate: number; length: number }): SearchPayload {
+    return {
+      responses: [
+        {
+          username: "peer-known",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 1,
+          files: [asFile(row)],
+        },
+      ],
+      searchText: "Daft Punk Get Lucky",
+    };
+  }
+
+  it("leaves a Drumless Edition folder with a clean basename for an owner decision", () => {
+    const folderOnly = {
+      filename:
+        "music\\Daft Punk\\2023 - Random Access Memories (Drumless Edition)\\08 - Get Lucky (feat. Pharrell Williams and Nile Rodgers).mp3",
+      size: 14824630,
+      bitRate: 320,
+      length: 369,
+    };
+    const decision = run(solo(folderOnly));
+    expect(decision.outcome).toBe("selected");
+    if (decision.outcome !== "selected") return;
+    expect(decision.versionClass).toBe("original");
+    expect(decision.removed.stem).toBe(0);
+    expect(decision.file.size).toBe(folderOnly.size);
+    expect(decision.file.bitRate).toBe(folderOnly.bitRate);
+  });
+
+  it("rejects or reclassifies each real filename", () => {
+    for (const row of rows) {
+      const decision = run(solo(row));
+      if (row.treatment.kind === "reject") {
+        expect(decision.outcome, row.filename).toBe("no_suitable_result");
+        if (decision.outcome === "no_suitable_result") expect(decision.removed[row.treatment.reason]).toBe(1);
+      } else {
+        expect(decision.outcome, row.filename).toBe("selected");
+        if (decision.outcome !== "selected") continue;
+        expect(decision.versionClass).toBe(row.treatment.versionClass);
+        expect(fileVersionClass({
+          peer: "peer-known",
+          path: row.filename,
+          basename: basenameOf(row.filename),
+          folders: row.filename.split(/[/\\]/).filter(Boolean).slice(0, -1),
+          sizeBytes: row.size,
+          durationSeconds: row.length,
+          format: { ext: ".mp3", lossless: false },
+          bitrateKbps: row.bitRate,
+          locked: false,
+        })).toBe(row.treatment.versionClass);
+      }
+    }
+  });
+
+  it("does not pick a known wrong row when that row has the best peer", () => {
+    const bestFiles = rows.map(asFile);
+    const responses: SlskdResponse[] = curated.responses.map((response) => ({
+      ...response,
+      hasFreeUploadSlot: false,
+      queueLength: 1_000_000,
+      uploadSpeed: 1,
+      files: (response.files ?? []).filter((file) => !isKnownWrong(file.filename)),
+    }));
+    responses.push({
+      username: "peer-fast",
+      hasFreeUploadSlot: true,
+      queueLength: 0,
+      uploadSpeed: 1_000_000_000_000,
+      files: bestFiles,
+    });
+    const payload: SearchPayload = { responses, searchText: curated.searchText };
+    const versions = ["balanced", "original", "extended", "remix", "radio_edit"] as const;
+    const formats = ["prefer_mp3", "prefer_flac", "mp3_only", "flac_only"] as const;
+    for (const versionPreference of versions) {
+      for (const formatPreference of formats) {
+        const decision = run(payload, { versionPreference, formatPreference });
+        expect(decision.outcome, `${versionPreference}/${formatPreference}`).toBe("selected");
+        if (decision.outcome !== "selected") continue;
+        expect(isKnownWrong(decision.file.filename), `${versionPreference}/${formatPreference} ${decision.file.filename}`).toBe(
+          false,
+        );
+      }
+    }
+    const explicit = [
+      { versionPreference: "extended" as const, title: "Get Lucky (Radio Edit)" },
+      { versionPreference: "remix" as const, title: "Get Lucky (Album Version)" },
+    ];
+    for (const item of explicit) {
+      const decision = run(payload, {
+        versionPreference: item.versionPreference,
+        formatPreference: "prefer_mp3",
+        query: { artist: "Daft Punk", title: item.title },
+      });
+      expect(decision.outcome, item.title).toBe("selected");
+      if (decision.outcome !== "selected") continue;
+      expect(isKnownWrong(decision.file.filename), item.title).toBe(false);
+    }
+  });
+});

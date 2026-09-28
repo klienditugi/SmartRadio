@@ -11,11 +11,12 @@
  *   wrong title (the phrase must start at a boundary in the original basename;
  *   punctuation is spaces only for that comparison, and anything after the
  *   phrase is allowed; a closing ) or ] , or the requested artist name, is
- *   also a boundary), a medley (two other songs, or the whole word mashup,
- *   mash up, segue, transition, vs, or versus in the basename), a tribute or the word
- *   cover in the basename,
- *   a different artist leading the basename when this artist is only in folders,
- *   stems, long-recording phrases, bitrate under 128 kbps,
+ *   also a boundary), a medley (two other songs joined by ` _ `, ` / `, ` | `,
+ *   ` + `, or a tight capitalised hyphen, or the whole word mashup, mash up,
+ *   segue, transition, vs, or versus in the basename; vs or versus also counts
+ *   in a folder the artist was taken from), a tribute or the word cover in the
+ *   basename, a different artist leading the basename when this artist is only
+ *   in folders, stems, long-recording phrases, bitrate under 128 kbps,
  *   files over max_file_size_mb (default 30 MiB), duration, sample rate, bit depth,
  *   and a short recording (same detector as before: under 90s, or under 0.6 of the
  *   median once five lengths are known).
@@ -110,6 +111,10 @@ const OTHER_VERSION_PHRASES = [
   "stem",
   "stems",
   "multitrack",
+  "drumless",
+  "intro clean",
+  "recut",
+  "re cut",
 ] as const;
 const REMIX_WORDS = ["remix", "rmx"] as const;
 /**
@@ -155,6 +160,12 @@ const CLASSIFIED_OVERLAP = new Set(["remix", "edit", "extended", "radio edit"]);
 
 /** Spaced joins only. A bare underscore is a space, not a medley separator. ` - ` is not one either. */
 const MEDLEY_SPLIT = / _ | \/ | \| | \+ |\b(?:medley|megamix)\b/i;
+/**
+ * `Get Lucky-Freak Out-Another Star`. The capital after the hyphen starts the next title.
+ * Case-sensitive on purpose, so `daft_punk-get_lucky` and `my-free-mp3` are not joins.
+ * Spaced ` - ` stays a normal artist/title separator.
+ */
+const TIGHT_TITLE_HYPHEN = /(?<=[A-Za-z])-(?=[A-Z])/;
 
 export const SCORE_COMPONENTS = [
   "requestedVersion",
@@ -665,10 +676,14 @@ function mentionsTitle(text: string, titleTokens: readonly string[]): boolean {
 }
 
 function medleyPieces(raw: string): string[] {
-  return raw
-    .split(MEDLEY_SPLIT)
-    .map((piece) => piece.trim())
-    .filter((piece) => piece.length > 0);
+  const pieces: string[] = [];
+  for (const part of raw.split(MEDLEY_SPLIT)) {
+    for (const tighter of part.split(TIGHT_TITLE_HYPHEN)) {
+      const trimmed = tighter.trim();
+      if (trimmed.length > 0) pieces.push(trimmed);
+    }
+  }
+  return pieces;
 }
 
 function leftoverTitleTokens(piece: string, titleTokens: readonly string[], artistTokens: readonly string[]): string[] {
@@ -682,9 +697,11 @@ function leftoverTitleTokens(piece: string, titleTokens: readonly string[], arti
 
 /**
  * A medley names at least two other titles beside this song, joined by
- * ` _ `, ` / `, ` | `, or ` + `, or it uses the word medley / megamix.
+ * ` _ `, ` / `, ` | `, ` + `, or a tight capitalised hyphen (`Title-Other`),
+ * or it uses the word medley / megamix.
  * One extra piece (an artist, or a single other title) is not enough.
  * A repeated title, a track number, the artist, a feat credit, and a version marker are not another title.
+ * Spaced ` - ` is not a join. A lowercase hyphen (`artist-title`, a URL) is not one either.
  */
 function isMedleyName(raw: string, titleTokens: readonly string[] | null, artistTokens: readonly string[]): boolean {
   if (!titleTokens || titleTokens.length === 0 || !raw.trim()) return false;
@@ -809,13 +826,30 @@ function basenameHasCoverWord(track: CandidateTrack): boolean {
 
 /**
  * Whole word or phrase in the basename only. `mash-up` normalizes to `mash up`,
- * and `vs.` normalizes to `vs`. A folder name does not count.
+ * and `vs.` normalizes to `vs`. A folder name does not count, except the
+ * artist-folder case below.
  * bootleg, edit, remix, x, feat, and ft do not.
  */
 const MEDLEY_BASENAME_PHRASES = ["mashup", "mash up", "segue", "transition", "versus", "vs"] as const;
 
 function basenameHasMedleyWord(track: CandidateTrack): boolean {
   return hasAnyPhrase(basenameText(track), MEDLEY_BASENAME_PHRASES);
+}
+
+/**
+ * The basename does not name the artist, so the artist is read from a folder.
+ * Whole-word vs/versus in that same folder segment is the basename medley rule.
+ * A vs folder that does not carry the artist, and a basename that already names
+ * the artist, are left alone.
+ */
+function artistTakenFromVsFolder(track: CandidateTrack, artistTokens: readonly string[]): boolean {
+  if (artistTokens.length === 0) return false;
+  if (hasEveryToken(basenameText(track), artistTokens)) return false;
+  return track.folders.some((folder) => {
+    const text = normalizeMatchText(folder);
+    if (!hasEveryToken(text, artistTokens)) return false;
+    return hasPhrase(text, "vs") || hasPhrase(text, "versus");
+  });
 }
 
 function identityRejection(
@@ -831,7 +865,8 @@ function identityRejection(
   if (
     basenameHasMedleyWord(track) ||
     isMedleyName(base, titleTokens, artists) ||
-    isMedleyName(albumFolderRaw(track), titleTokens, artists)
+    isMedleyName(albumFolderRaw(track), titleTokens, artists) ||
+    artistTakenFromVsFolder(track, artists)
   ) {
     return "medley";
   }
