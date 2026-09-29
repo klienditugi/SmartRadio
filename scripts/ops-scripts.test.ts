@@ -42,8 +42,11 @@ describe("ops scripts", () => {
   it("stays on systemd when units and docker are both present", () => {
     const update = read("update.sh");
     const uninstall = read("uninstall.sh");
-    expect(update).not.toMatch(/systemctl list-unit-files/);
-    expect(uninstall).not.toMatch(/systemctl list-unit-files/);
+    expect(update).not.toMatch(/list-unit-files\s*\|/);
+    expect(uninstall).not.toMatch(/list-unit-files\s*\|/);
+    expect(read("scripts/ops-common.sh")).toMatch(/list-unit-files --no-legend --no-pager/);
+    expect(read("scripts/ops-common.sh")).not.toMatch(/list-unit-files\s*\|/);
+    expect(update).toMatch(/run_project_js_build/);
     expect(update).toMatch(/restart_managed_services/);
     expect(read("install.sh")).toMatch(/write_install_mode/);
     expect(read(".gitignore")).toMatch(/\.subwave-install-mode/);

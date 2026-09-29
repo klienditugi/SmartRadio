@@ -123,12 +123,14 @@ read_install_mode() {
   esac
 }
 
-# True when the unit file is installed. No pipeline: list-unit-files piped to
-# grep -q is unsafe under set -o pipefail. grep -q exits on the first match,
-# the writer then dies with SIGPIPE (141), and pipefail makes the test false.
+# True when the unit file is installed.
+# Do not pipe `systemctl list-unit-files` into `grep -q`. Under set -o pipefail,
+# grep -q exits on the first match, systemctl dies with SIGPIPE (141), and the
+# test is false even though the unit is present. Query that one unit and read
+# the command's own exit status and output. No pipe.
 # Tests may set SUBWAVE_SYSTEMD_UNIT_DIRS to a colon-separated fixture path.
-systemd_unit_loaded() {
-  local unit="$1" dir state dirs
+systemd_unit_file_installed() {
+  local unit="$1" dir dirs
   dirs="${SUBWAVE_SYSTEMD_UNIT_DIRS:-/etc/systemd/system:/usr/lib/systemd/system:/lib/systemd/system}"
   while [[ -n "${dirs}" ]]; do
     dir="${dirs%%:*}"
@@ -142,12 +144,30 @@ systemd_unit_loaded() {
       return 0
     fi
   done
+  return 1
+}
+
+systemd_unit_via_systemctl() {
+  local unit="$1" output="" status=0 line="" name=""
   command -v systemctl >/dev/null 2>&1 || return 1
-  state="$(systemctl_show_value LoadState "${unit}")"
-  case "${state}" in
-    loaded|masked) return 0 ;;
-    *) return 1 ;;
-  esac
+  # One unit name. --no-legend keeps the footer out of the output we check.
+  # The shell reads the whole result, so this is not the grep -q pipeline.
+  output="$(systemctl list-unit-files --no-legend --no-pager "${unit}" 2>/dev/null)" && status=0 || status=$?
+  [[ "${status}" -eq 0 ]] || return 1
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    name="${line%%[[:space:]]*}"
+    [[ "${name}" == "${unit}" ]] && return 0
+  done <<< "${output}"
+  return 1
+}
+
+systemd_unit_loaded() {
+  local unit="$1"
+  if systemd_unit_via_systemctl "${unit}"; then
+    return 0
+  fi
+  systemd_unit_file_installed "${unit}"
 }
 
 systemctl_show_value() {
@@ -608,6 +628,92 @@ restart_compose_project() {
   write_install_mode "${root}" compose
   wait_for_api_health "${root}"
   print_deployed_commit "${root}"
+}
+
+# Owner of the clone. sudo ./update.sh must not leave the web build owned by root.
+repo_owner_name() {
+  stat -c '%U' "$1"
+}
+
+repo_owner_group() {
+  stat -c '%G' "$1"
+}
+
+repo_owner_home() {
+  local owner="$1" record=""
+  record="$(getent passwd "${owner}" 2>/dev/null || true)"
+  [[ -n "${record}" ]] || return 1
+  # name:passwd:uid:gid:gecos:home:shell
+  record="${record#*:}"
+  record="${record#*:}"
+  record="${record#*:}"
+  record="${record#*:}"
+  record="${record#*:}"
+  record="${record%%:*}"
+  [[ -n "${record}" ]] || return 1
+  printf '%s\n' "${record}"
+}
+
+# node_modules and the web build only. Never .env, secrets, config, or data.
+each_build_output() {
+  local root="$1" dir
+  printf '%s\n' "${root}/node_modules"
+  printf '%s\n' "${root}/apps/web/dist"
+  for dir in "${root}/apps/"* "${root}/packages/"*; do
+    [[ -d "${dir}/node_modules" ]] || continue
+    printf '%s\n' "${dir}/node_modules"
+  done
+}
+
+chown_build_outputs_to_repo_owner() {
+  local root="$1" owner="" group="" path=""
+  [[ "$(id -u)" -eq 0 ]] || return 0
+  owner="$(repo_owner_name "${root}")"
+  group="$(repo_owner_group "${root}")"
+  [[ -n "${owner}" && "${owner}" != "root" ]] || return 0
+  while IFS= read -r path; do
+    [[ -e "${path}" ]] || continue
+    chown -R "${owner}:${group}" "${path}"
+  done < <(each_build_output "${root}")
+}
+
+# Run a command as the clone owner when this script is root. Preserves PATH so
+# pnpm found by sudo is still visible. HOME is the owner's, not /root.
+run_as_repo_owner() {
+  local root="$1"
+  shift
+  local owner="" home=""
+  owner="$(repo_owner_name "${root}")"
+  if [[ "$(id -u)" -ne 0 || -z "${owner}" || "${owner}" == "root" ]]; then
+    "$@"
+    return
+  fi
+  home="$(repo_owner_home "${owner}")" || die "repo owner ${owner} has no passwd home; refusing to build as root"
+  if command -v runuser >/dev/null 2>&1; then
+    runuser -u "${owner}" -- env HOME="${home}" PATH="${PATH}" USER="${owner}" LOGNAME="${owner}" "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -u "${owner}" -- env HOME="${home}" PATH="${PATH}" USER="${owner}" LOGNAME="${owner}" "$@"
+  else
+    die "repo owner is ${owner}; refusing to build as root without runuser or sudo"
+  fi
+}
+
+run_project_js_build() {
+  local root="$1" owner=""
+  need_cmd node
+  need_cmd pnpm
+  chown_build_outputs_to_repo_owner "${root}"
+  owner="$(repo_owner_name "${root}")"
+  if [[ "$(id -u)" -eq 0 && "${owner}" != "root" ]]; then
+    info "installing dependencies and building the web UI as ${owner}"
+  else
+    info "installing dependencies and building the web UI"
+  fi
+  (
+    cd "${root}"
+    run_as_repo_owner "${root}" pnpm install --frozen-lockfile
+    run_as_repo_owner "${root}" pnpm --filter @subwave-ai/web build
+  )
 }
 
 # Restarts the install that is already there. Never starts the other mode.

@@ -17,6 +17,7 @@ while [[ $# -gt 0 ]]; do
       echo "Docker used by another project (slskd's smartradio-slskd) does not select Compose."
       echo "If the API port is held by anything other than the unit or container being restarted, this script stops and names that process. It does not kill it."
       echo "--force does not switch install mode, kill processes, or overwrite .env, secrets, config, or data."
+      echo "When run as root, pnpm install and the web build run as the owner of this directory."
       echo "Does not install or update Ollama. Does not overwrite .env, secrets, config, or library files."
       exit 0
       ;;
@@ -32,10 +33,7 @@ git fetch origin
 info "pulling current branch (rebase)"
 git pull --rebase --autostash origin "$(git rev-parse --abbrev-ref HEAD)" || warn "git pull failed — resolve locally and retry"
 
-need_cmd node
-need_cmd pnpm
-pnpm install --frozen-lockfile
-pnpm --filter @subwave-ai/web build
+run_project_js_build "${ROOT}"
 
 if [[ -f "${ROOT}/.env" ]]; then
   load_env_file "${ROOT}/.env"

@@ -36,7 +36,7 @@ pnpm test   # includes scripts/ops-scripts.test.ts
 ./doctor.sh # when the API is not running, health is expected to FAIL
 ```
 
-`scripts/test-update-mode.sh` covers update mode selection. The old `systemctl list-unit-files | grep -q` test is false under `set -o pipefail` when the unit is present (SIGPIPE, exit 141). The harness reproduces that with a stub `systemctl` and a stub `docker`, and checks that a systemd install restarts units and does not run Compose.
+`scripts/test-update-mode.sh` covers update mode selection. The old `systemctl list-unit-files | grep -q` test is false under `set -o pipefail` when the unit is present (SIGPIPE, exit 141). The harness reproduces that with a stub `systemctl` and a stub `docker`. The replacement is `systemctl list-unit-files --no-legend --no-pager subwave-api.service` with no pipe: exit status 0 and the unit name in the output. A systemd install then restarts units and does not run Compose. The same harness checks that a root update runs `pnpm install` and the web build as the owner of the clone, and chowns `node_modules` and `apps/web/dist` back to that owner without touching secrets, `.env`, config, or data.
 
 `install.sh --help` must mention that Ollama is never installed.
 

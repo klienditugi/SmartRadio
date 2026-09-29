@@ -215,10 +215,7 @@ if [[ "${SKIP_BUILD}" -eq 0 ]]; then
       die "pnpm is required (corepack not available)"
     fi
   fi
-  info "installing JavaScript dependencies"
-  (cd "${ROOT}" && pnpm install --frozen-lockfile)
-  info "building web UI"
-  (cd "${ROOT}" && pnpm --filter @subwave-ai/web build)
+  run_project_js_build "${ROOT}"
 fi
 
 if [[ "${MODE}" == "compose" ]]; then

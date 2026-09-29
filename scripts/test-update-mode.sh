@@ -52,6 +52,29 @@ prepare_case() {
 printf '%s\n' "$*" >> "${SYSTEMCTL_LOG}"
 case "${1:-}" in
   list-unit-files)
+    queried=""
+    for arg in "$@"; do
+      case "${arg}" in
+        *.service) queried="${arg}" ;;
+      esac
+    done
+    if [[ -n "${queried}" ]]; then
+      # Pipe-free query of one unit. Must not flood, or the old SIGPIPE test
+      # and this path would be the same command.
+      if [[ -n "${SYSTEMCTL_LIST_FAIL:-}" ]]; then
+        exit 141
+      fi
+      case "${SYSTEMCTL_LOAD_STATE:-not-found}" in
+        loaded|masked)
+          case "${queried}" in
+            subwave-api.service|subwave-worker.service)
+              printf '%s %s enabled\n' "${queried}" "${SYSTEMCTL_LOAD_STATE}"
+              ;;
+          esac
+          ;;
+      esac
+      exit 0
+    fi
     printf '%s\n' "subwave-api.service enabled enabled"
     printf '%s\n' "subwave-worker.service enabled enabled"
     i=0
@@ -245,8 +268,9 @@ install_unit_files() {
 }
 
 scenario_pipefail_fixed() {
-  install_unit_files
-  local with_pipefail=0 without=0
+  # No unit files on disk. Detection has to succeed from systemctl alone.
+  export SYSTEMCTL_LOAD_STATE=loaded
+  local with_pipefail=0 without=0 targeted=0 targeted_out=""
   set +e
   set -o pipefail
   systemctl list-unit-files | grep -q '^subwave-api.service'
@@ -254,8 +278,10 @@ scenario_pipefail_fixed() {
   set +o pipefail
   systemctl list-unit-files | grep -q '^subwave-api.service'
   without=$?
-  set -e
   set -o pipefail
+  targeted_out="$(systemctl list-unit-files --no-legend --no-pager subwave-api.service 2>/dev/null)"
+  targeted=$?
+  set -e
   if [[ "${with_pipefail}" -ne 141 ]]; then
     echo "expected SIGPIPE fall-through (141) from list-unit-files piped to grep -q, got ${with_pipefail}" >&2
     return 1
@@ -264,6 +290,11 @@ scenario_pipefail_fixed() {
     echo "without pipefail the same pipeline should succeed because the unit is present, got ${without}" >&2
     return 1
   fi
+  if [[ "${targeted}" -ne 0 || "${targeted_out}" != subwave-api.service* ]]; then
+    echo "pipe-free list-unit-files subwave-api.service failed: status ${targeted} output [${targeted_out}]" >&2
+    return 1
+  fi
+  systemd_unit_loaded subwave-api.service
   : > "${SYSTEMCTL_LOG}"
   : > "${DOCKER_LOG}"
   export DOCKER_COMPOSE_LS=smartradio-slskd
@@ -272,7 +303,7 @@ scenario_pipefail_fixed() {
 
 scenario_show_sigpipe_still_systemd() {
   install_unit_files
-  export SYSTEMCTL_SHOW_FAIL=1
+  export SYSTEMCTL_LIST_FAIL=1
   export DOCKER_COMPOSE_LS=subwave-ai
   mode="$(resolve_deploy_mode "${CASE}/repo")"
   [[ "${mode}" == "systemd" ]]
@@ -391,6 +422,77 @@ scenario_proc_fallback_quiet() {
   [[ -z "${pids}" ]]
 }
 
+write_owner_stubs() {
+  local owner="$1"
+  export CHOWN_LOG="${CASE}/chown.log"
+  export RUNUSER_LOG="${CASE}/runuser.log"
+  export PNPM_LOG="${CASE}/pnpm.log"
+  : > "${CHOWN_LOG}"
+  : > "${RUNUSER_LOG}"
+  : > "${PNPM_LOG}"
+  cat > "${CASE}/bin/stat" << EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "-c" ]]; then
+  case "\${2:-}" in
+    %U) printf '%s\n' '${owner}'; exit 0 ;;
+    %G) printf '%s\n' '${owner}'; exit 0 ;;
+  esac
+fi
+exit 1
+EOF
+  cat > "${CASE}/bin/chown" << 'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${CHOWN_LOG}"
+exit 0
+EOF
+  cat > "${CASE}/bin/runuser" << 'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${RUNUSER_LOG}"
+exit 0
+EOF
+  cat > "${CASE}/bin/sudo" << 'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${RUNUSER_LOG}"
+exit 0
+EOF
+  cat > "${CASE}/bin/pnpm" << 'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${PNPM_LOG}"
+exit 0
+EOF
+  cat > "${CASE}/bin/node" << 'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  cat > "${CASE}/bin/getent" << EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "passwd" && "\${2:-}" == "${owner}" ]]; then
+  printf '%s\n' '${owner}:x:1001:1001:Owner:/home/${owner}:/bin/bash'
+  exit 0
+fi
+exit 2
+EOF
+  chmod +x "${CASE}/bin/stat" "${CASE}/bin/chown" "${CASE}/bin/runuser" "${CASE}/bin/sudo" "${CASE}/bin/pnpm" "${CASE}/bin/node" "${CASE}/bin/getent"
+}
+
+scenario_build_as_repo_owner() {
+  export STUB_UID=0
+  write_owner_stubs grokbot
+  mkdir -p "${CASE}/repo/node_modules" "${CASE}/repo/apps/web/dist" "${CASE}/repo/apps/api/node_modules" "${CASE}/repo/packages/core/node_modules" "${CASE}/repo/secrets" "${CASE}/repo/data" "${CASE}/repo/config"
+  printf 'x\n' > "${CASE}/repo/secrets/verification_hmac_key"
+  printf 'x\n' > "${CASE}/repo/.env"
+  printf 'x\n' > "${CASE}/repo/config/subwave.yaml"
+  printf 'x\n' > "${CASE}/repo/data/subwave.sqlite"
+  run_project_js_build "${CASE}/repo"
+}
+
+scenario_build_not_root() {
+  export STUB_UID=1000
+  write_owner_stubs grokbot
+  mkdir -p "${CASE}/repo/node_modules" "${CASE}/repo/apps/web/dist"
+  run_project_js_build "${CASE}/repo"
+}
+
 scenario_ss_failure_uses_proc() {
   export SS_FAIL=1
   export PATH="${CASE}/bin:${ORIG_PATH}"
@@ -402,11 +504,13 @@ scenario_ss_failure_uses_proc() {
 bash -n "${ROOT}/install.sh" "${ROOT}/update.sh" "${ROOT}/uninstall.sh" "${ROOT}/scripts/ops-common.sh" "${ROOT}/scripts/test-update-mode.sh"
 ok "bash -n ops scripts"
 
-if grep -nE 'systemctl list-unit-files' "${ROOT}/update.sh" "${ROOT}/uninstall.sh"; then
-  bad "update.sh or uninstall.sh still calls systemctl list-unit-files"
+if grep -nE 'list-unit-files[[:space:]]*\|' "${ROOT}/update.sh" "${ROOT}/uninstall.sh" "${ROOT}/scripts/ops-common.sh"; then
+  bad "systemd detection still pipes list-unit-files"
 else
-  ok "update and uninstall do not call systemctl list-unit-files"
+  ok "systemd detection does not pipe list-unit-files"
 fi
+grep -q 'list-unit-files --no-legend --no-pager' "${ROOT}/scripts/ops-common.sh"
+ok "detection queries one unit without grep"
 
 grep -q 'restart_managed_services' "${ROOT}/update.sh"
 ok "update.sh restarts through restart_managed_services"
@@ -423,7 +527,8 @@ commit="$(git -C "${CASE}/repo" rev-parse HEAD)"
 assert_out_has "prints deployed commit" "deployed commit ${commit}"
 assert_out_has "health is 200" "/api/v1/health returned 200"
 assert_log_has "restarts both units" "${SYSTEMCTL_LOG}" "restart subwave-api.service subwave-worker.service"
-assert_log_lacks "does not call list-unit-files while restarting" "${SYSTEMCTL_LOG}" "list-unit-files"
+assert_log_has "queries subwave-api.service directly" "${SYSTEMCTL_LOG}" "list-unit-files --no-legend --no-pager subwave-api.service"
+assert_log_lacks "restart does not dump every unit" "${SYSTEMCTL_LOG}" "unit-00000.service"
 assert_log_lacks "does not compose up" "${DOCKER_LOG}" " up "
 assert_log_lacks "does not mention slskd to docker" "${DOCKER_LOG}" "smartradio-slskd"
 [[ "$(tr -d '[:space:]' < "$(install_mode_file "${CASE}/repo")")" == "systemd" ]] && ok "records systemd after restart" || bad "records systemd after restart"
@@ -520,6 +625,28 @@ assert_log_lacks "inactive unit does not compose up" "${DOCKER_LOG}" " up "
 
 prepare_case
 run_scenario "api port comes from config, then env, else 8788" ok scenario_yaml_port
+
+prepare_case
+run_scenario "root build runs as the repo owner" ok scenario_build_as_repo_owner
+assert_log_has "chowns root node_modules" "${CASE}/chown.log" "grokbot:grokbot ${CASE}/repo/node_modules"
+assert_log_has "chowns web dist" "${CASE}/chown.log" "grokbot:grokbot ${CASE}/repo/apps/web/dist"
+assert_log_has "chowns package node_modules" "${CASE}/chown.log" "grokbot:grokbot ${CASE}/repo/apps/api/node_modules"
+assert_log_has "chowns workspace package node_modules" "${CASE}/chown.log" "grokbot:grokbot ${CASE}/repo/packages/core/node_modules"
+assert_log_lacks "does not chown secrets" "${CASE}/chown.log" "secrets"
+assert_log_lacks "does not chown env" "${CASE}/chown.log" ".env"
+assert_log_lacks "does not chown config" "${CASE}/chown.log" "subwave.yaml"
+assert_log_lacks "does not chown data" "${CASE}/chown.log" "data"
+assert_log_has "runuser drops to the owner" "${CASE}/runuser.log" "-u grokbot"
+assert_log_has "install runs through runuser" "${CASE}/runuser.log" "pnpm install --frozen-lockfile"
+assert_log_has "web build runs through runuser" "${CASE}/runuser.log" "pnpm --filter @subwave-ai/web build"
+[[ ! -s "${CASE}/pnpm.log" ]] && ok "pnpm is not executed as root" || bad "pnpm is not executed as root"
+
+prepare_case
+run_scenario "non-root build stays the current user" ok scenario_build_not_root
+assert_log_has "non-root runs pnpm install" "${CASE}/pnpm.log" "install --frozen-lockfile"
+assert_log_has "non-root runs the web build" "${CASE}/pnpm.log" "--filter @subwave-ai/web build"
+[[ ! -s "${CASE}/runuser.log" ]] && ok "non-root does not call runuser" || bad "non-root does not call runuser"
+[[ ! -s "${CASE}/chown.log" ]] && ok "non-root does not chown" || bad "non-root does not chown"
 
 prepare_case
 run_scenario "proc net tcp is quiet when ss is absent" ok scenario_proc_fallback_quiet
