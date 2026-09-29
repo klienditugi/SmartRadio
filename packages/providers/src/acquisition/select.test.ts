@@ -753,6 +753,7 @@ describe("slskd search ranking", () => {
       tribute_or_cover: 0,
       artist_mismatch: 0,
       stem: 0,
+      unaccepted_version: 0,
       long_recording: 0,
       under_bitrate: 0,
       short_recording: 0,
@@ -761,7 +762,7 @@ describe("slskd search ranking", () => {
       outcome: "no_suitable_result",
       removed,
       reason:
-        "no_suitable_result: locked=2, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, long_recording=0, under_bitrate=0, short_recording=0",
+        "no_suitable_result: locked=2, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=0, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, unaccepted_version=0, long_recording=0, under_bitrate=0, short_recording=0",
     });
     expect(selectSearchResult(payload, opts)).toBeNull();
     expect(selectSearch({ responses: [] }, opts)).toEqual({ outcome: "no_responses" });
@@ -963,12 +964,13 @@ describe("slskd search ranking", () => {
         tribute_or_cover: 0,
         artist_mismatch: 0,
         stem: 0,
+        unaccepted_version: 0,
         long_recording: 0,
         under_bitrate: 0,
         short_recording: 0,
       },
       reason:
-        "no_suitable_result: locked=0, junk=0, extensions=0, format_preference=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=1, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, long_recording=0, under_bitrate=0, short_recording=0",
+        "no_suitable_result: locked=0, junk=0, extensions=0, format_preference=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=1, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, unaccepted_version=0, long_recording=0, under_bitrate=0, short_recording=0",
     });
     expect(selectSearchResult(drumsOnly, { allowedExtensions: [".ogg"] })).toBeNull();
     expect(
@@ -1214,6 +1216,7 @@ describe("slskd search ranking", () => {
       tribute_or_cover: 0,
       artist_mismatch: 0,
       stem: 0,
+      unaccepted_version: 0,
       long_recording: 0,
       under_bitrate: 0,
       short_recording: 0,
@@ -1228,7 +1231,7 @@ describe("slskd search ranking", () => {
     ).toEqual({
       outcome: "no_suitable_result",
       removed,
-      reason: `no_suitable_result: locked=1, junk=1, extensions=1, format_preference=0, min_file_size=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=1, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, long_recording=0, under_bitrate=0, short_recording=0`,
+      reason: `no_suitable_result: locked=1, junk=1, extensions=1, format_preference=0, min_file_size=1, max_file_size=1, max_duration=1, max_sample_rate=1, max_bit_depth=1, title_mismatch=1, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, unaccepted_version=0, long_recording=0, under_bitrate=0, short_recording=0`,
     });
   });
 

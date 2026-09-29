@@ -242,9 +242,13 @@ describe("ordered selector", () => {
     const folderTitle = mp3("folder-title", "1 - remix.flac", {
       path: "@@share\\Daft Punk\\Get Lucky (Daft Punk remix)\\1 - remix.flac",
     });
-    expect(fileVersionClass(oneJoin)).toBe("remix");
-    expect(selected([oneJoin]).pick.peer).toBe("allan");
-    expect(selected([pantelis]).pick.peer).toBe("pantelis");
+    expect(fileVersionClass(oneJoin)).toBe("original");
+    const bootlegOnly = selectTracks([oneJoin], { query });
+    expect(bootlegOnly.outcome).toBe("no_suitable_result");
+    if (bootlegOnly.outcome === "no_suitable_result") expect(bootlegOnly.removed.unaccepted_version).toBe(1);
+    const pantelisOnly = selectTracks([pantelis], { query });
+    expect(pantelisOnly.outcome).toBe("no_suitable_result");
+    if (pantelisOnly.outcome === "no_suitable_result") expect(pantelisOnly.removed.unaccepted_version).toBe(1);
     expect(selected([folderTitle]).pick.peer).toBe("folder-title");
     expect(scoreTrack(folderTitle, { query }).breakdown.titleMatch).toBe(1);
 
@@ -378,8 +382,28 @@ describe("ordered selector", () => {
     const xOnly = mp3("x", "Daft Punk X Pharrell - Get Lucky.mp3");
     const featOnly = mp3("feat", "Daft Punk feat. Pharrell Williams - Get Lucky.mp3");
     const ftOnly = mp3("ft", "Daft Punk ft. Pharrell Williams - Get Lucky.mp3");
-    expect(selected([bootleg, editOnly, remixOnly, xOnly, featOnly, ftOnly]).pick.peer).toBe("bootleg");
-    expect(selected([bootleg]).removed.medley).toBe(0);
+    expect(selected([bootleg, editOnly, remixOnly, xOnly, featOnly, ftOnly]).pick.peer).toBe("remix-word");
+    const bootlegDecision = selectTracks([bootleg], { query });
+    expect(bootlegDecision.outcome).toBe("no_suitable_result");
+    if (bootlegDecision.outcome === "no_suitable_result") expect(bootlegDecision.removed.unaccepted_version).toBe(1);
+    const bootlegRemix = mp3("bootleg-remix", "Daft Punk - Get Lucky (Bootleg Remix).mp3");
+    const bootlegRemixOnly = selectTracks([bootlegRemix], { query });
+    expect(bootlegRemixOnly.outcome).toBe("no_suitable_result");
+    if (bootlegRemixOnly.outcome === "no_suitable_result") expect(bootlegRemixOnly.removed.unaccepted_version).toBe(1);
+    const outro = mp3("outro", "Daft Punk - Get Lucky (Outro).mp3");
+    const outroOnly = selectTracks([outro], { query });
+    expect(outroOnly.outcome).toBe("no_suitable_result");
+    if (outroOnly.outcome === "no_suitable_result") expect(outroOnly.removed.unaccepted_version).toBe(1);
+    const outroFolder = mp3("outro-folder", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Outro\\Daft Punk - Get Lucky.mp3",
+    });
+    expect(selected([outroFolder]).removed.unaccepted_version).toBe(0);
+    const yearEdit = mp3("year", "Daft Punk - Get Lucky 2k17.mp3");
+    const notYear = mp3("not-year", "Daft Punk - Get Lucky 2k9.mp3");
+    const yearOnly = selectTracks([yearEdit], { query });
+    expect(yearOnly.outcome).toBe("no_suitable_result");
+    if (yearOnly.outcome === "no_suitable_result") expect(yearOnly.removed.unaccepted_version).toBe(1);
+    expect(selected([notYear]).removed.unaccepted_version).toBe(0);
 
     const oneTight = mp3("one-tight", "Daft Punk - Get Lucky-You Should Be Dancing.mp3");
     const sceneHyphen = mp3("scene-hyphen", "Daft_Punk-Get_Lucky.mp3");

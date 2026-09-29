@@ -17,7 +17,11 @@
  *   in a folder the artist was taken from), a tribute or the word cover in the
  *   basename, a different artist leading the basename when this artist is only
  *   in folders, stems (including the whole word drumless in the basename or a
- *   folder), long-recording phrases, bitrate under 128 kbps,
+ *   folder), an unaccepted version (class other, or a basename whole word
+ *   intro, outro, instrumental, recut, re-cut, bootleg, or 2k plus two digits;
+ *   a reject label wins over remix, club, extended, radio edit, album, or
+ *   original; folders do not trigger these labels), long-recording phrases,
+ *   bitrate under 128 kbps,
  *   files over max_file_size_mb (default 30 MiB), duration, sample rate, bit depth,
  *   and a short recording (same detector as before: under 90s, or under 0.6 of the
  *   median once five lengths are known).
@@ -121,7 +125,6 @@ const REMIX_WORDS = ["remix", "rmx"] as const;
  */
 const DERIVED_VERSION_PHRASES = [
   ...REMIX_WORDS,
-  "bootleg",
   "mashup",
   "mash up",
   "vs",
@@ -215,6 +218,7 @@ export type FilterRemovalCounts = {
   tribute_or_cover: number;
   artist_mismatch: number;
   stem: number;
+  unaccepted_version: number;
   long_recording: number;
   under_bitrate: number;
   short_recording: number;
@@ -235,6 +239,7 @@ const REMOVAL_ORDER = [
   "tribute_or_cover",
   "artist_mismatch",
   "stem",
+  "unaccepted_version",
   "long_recording",
   "under_bitrate",
   "short_recording",
@@ -387,6 +392,7 @@ function emptyRemovals(): FilterRemovalCounts {
     tribute_or_cover: 0,
     artist_mismatch: 0,
     stem: 0,
+    unaccepted_version: 0,
     long_recording: 0,
     under_bitrate: 0,
     short_recording: 0,
@@ -582,7 +588,7 @@ function hasNamedProducerEdit(text: string): boolean {
 
 /**
  * Version marks on already-normalized text. The most specific marker wins.
- * A derived marker (remix, club, mix by, bootleg, mashup, "vs", mixshow,
+ * A derived marker (remix, club, mix by, mashup, "vs", mixshow,
  * rework, or a named-producer edit) is remix or extended/club, never original
  * or radio edit, even when the name also says original, vocal, radio edit, or edit.
  * "original vocal" inside that title is not an original.
@@ -919,6 +925,21 @@ function medianOf(values: readonly number[]): number {
   return (lower + upper) / 2;
 }
 
+/** Basename whole words. A folder does not count. `2k17` is `2k` plus two digits. */
+const UNACCEPTED_BASENAME_PHRASES = ["intro", "outro", "instrumental", "recut", "re cut", "bootleg"] as const;
+const YEAR_EDIT = /\b2k\d{2}\b/;
+
+/**
+ * Class other is not an accepted version. The basename labels above reject
+ * even when the same name is also remix, club, extended, radio edit, album,
+ * or original. A clean title with none of these stays original.
+ */
+function unacceptedVersion(track: CandidateTrack): boolean {
+  const text = basenameText(track);
+  if (hasAnyPhrase(text, UNACCEPTED_BASENAME_PHRASES) || YEAR_EDIT.test(text)) return true;
+  return fileVersionClass(track) === "other";
+}
+
 function incidentalStem(
   track: CandidateTrack,
   policy: ResolvedPolicy,
@@ -950,6 +971,7 @@ function firstRejection(
   if (identity) return identity;
   const asked = matchedTerms(requestedBlob(policy.query), policy.versionPenaltyTerms);
   if (incidentalStem(track, policy, titleTokens, asked)) return "stem";
+  if (unacceptedVersion(track)) return "unaccepted_version";
   if (matchesLongRecording(track, policy.longRecordingPhrases)) return "long_recording";
   if (underBitrate(track)) return "under_bitrate";
   if (policy.maxFileSizeMb !== null && track.sizeBytes > policy.maxFileSizeMb * MIB) return "max_file_size";
