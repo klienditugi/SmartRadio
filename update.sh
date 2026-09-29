@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
       echo "Docker used by another project (slskd's smartradio-slskd) does not select Compose."
       echo "If the API port is held by anything other than the unit or container being restarted, this script stops and names that process. It does not kill it."
       echo "--force does not switch install mode, kill processes, or overwrite .env, secrets, config, or data."
-      echo "When run as root, pnpm install and the web build run as the owner of this directory."
+      echo "When run as root, git fetch/pull, pnpm install, and the web build run as the owner of this directory."
       echo "Does not install or update Ollama. Does not overwrite .env, secrets, config, or library files."
       exit 0
       ;;
@@ -26,12 +26,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 never_touch_ollama_msg
-need_cmd git
 cd "${ROOT}"
-info "fetching origin"
-git fetch origin
-info "pulling current branch (rebase)"
-git pull --rebase --autostash origin "$(git rev-parse --abbrev-ref HEAD)" || warn "git pull failed — resolve locally and retry"
+update_git_checkout "${ROOT}"
 
 run_project_js_build "${ROOT}"
 

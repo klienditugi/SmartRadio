@@ -54,7 +54,7 @@ The two modes are exclusive. `install.sh` records the choice in `.subwave-instal
 
 On a systemd install, `./update.sh` must be run as root (`sudo ./update.sh`). If it is not root, it exits and says to re-run with sudo. It does not start Compose instead.
 
-`sudo ./update.sh` and `sudo ./install.sh` run `pnpm install` and the web build as the owner of the clone (`stat -c %U` of the repo root, via `runuser` or `sudo -u`). Existing `node_modules` directories and `apps/web/dist` are given back to that owner first, so a previous root build can be rewritten. `.env`, secrets, config, and data are not chowned.
+`sudo ./update.sh` and `sudo ./install.sh` run `pnpm install` and the web build as the owner of the clone (`stat -c %U` of the repo root, via `runuser` or `sudo -u`). Existing `node_modules` directories and `apps/web/dist` are given back to that owner first, so a previous root build can be rewritten. The same root update chowns `.git` back to that owner and runs `git fetch` and `git pull` as that user, so a later non-root pull is not blocked by root-owned files in `.git`. `.env`, secrets, config, and data are not chowned.
 
 Before a start or restart, if the API port (`SUBWAVE_API_PORT`, otherwise `server.port` in the config file, otherwise 8788) is held by a process that is not the unit or container being restarted, the script stops and names that process. It does not kill it.
 

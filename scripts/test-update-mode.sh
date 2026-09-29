@@ -475,6 +475,40 @@ EOF
   chmod +x "${CASE}/bin/stat" "${CASE}/bin/chown" "${CASE}/bin/runuser" "${CASE}/bin/sudo" "${CASE}/bin/pnpm" "${CASE}/bin/node" "${CASE}/bin/getent"
 }
 
+write_git_stub() {
+  export GIT_LOG="${CASE}/git.log"
+  : > "${GIT_LOG}"
+  cat > "${CASE}/bin/git" << 'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${GIT_LOG}"
+if [[ "$*" == *rev-parse* ]]; then
+  printf '%s\n' main
+fi
+exit 0
+EOF
+  chmod +x "${CASE}/bin/git"
+}
+
+scenario_git_as_repo_owner() {
+  export STUB_UID=0
+  write_owner_stubs grokbot
+  write_git_stub
+  mkdir -p "${CASE}/repo/.git" "${CASE}/repo/secrets" "${CASE}/repo/data" "${CASE}/repo/config"
+  printf 'x\n' > "${CASE}/repo/.env"
+  printf 'x\n' > "${CASE}/repo/secrets/verification_hmac_key"
+  printf 'x\n' > "${CASE}/repo/config/subwave.yaml"
+  printf 'x\n' > "${CASE}/repo/data/subwave.sqlite"
+  update_git_checkout "${CASE}/repo"
+}
+
+scenario_git_not_root() {
+  export STUB_UID=1000
+  write_owner_stubs grokbot
+  write_git_stub
+  mkdir -p "${CASE}/repo/.git"
+  update_git_checkout "${CASE}/repo"
+}
+
 scenario_build_as_repo_owner() {
   export STUB_UID=0
   write_owner_stubs grokbot
@@ -518,6 +552,13 @@ grep -q 'SIGPIPE' "${ROOT}/scripts/ops-common.sh"
 ok "ops-common documents the SIGPIPE failure"
 grep -q 'write_install_mode' "${ROOT}/install.sh"
 ok "install.sh records the install mode"
+grep -q 'update_git_checkout' "${ROOT}/update.sh"
+ok "update.sh pulls through update_git_checkout"
+if grep -nE '^[[:space:]]*git (fetch|pull|checkout|reset|submodule)' "${ROOT}/update.sh"; then
+  bad "update.sh still runs a git write directly"
+else
+  ok "update.sh does not run git fetch/pull directly"
+fi
 git -C "${ROOT}" check-ignore -q .subwave-install-mode
 ok "install mode file is gitignored"
 
@@ -625,6 +666,29 @@ assert_log_lacks "inactive unit does not compose up" "${DOCKER_LOG}" " up "
 
 prepare_case
 run_scenario "api port comes from config, then env, else 8788" ok scenario_yaml_port
+
+prepare_case
+run_scenario "root git fetch and pull run as the repo owner" ok scenario_git_as_repo_owner
+assert_log_has "chowns .git" "${CASE}/chown.log" "grokbot:grokbot ${CASE}/repo/.git"
+assert_log_lacks "git chown skips secrets" "${CASE}/chown.log" "secrets"
+assert_log_lacks "git chown skips env" "${CASE}/chown.log" ".env"
+assert_log_lacks "git chown skips config" "${CASE}/chown.log" "subwave.yaml"
+assert_log_lacks "git chown skips data" "${CASE}/chown.log" "/data"
+assert_log_has "git fetch goes through runuser" "${CASE}/runuser.log" "git -C ${CASE}/repo fetch origin"
+assert_log_has "git pull goes through runuser" "${CASE}/runuser.log" "git -C ${CASE}/repo pull --rebase --autostash"
+assert_log_has "git rev-parse goes through runuser" "${CASE}/runuser.log" "rev-parse --abbrev-ref HEAD"
+assert_log_lacks "root run does not fetch directly" "${CASE}/git.log" "fetch"
+assert_log_lacks "root run does not pull directly" "${CASE}/git.log" "pull"
+assert_log_lacks "root run does not checkout directly" "${CASE}/git.log" "checkout"
+assert_log_lacks "root run does not reset directly" "${CASE}/git.log" "reset"
+assert_log_lacks "root run does not touch submodules directly" "${CASE}/git.log" "submodule"
+
+prepare_case
+run_scenario "non-root git runs directly" ok scenario_git_not_root
+assert_log_has "non-root git fetch" "${CASE}/git.log" "fetch origin"
+assert_log_has "non-root git pull" "${CASE}/git.log" "pull --rebase --autostash"
+[[ ! -s "${CASE}/chown.log" ]] && ok "non-root git does not chown" || bad "non-root git does not chown"
+[[ ! -s "${CASE}/runuser.log" ]] && ok "non-root git does not call runuser" || bad "non-root git does not call runuser"
 
 prepare_case
 run_scenario "root build runs as the repo owner" ok scenario_build_as_repo_owner

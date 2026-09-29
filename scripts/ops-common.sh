@@ -688,14 +688,40 @@ run_as_repo_owner() {
     "$@"
     return
   fi
-  home="$(repo_owner_home "${owner}")" || die "repo owner ${owner} has no passwd home; refusing to build as root"
+  home="$(repo_owner_home "${owner}")" || die "repo owner ${owner} has no passwd home; refusing to run as root"
   if command -v runuser >/dev/null 2>&1; then
     runuser -u "${owner}" -- env HOME="${home}" PATH="${PATH}" USER="${owner}" LOGNAME="${owner}" "$@"
   elif command -v sudo >/dev/null 2>&1; then
     sudo -u "${owner}" -- env HOME="${home}" PATH="${PATH}" USER="${owner}" LOGNAME="${owner}" "$@"
   else
-    die "repo owner is ${owner}; refusing to build as root without runuser or sudo"
+    die "repo owner is ${owner}; refusing to run as root without runuser or sudo"
   fi
+}
+
+# A previous sudo ./update.sh can leave root-owned files under .git.
+# Give only that directory back. .env, secrets, config, and data stay put.
+chown_git_dir_to_repo_owner() {
+  local root="$1" owner="" group="" gitdir=""
+  [[ "$(id -u)" -eq 0 ]] || return 0
+  gitdir="${root}/.git"
+  [[ -e "${gitdir}" ]] || return 0
+  owner="$(repo_owner_name "${root}")"
+  group="$(repo_owner_group "${root}")"
+  [[ -n "${owner}" && "${owner}" != "root" ]] || return 0
+  chown -R "${owner}:${group}" "${gitdir}"
+}
+
+# fetch/pull (and the rev-parse they need) write or refresh .git. Run them as
+# the clone owner so a later non-root pull is not blocked by root-owned files.
+update_git_checkout() {
+  local root="$1" branch=""
+  need_cmd git
+  chown_git_dir_to_repo_owner "${root}"
+  info "fetching origin"
+  run_as_repo_owner "${root}" git -C "${root}" fetch origin
+  branch="$(run_as_repo_owner "${root}" git -C "${root}" rev-parse --abbrev-ref HEAD)"
+  info "pulling current branch (rebase)"
+  run_as_repo_owner "${root}" git -C "${root}" pull --rebase --autostash origin "${branch}" || warn "git pull failed — resolve locally and retry"
 }
 
 run_project_js_build() {
