@@ -16,8 +16,9 @@
  *   segue, transition, vs, or versus in the basename; vs or versus also counts
  *   in a folder the artist was taken from), a tribute or the word cover in the
  *   basename, a different artist leading the basename when this artist is only
- *   in folders, stems (including the whole word drumless in the basename or a
- *   folder), an unaccepted version (class other, or a basename whole word
+ *   a bare bracket credit or only in folders, stems (including the whole word
+ *   drumless in the basename or a folder), an unaccepted version (class other,
+ *   or a basename whole word
  *   intro, outro, instrumental, recut, re-cut, bootleg, or 2k plus two digits;
  *   a reject label wins over remix, club, extended, radio edit, album, or
  *   original; folders do not trigger these labels), long-recording phrases,
@@ -845,6 +846,60 @@ function basenameHasMedleyWord(track: CandidateTrack): boolean {
  * A vs folder that does not carry the artist, and a basename that already names
  * the artist, are left alone.
  */
+/**
+ * Version words that keep a remixer-first name (or a bracketed remix credit)
+ * out of the bare-credit cover rule. A folder is not read.
+ */
+const BRACKET_CREDIT_VERSION_WORDS = [
+  "remix",
+  "rmx",
+  "mix",
+  "club",
+  "extended",
+  "edit",
+  "re edit",
+  "reedit",
+  "rework",
+  "dub",
+  "bootleg",
+] as const;
+
+function bracketGroups(raw: string): string[] {
+  const groups: string[] = [];
+  for (const match of raw.matchAll(/\(([^)]*)\)|\[([^\]]*)\]|\{([^}]*)\}/g)) {
+    groups.push(match[1] ?? match[2] ?? match[3] ?? "");
+  }
+  return groups;
+}
+
+/** The bracket holds the artist name and nothing else, as in `[Daft Punk]` or `(Daft Punk)`. */
+function isBareArtistCredit(group: string, artistTokens: readonly string[]): boolean {
+  const tokens = significantTokens(normalizeMatchText(group));
+  return tokens.length === artistTokens.length && artistTokens.every((token) => tokens.includes(token));
+}
+
+/**
+ * A different artist leads `<Other Artist> - <Title>`, and the requested artist
+ * appears only as a bare `[Artist]` or `(Artist)` credit. A version word in
+ * that bracket or anywhere else in the basename keeps the file (a remixer
+ * credit). Folders are not read.
+ */
+function bareBracketArtistCredit(
+  rawBase: string,
+  artistTokens: readonly string[],
+  titleTokens: readonly string[] | null,
+): boolean {
+  if (artistTokens.length === 0) return false;
+  if (!differentArtistLeads(rawBase, artistTokens, titleTokens)) return false;
+  const normalized = normalizeMatchText(rawBase);
+  if (hasAnyPhrase(normalized, BRACKET_CREDIT_VERSION_WORDS)) return false;
+  if (!hasEveryToken(normalized, artistTokens)) return false;
+  const holdingArtist = bracketGroups(rawBase).filter((group) => hasEveryToken(normalizeMatchText(group), artistTokens));
+  if (holdingArtist.length === 0 || !holdingArtist.every((group) => isBareArtistCredit(group, artistTokens))) return false;
+  const outside = rawBase.replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ");
+  return !hasEveryToken(normalizeMatchText(outside), artistTokens);
+}
+
 function artistTakenFromVsFolder(track: CandidateTrack, artistTokens: readonly string[]): boolean {
   if (artistTokens.length === 0) return false;
   if (hasEveryToken(basenameText(track), artistTokens)) return false;
@@ -878,6 +933,7 @@ function identityRejection(
   const artistOutsideTribute = hasEveryToken(normalizeMatchText(stripTributePhrases(base, artist)), artists);
   const otherLeads = differentArtistLeads(base, artists, titleTokens);
   if (otherLeads && artistInBasename && !artistOutsideTribute) return "tribute_or_cover";
+  if (bareBracketArtistCredit(base, artists, titleTokens)) return "tribute_or_cover";
   if (otherLeads && !artistInBasename) return "artist_mismatch";
   return null;
 }

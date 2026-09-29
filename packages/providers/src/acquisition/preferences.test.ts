@@ -360,7 +360,7 @@ describe("wrong-song rows stay out of the pick", () => {
     size: number;
     bitRate: number;
     length: number;
-    reason: "medley" | "stem" | "unaccepted_version";
+    reason: "medley" | "stem" | "unaccepted_version" | "tribute_or_cover";
   }[] = [
     {
       filename:
@@ -503,6 +503,13 @@ describe("wrong-song rows stay out of the pick", () => {
       bitRate: 320,
       length: 141,
       reason: "unaccepted_version",
+    },
+    {
+      filename: "music\\1001 Awesome Cover Songs\\Halestorm - Get Lucky [Daft Punk].mp3",
+      size: 7680294,
+      bitRate: 320,
+      length: 188,
+      reason: "tribute_or_cover",
     },
   ];
 

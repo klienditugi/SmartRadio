@@ -316,6 +316,43 @@ describe("ordered selector", () => {
     expect(cohort.versionClass).toBe("radio_edit");
   });
 
+  it("rejects a bare bracket credit when another artist leads", () => {
+    const halestorm = mp3("halestorm", "Halestorm - Get Lucky [Daft Punk].mp3", {
+      sizeBytes: 7_680_294,
+      durationSeconds: 188,
+      bitrateKbps: 320,
+      folders: ["1001 Awesome Cover Songs"],
+    });
+    const paren = mp3("paren", "Halestorm - Get Lucky (Daft Punk).mp3");
+    const remixCredit = mp3("remixer", "Some DJ - Get Lucky (Daft Punk Remix).mp3");
+    const remixerFirst = mp3("dj", "Some DJ - Get Lucky (Some DJ Remix).mp3");
+    const dancing = mp3("beat", "Daft Punk - Get Lucky (Dancing To The Beat).mp3", {
+      sizeBytes: 10_290_240,
+      durationSeconds: 256,
+      bitrateKbps: 320,
+    });
+    const ten = mp3("ten", "Daft Punk ft Pharrell Williams & Nile Rodgers - Get Lucky (10s).mp3", {
+      sizeBytes: 10_004_789,
+      durationSeconds: 247,
+      bitrateKbps: 320,
+    });
+    const halestormOnly = selectTracks([halestorm], { query });
+    const parenOnly = selectTracks([paren], { query });
+    expect(halestormOnly.outcome).toBe("no_suitable_result");
+    expect(parenOnly.outcome).toBe("no_suitable_result");
+    if (halestormOnly.outcome === "no_suitable_result") expect(halestormOnly.removed.tribute_or_cover).toBe(1);
+    if (parenOnly.outcome === "no_suitable_result") expect(parenOnly.removed.tribute_or_cover).toBe(1);
+    expect(selected([remixCredit]).pick.peer).toBe("remixer");
+    expect(fileVersionClass(remixCredit)).toBe("remix");
+    const remixerOnly = selectTracks([remixerFirst], { query });
+    expect(remixerOnly.outcome).toBe("no_suitable_result");
+    if (remixerOnly.outcome === "no_suitable_result") expect(remixerOnly.removed.artist_mismatch).toBe(1);
+    expect(fileVersionClass(dancing)).toBe("original");
+    expect(selected([dancing]).pick.peer).toBe("beat");
+    expect(fileVersionClass(ten)).toBe("original");
+    expect(selected([ten]).pick.peer).toBe("ten");
+  });
+
   it("rejects a tribute or cover and a medley, and keeps a title-first file", () => {
     const cover = mp3("cover", "Daughter - Get Lucky (Daft Punk Cover).mp3");
     const medley = mp3("medley", "Daft Punk - Get Lucky _ Giorgio by Moroder _ Contact.flac");
