@@ -99,6 +99,15 @@ case "${1:-}" in
     exit 0
     ;;
   restart)
+    unit=""
+    for arg in "$@"; do
+      case "${arg}" in
+        *.service) unit="${arg}" ;;
+      esac
+    done
+    if [[ -n "${SYSTEMCTL_RESTART_FAIL:-}" && "${unit}" == "${SYSTEMCTL_RESTART_FAIL}" ]]; then
+      exit 1
+    fi
     exit 0
     ;;
   is-active)
@@ -178,6 +187,17 @@ fi
 exec ${REAL_PS} "\$@"
 EOF
 
+  # Default owner is root, so run_as_repo_owner executes git directly.
+  # Ownership scenarios overwrite this with the real clone owner.
+  cat > "${CASE}/bin/stat" << 'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-c" ]]; then
+  case "${2:-}" in
+    %U|%G) printf '%s\n' root; exit 0 ;;
+  esac
+fi
+exit 1
+EOF
   chmod +x "${CASE}/bin/"*
 
   git -C "${CASE}/repo" init -q
@@ -197,7 +217,7 @@ EOF
   export SYSTEMCTL_LOAD_STATE=not-found
   export SYSTEMCTL_MAIN_PID=0
   export SYSTEMCTL_IS_ACTIVE=active
-  unset SUBWAVE_API_HOST SUBWAVE_CONFIG SS_OUTPUT SS_FAIL DOCKER_COMPOSE_LS DOCKER_PS_OUT DOCKER_INSPECT_PID PS_COMM_FOR_PID PS_COMM_PID SYSTEMCTL_SHOW_FAIL CURL_CODE || true
+  unset SUBWAVE_API_HOST SUBWAVE_CONFIG SS_OUTPUT SS_FAIL DOCKER_COMPOSE_LS DOCKER_PS_OUT DOCKER_INSPECT_PID PS_COMM_FOR_PID PS_COMM_PID SYSTEMCTL_SHOW_FAIL SYSTEMCTL_RESTART_FAIL CURL_CODE || true
 }
 
 run_scenario() {
@@ -260,6 +280,12 @@ assert_log_has() {
     bad "${name}"
     dump_case
   fi
+}
+
+assert_both_units_restarted() {
+  local name="$1"
+  assert_log_has "${name} (api)" "${SYSTEMCTL_LOG}" "restart subwave-api.service"
+  assert_log_has "${name} (worker)" "${SYSTEMCTL_LOG}" "restart subwave-worker.service"
 }
 
 install_unit_files() {
@@ -393,6 +419,22 @@ scenario_inactive_after_restart() {
   restart_managed_services "${CASE}/repo"
 }
 
+scenario_systemd_restart_api_fails() {
+  install_unit_files
+  export SYSTEMCTL_LOAD_STATE=loaded
+  export SYSTEMCTL_RESTART_FAIL=subwave-api.service
+  export DOCKER_COMPOSE_LS=subwave-ai
+  restart_managed_services "${CASE}/repo"
+}
+
+scenario_systemd_restart_worker_fails() {
+  install_unit_files
+  export SYSTEMCTL_LOAD_STATE=loaded
+  export SYSTEMCTL_RESTART_FAIL=subwave-worker.service
+  export DOCKER_COMPOSE_LS=subwave-ai
+  restart_managed_services "${CASE}/repo"
+}
+
 scenario_yaml_port() {
   unset SUBWAVE_API_PORT
   cat > "${CASE}/repo/config/subwave.yaml" << 'EOF'
@@ -448,11 +490,30 @@ EOF
   cat > "${CASE}/bin/runuser" << 'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${RUNUSER_LOG}"
+# Print rev-parse output here. Execing git would record a direct git call.
+if [[ "$*" == *rev-parse* ]]; then
+  if [[ "$*" == *--abbrev-ref* ]]; then
+    printf '%s\n' main
+  elif [[ "$*" == *--short* ]]; then
+    printf '%s\n' 0123456
+  else
+    printf '%s\n' 0123456789abcdef0123456789abcdef01234567
+  fi
+fi
 exit 0
 EOF
   cat > "${CASE}/bin/sudo" << 'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${RUNUSER_LOG}"
+if [[ "$*" == *rev-parse* ]]; then
+  if [[ "$*" == *--abbrev-ref* ]]; then
+    printf '%s\n' main
+  elif [[ "$*" == *--short* ]]; then
+    printf '%s\n' 0123456
+  else
+    printf '%s\n' 0123456789abcdef0123456789abcdef01234567
+  fi
+fi
 exit 0
 EOF
   cat > "${CASE}/bin/pnpm" << 'EOF'
@@ -489,16 +550,47 @@ EOF
   chmod +x "${CASE}/bin/git"
 }
 
+write_sleep_stub() {
+  cat > "${CASE}/bin/sleep" << 'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${CASE}/bin/sleep"
+}
+
 scenario_git_as_repo_owner() {
   export STUB_UID=0
   write_owner_stubs grokbot
   write_git_stub
+  write_sleep_stub
   mkdir -p "${CASE}/repo/.git" "${CASE}/repo/secrets" "${CASE}/repo/data" "${CASE}/repo/config"
   printf 'x\n' > "${CASE}/repo/.env"
   printf 'x\n' > "${CASE}/repo/secrets/verification_hmac_key"
   printf 'x\n' > "${CASE}/repo/config/subwave.yaml"
   printf 'x\n' > "${CASE}/repo/data/subwave.sqlite"
   update_git_checkout "${CASE}/repo"
+
+  # Post-restart health success, then health failure. Both rev-parse.
+  # A direct git call, including read-only rev-parse, lands in git.log.
+  install_unit_files
+  export SYSTEMCTL_LOAD_STATE=loaded
+  export DOCKER_COMPOSE_LS=subwave-ai
+  export CURL_CODE=200
+  restart_managed_services "${CASE}/repo"
+
+  export CURL_CODE=500
+  local ec=0
+  set +e
+  (
+    set -euo pipefail
+    restart_managed_services "${CASE}/repo"
+  )
+  ec=$?
+  set -e
+  if [[ "${ec}" -eq 0 ]]; then
+    echo "health failure should stop the update" >&2
+    return 1
+  fi
 }
 
 scenario_git_not_root() {
@@ -559,6 +651,11 @@ if grep -nE '^[[:space:]]*git (fetch|pull|checkout|reset|submodule)' "${ROOT}/up
 else
   ok "update.sh does not run git fetch/pull directly"
 fi
+if grep -nE '\$\(git[[:space:]]|^[[:space:]]*git[[:space:]]' "${ROOT}/update.sh" "${ROOT}/scripts/ops-common.sh"; then
+  bad "git is invoked outside run_as_repo_owner"
+else
+  ok "git is only invoked through run_as_repo_owner"
+fi
 git -C "${ROOT}" check-ignore -q .subwave-install-mode
 ok "install mode file is gitignored"
 
@@ -567,7 +664,7 @@ run_scenario "pipefail fall-through is fixed" ok scenario_pipefail_fixed
 commit="$(git -C "${CASE}/repo" rev-parse HEAD)"
 assert_out_has "prints deployed commit" "deployed commit ${commit}"
 assert_out_has "health is 200" "/api/v1/health returned 200"
-assert_log_has "restarts both units" "${SYSTEMCTL_LOG}" "restart subwave-api.service subwave-worker.service"
+assert_both_units_restarted "restarts both units"
 assert_log_has "queries subwave-api.service directly" "${SYSTEMCTL_LOG}" "list-unit-files --no-legend --no-pager subwave-api.service"
 assert_log_lacks "restart does not dump every unit" "${SYSTEMCTL_LOG}" "unit-00000.service"
 assert_log_lacks "does not compose up" "${DOCKER_LOG}" " up "
@@ -613,7 +710,7 @@ assert_log_lacks "foreign listener does not compose up" "${DOCKER_LOG}" " up "
 
 prepare_case
 run_scenario "listener owned by the api unit can restart" ok scenario_port_owned_by_unit
-assert_log_has "owned port still restarts units" "${SYSTEMCTL_LOG}" "restart subwave-api.service subwave-worker.service"
+assert_both_units_restarted "owned port still restarts units"
 assert_log_lacks "owned port does not compose up" "${DOCKER_LOG}" " up "
 
 prepare_case
@@ -621,7 +718,7 @@ run_scenario "exited compose containers are kept" ok scenario_exited_containers
 assert_err_has "warns about the api container" "subwave-ai-api-1"
 assert_err_has "tells you how to remove stopped containers" " rm -f"
 assert_err_has "names the worker leftover" "subwave-ai-worker-1"
-assert_log_has "still restarts systemd" "${SYSTEMCTL_LOG}" "restart subwave-api.service subwave-worker.service"
+assert_both_units_restarted "still restarts systemd"
 assert_log_lacks "does not auto-remove containers" "${DOCKER_LOG}" " rm "
 assert_log_lacks "does not compose down" "${DOCKER_LOG}" " down "
 assert_log_lacks "does not compose up" "${DOCKER_LOG}" " up "
@@ -655,7 +752,7 @@ assert_log_lacks "unnamed listener does not compose up" "${DOCKER_LOG}" " up "
 prepare_case
 run_scenario "installed units override a compose mode file" ok scenario_units_override_recorded_compose
 assert_err_has "warns that the mode file disagrees" "Staying on systemd"
-assert_log_has "disagreement restarts units" "${SYSTEMCTL_LOG}" "restart subwave-api.service subwave-worker.service"
+assert_both_units_restarted "disagreement restarts units"
 assert_log_lacks "disagreement does not compose up" "${DOCKER_LOG}" " up "
 [[ "$(tr -d '[:space:]' < "$(install_mode_file "${CASE}/repo")")" == "systemd" ]] && ok "corrects the mode file to systemd" || bad "corrects the mode file to systemd"
 
@@ -663,6 +760,26 @@ prepare_case
 run_scenario "inactive unit after restart is an error" fail scenario_inactive_after_restart
 assert_err_has "names the inactive unit" "subwave-api.service is not active"
 assert_log_lacks "inactive unit does not compose up" "${DOCKER_LOG}" " up "
+
+prepare_case
+run_scenario "api unit restart failure is an error" fail scenario_systemd_restart_api_fails
+assert_err_has "api restart failure names the unit" "systemctl restart subwave-api.service failed"
+assert_err_has "api restart failure points at journalctl" "journalctl -u subwave-api.service"
+assert_err_has "api restart failure points at systemctl status" "systemctl status subwave-api.service"
+assert_err_has "api restart failure refuses compose" "Refusing to start Docker Compose"
+assert_log_has "api restart was attempted" "${SYSTEMCTL_LOG}" "restart subwave-api.service"
+assert_log_lacks "api restart failure does not restart the worker" "${SYSTEMCTL_LOG}" "restart subwave-worker.service"
+assert_log_lacks "api restart failure does not compose up" "${DOCKER_LOG}" " up "
+
+prepare_case
+run_scenario "worker unit restart failure is an error" fail scenario_systemd_restart_worker_fails
+assert_err_has "worker restart failure names the unit" "systemctl restart subwave-worker.service failed"
+assert_err_has "worker restart failure points at journalctl" "journalctl -u subwave-worker.service"
+assert_err_has "worker restart failure points at systemctl status" "systemctl status subwave-worker.service"
+assert_err_has "worker restart failure refuses compose" "Refusing to start Docker Compose"
+assert_log_has "worker restart failure still restarted the api" "${SYSTEMCTL_LOG}" "restart subwave-api.service"
+assert_log_has "worker restart was attempted" "${SYSTEMCTL_LOG}" "restart subwave-worker.service"
+assert_log_lacks "worker restart failure does not compose up" "${DOCKER_LOG}" " up "
 
 prepare_case
 run_scenario "api port comes from config, then env, else 8788" ok scenario_yaml_port
@@ -677,11 +794,19 @@ assert_log_lacks "git chown skips data" "${CASE}/chown.log" "/data"
 assert_log_has "git fetch goes through runuser" "${CASE}/runuser.log" "git -C ${CASE}/repo fetch origin"
 assert_log_has "git pull goes through runuser" "${CASE}/runuser.log" "git -C ${CASE}/repo pull --rebase --autostash"
 assert_log_has "git rev-parse goes through runuser" "${CASE}/runuser.log" "rev-parse --abbrev-ref HEAD"
-assert_log_lacks "root run does not fetch directly" "${CASE}/git.log" "fetch"
-assert_log_lacks "root run does not pull directly" "${CASE}/git.log" "pull"
-assert_log_lacks "root run does not checkout directly" "${CASE}/git.log" "checkout"
-assert_log_lacks "root run does not reset directly" "${CASE}/git.log" "reset"
-assert_log_lacks "root run does not touch submodules directly" "${CASE}/git.log" "submodule"
+assert_log_has "health success rev-parse goes through runuser" "${CASE}/runuser.log" "rev-parse HEAD"
+assert_log_has "health failure rev-parse goes through runuser" "${CASE}/runuser.log" "rev-parse --short HEAD"
+assert_out_has "health success prints the deployed commit" "deployed commit 0123456789abcdef0123456789abcdef01234567"
+assert_err_has "health failure names the commit" "commit 0123456"
+assert_err_has "health failure points at the api journal" "journalctl -u subwave-api"
+assert_log_lacks "post-restart root run does not compose up" "${DOCKER_LOG}" " up "
+if [[ -s "${CASE}/git.log" ]]; then
+  bad "root run invoked git directly"
+  echo "----- git.log -----" >&2
+  cat "${CASE}/git.log" >&2
+else
+  ok "root run does not invoke git directly"
+fi
 
 prepare_case
 run_scenario "non-root git runs directly" ok scenario_git_not_root

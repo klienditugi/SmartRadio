@@ -589,24 +589,31 @@ wait_for_api_health() {
     fi
     sleep 1
   done
-  commit="$(git -C "${root}" rev-parse --short HEAD 2>/dev/null || true)"
+  # Read-only, but still a git process. A root update must not run it as root.
+  commit="$(run_as_repo_owner "${root}" git -C "${root}" rev-parse --short HEAD 2>/dev/null || true)"
   die "/api/v1/health did not return 200 at ${url} after restart (commit ${commit:-unknown}). Check journalctl -u subwave-api. Nothing was killed."
 }
 
 print_deployed_commit() {
   local root="$1" commit=""
-  commit="$(git -C "${root}" rev-parse HEAD 2>/dev/null || true)"
+  commit="$(run_as_repo_owner "${root}" git -C "${root}" rev-parse HEAD 2>/dev/null || true)"
   [[ -n "${commit}" ]] || die "could not read the deployed commit (git rev-parse HEAD)"
   info "deployed commit ${commit}"
 }
 
 restart_systemd_units() {
-  local root="$1"
+  local root="$1" unit=""
   if ! systemd_unit_loaded subwave-api.service || ! systemd_unit_loaded subwave-worker.service; then
     die "install mode is systemd, but subwave-api.service and subwave-worker.service are not both installed. Refusing to start Docker Compose."
   fi
   info "restarting systemd units subwave-api.service and subwave-worker.service"
-  systemctl restart subwave-api.service subwave-worker.service
+  # Restart each unit on its own. One systemctl restart of both, under set -e,
+  # exits with no message when either unit fails and can look like a crash.
+  for unit in subwave-api.service subwave-worker.service; do
+    if ! systemctl restart "${unit}"; then
+      die "systemctl restart ${unit} failed. Check journalctl -u ${unit} and systemctl status ${unit}. Refusing to start Docker Compose."
+    fi
+  done
   systemctl is-active --quiet subwave-api.service || die "subwave-api.service is not active after restart"
   systemctl is-active --quiet subwave-worker.service || die "subwave-worker.service is not active after restart"
   info "subwave-api.service and subwave-worker.service are active"

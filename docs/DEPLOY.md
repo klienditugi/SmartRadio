@@ -54,13 +54,13 @@ The two modes are exclusive. `install.sh` records the choice in `.subwave-instal
 
 On a systemd install, `./update.sh` must be run as root (`sudo ./update.sh`). If it is not root, it exits and says to re-run with sudo. It does not start Compose instead.
 
-`sudo ./update.sh` and `sudo ./install.sh` run `pnpm install` and the web build as the owner of the clone (`stat -c %U` of the repo root, via `runuser` or `sudo -u`). Existing `node_modules` directories and `apps/web/dist` are given back to that owner first, so a previous root build can be rewritten. The same root update chowns `.git` back to that owner and runs `git fetch` and `git pull` as that user, so a later non-root pull is not blocked by root-owned files in `.git`. `.env`, secrets, config, and data are not chowned.
+`sudo ./update.sh` and `sudo ./install.sh` run `pnpm install` and the web build as the owner of the clone (`stat -c %U` of the repo root, via `runuser` or `sudo -u`). Existing `node_modules` directories and `apps/web/dist` are given back to that owner first, so a previous root build can be rewritten. The same root update chowns `.git` back to that owner and runs every `git` command as that user, including `fetch`, `pull`, and the read-only `rev-parse` that prints the deployed commit (and the commit named if health never returns 200). A later non-root pull is not blocked by root-owned files in `.git`. `.env`, secrets, config, and data are not chowned.
 
 Before a start or restart, if the API port (`SUBWAVE_API_PORT`, otherwise `server.port` in the config file, otherwise 8788) is held by a process that is not the unit or container being restarted, the script stops and names that process. It does not kill it.
 
 Created or Exited containers left over from the `subwave-ai` project are reported with the command to remove them. They are not deleted. Running `subwave-ai` containers on a systemd install stop the update. `smartradio-slskd` is not inspected or changed.
 
-After a systemd restart the script checks that both units are active and that `GET /api/v1/health` returns 200, and it prints the deployed commit.
+After a systemd restart the script checks that both units are active and that `GET /api/v1/health` returns 200, and it prints the deployed commit. If `systemctl restart` of `subwave-api.service` or `subwave-worker.service` fails, the script stops and names that unit. It tells you to check `journalctl -u <unit>` and `systemctl status <unit>`. It does not start Compose.
 
 Compose never stores the library only in an ephemeral container layer.
 
