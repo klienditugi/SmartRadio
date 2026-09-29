@@ -358,18 +358,20 @@ describe("dry-run grid", () => {
 });
 
 describe("wrong-song rows stay out of the pick", () => {
-  type Treatment =
-    | { kind: "reject"; reason: "medley" | "stem" }
-    | { kind: "class"; versionClass: "other" };
-
-  const rows: { filename: string; size: number; bitRate: number; length: number; treatment: Treatment }[] = [
+  const rows: {
+    filename: string;
+    size: number;
+    bitRate: number;
+    length: number;
+    reason: "medley" | "stem";
+  }[] = [
     {
       filename:
         "@@share052\\MUSICA\\DAFT PUNK\\DAFT PUNK - COLLECTION\\Daft Punk - Get Lucky-Freak Out-Another Star (with Stevie Wonder, Pharrell Williams & Nile Rodgers) (Grammy Awards 2014).mp3",
       size: 13631033,
       bitRate: 320,
       length: 339,
-      treatment: { kind: "reject", reason: "medley" },
+      reason: "medley",
     },
     {
       filename:
@@ -377,7 +379,7 @@ describe("wrong-song rows stay out of the pick", () => {
       size: 13631033,
       bitRate: 320,
       length: 339,
-      treatment: { kind: "reject", reason: "medley" },
+      reason: "medley",
     },
     {
       filename:
@@ -385,7 +387,7 @@ describe("wrong-song rows stay out of the pick", () => {
       size: 13631033,
       bitRate: 320,
       length: 339,
-      treatment: { kind: "reject", reason: "medley" },
+      reason: "medley",
     },
     {
       filename:
@@ -393,7 +395,7 @@ describe("wrong-song rows stay out of the pick", () => {
       size: 14533708,
       bitRate: 320,
       length: 363,
-      treatment: { kind: "reject", reason: "medley" },
+      reason: "medley",
     },
     {
       filename:
@@ -401,7 +403,7 @@ describe("wrong-song rows stay out of the pick", () => {
       size: 14531633,
       bitRate: 320,
       length: 363,
-      treatment: { kind: "reject", reason: "medley" },
+      reason: "medley",
     },
     {
       filename:
@@ -409,7 +411,7 @@ describe("wrong-song rows stay out of the pick", () => {
       size: 14813281,
       bitRate: 320,
       length: 369,
-      treatment: { kind: "class", versionClass: "other" },
+      reason: "stem",
     },
     {
       filename:
@@ -417,7 +419,15 @@ describe("wrong-song rows stay out of the pick", () => {
       size: 14868623,
       bitRate: 320,
       length: 369,
-      treatment: { kind: "class", versionClass: "other" },
+      reason: "stem",
+    },
+    {
+      filename:
+        "@@share040\\Music\\Daft Punk\\Random Access Memories (Drumless Edition\\08 Get Lucky (Drumless Edition) (fea.mp3",
+      size: 14860412,
+      bitRate: 320,
+      length: 369,
+      reason: "stem",
     },
     {
       filename:
@@ -425,7 +435,7 @@ describe("wrong-song rows stay out of the pick", () => {
       size: 14824630,
       bitRate: 320,
       length: 369,
-      treatment: { kind: "class", versionClass: "other" },
+      reason: "stem",
     },
   ];
 
@@ -458,28 +468,11 @@ describe("wrong-song rows stay out of the pick", () => {
     };
   }
 
-  it("rejects or reclassifies each real filename", () => {
+  it("rejects each real filename", () => {
     for (const row of rows) {
       const decision = run(solo(row));
-      if (row.treatment.kind === "reject") {
-        expect(decision.outcome, row.filename).toBe("no_suitable_result");
-        if (decision.outcome === "no_suitable_result") expect(decision.removed[row.treatment.reason]).toBe(1);
-      } else {
-        expect(decision.outcome, row.filename).toBe("selected");
-        if (decision.outcome !== "selected") continue;
-        expect(decision.versionClass).toBe(row.treatment.versionClass);
-        expect(fileVersionClass({
-          peer: "peer-known",
-          path: row.filename,
-          basename: basenameOf(row.filename),
-          folders: row.filename.split(/[/\\]/).filter(Boolean).slice(0, -1),
-          sizeBytes: row.size,
-          durationSeconds: row.length,
-          format: { ext: ".mp3", lossless: false },
-          bitrateKbps: row.bitRate,
-          locked: false,
-        })).toBe(row.treatment.versionClass);
-      }
+      expect(decision.outcome, row.filename).toBe("no_suitable_result");
+      if (decision.outcome === "no_suitable_result") expect(decision.removed[row.reason], row.filename).toBe(1);
     }
   });
 

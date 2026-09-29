@@ -437,24 +437,25 @@ describe("ordered selector", () => {
         sizeBytes: 14824630,
       },
     );
-    expect(fileVersionClass(drumlessName)).toBe("other");
-    expect(selected([drumlessName]).removed.stem).toBe(0);
-    expect(fileVersionClass(drumlessFolder)).toBe("other");
+    const nameOnly = selectTracks([drumlessName], { query });
+    expect(nameOnly.outcome).toBe("no_suitable_result");
+    if (nameOnly.outcome === "no_suitable_result") expect(nameOnly.removed.stem).toBe(1);
+    expect(fileVersionClass(drumlessName)).toBe("original");
     const folderDecision = selectTracks([drumlessFolder], { query });
-    expect(folderDecision.outcome).toBe("selected");
-    if (folderDecision.outcome === "selected") {
-      expect(folderDecision.versionClass).toBe("other");
-      expect(folderDecision.removed.stem).toBe(0);
-      expect(folderDecision.removed.short_recording).toBe(0);
-    }
+    expect(folderDecision.outcome).toBe("no_suitable_result");
+    if (folderDecision.outcome === "no_suitable_result") expect(folderDecision.removed.stem).toBe(1);
+    expect(fileVersionClass(drumlessFolder)).toBe("original");
     const remixInDrumlessFolder = mp3("remix-in-folder", "Daft Punk - Get Lucky (Remix).mp3", {
       path: "music\\Daft Punk\\Random Access Memories (Drumless Edition)\\Daft Punk - Get Lucky (Remix).mp3",
     });
     const instrumentalFolder = mp3("instrumental-folder", "Daft Punk - Get Lucky.mp3", {
       path: "music\\Daft Punk\\Instrumental\\Daft Punk - Get Lucky.mp3",
     });
-    expect(fileVersionClass(remixInDrumlessFolder)).toBe("remix");
+    const remixFolderOnly = selectTracks([remixInDrumlessFolder], { query });
+    expect(remixFolderOnly.outcome).toBe("no_suitable_result");
+    if (remixFolderOnly.outcome === "no_suitable_result") expect(remixFolderOnly.removed.stem).toBe(1);
     expect(fileVersionClass(instrumentalFolder)).toBe("original");
+    expect(selected([instrumentalFolder]).removed.stem).toBe(0);
     const slowOriginal = mp3("slow-original", "08 - Get lucky.mp3", {
       bitrateKbps: 192,
       availability: { freeSlot: false, queueLength: 40, speedBps: 1 },
@@ -477,7 +478,8 @@ describe("ordered selector", () => {
     });
     expect(selectTracks([borderline, ...longs], { query }).removed.short_recording).toBe(0);
     const withDrumlessLength = selectTracks([drumlessFolder, borderline, ...longs], { query });
-    expect(withDrumlessLength.removed.short_recording).toBe(1);
+    expect(withDrumlessLength.removed.stem).toBe(1);
+    expect(withDrumlessLength.removed.short_recording).toBe(0);
     expect(withDrumlessLength.outcome).toBe("selected");
     if (withDrumlessLength.outcome === "selected") expect(withDrumlessLength.pick.peer).not.toBe("drumless-folder");
 

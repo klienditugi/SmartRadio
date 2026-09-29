@@ -16,7 +16,8 @@
  *   segue, transition, vs, or versus in the basename; vs or versus also counts
  *   in a folder the artist was taken from), a tribute or the word cover in the
  *   basename, a different artist leading the basename when this artist is only
- *   in folders, stems, long-recording phrases, bitrate under 128 kbps,
+ *   in folders, stems (including the whole word drumless in the basename or a
+ *   folder), long-recording phrases, bitrate under 128 kbps,
  *   files over max_file_size_mb (default 30 MiB), duration, sample rate, bit depth,
  *   and a short recording (same detector as before: under 90s, or under 0.6 of the
  *   median once five lengths are known).
@@ -36,9 +37,7 @@
  * the front. The rest stay in the default order. Club mix is the extended class.
  * A hybrid title keeps the most derived marker, so a club remix is a remix.
  * Version class and an explicit version match use the basename only.
- * A folder does not set the class, except the whole word drumless in a folder
- * segment, which marks the file other the same way the basename word does.
- * That does not reject the file. An unmarked file is original, and it is
+ * A folder does not set the class. An unmarked file is original, and it is
  * not an explicit Original Mix match.
  *
  * Acceptable quality is 192 kbps or more CBR, an MP3 VBR average around 170 kbps
@@ -79,7 +78,7 @@ const BITRATE_KNOWN_MIN = 32;
 const BITRATE_KNOWN_MAX = 320;
 
 /** Version terms that mean "this is not a full mix" rather than a desirable remix. */
-const STEM_VERSION_TERMS = ["stem", "stems", "multitrack", "acapella", "a cappella", "acappella"] as const;
+const STEM_VERSION_TERMS = ["stem", "stems", "multitrack", "acapella", "a cappella", "acappella", "drumless"] as const;
 
 const TITLE_STOPWORDS = new Set(["a", "an", "the", "and", "of", "feat", "ft"]);
 const CREDIT_WORDS = new Set(["feat", "ft", "featuring", "and"]);
@@ -113,7 +112,6 @@ const OTHER_VERSION_PHRASES = [
   "stem",
   "stems",
   "multitrack",
-  "drumless",
 ] as const;
 const REMIX_WORDS = ["remix", "rmx"] as const;
 /**
@@ -623,19 +621,11 @@ function versionClassFromMarks(marks: VersionMarks): VersionClass {
 }
 
 /**
- * Basename only, plus one folder exception: a folder segment with the whole
- * word drumless marks the file other, the same way that word does in the basename.
- * It does not clear a remix, extended, radio edit, or explicit original phrase,
- * and it does not satisfy an explicit request. No other folder word sets the class.
+ * Basename only. A folder named Mashup or ORIGINAL_BACKUP does not set the class.
+ * An unmarked basename is original.
  */
-function folderSegmentHasDrumless(track: CandidateTrack): boolean {
-  return track.folders.some((folder) => hasPhrase(normalizeMatchText(folder), "drumless"));
-}
-
 export function fileVersionClass(track: CandidateTrack): VersionClass {
-  const marks = classifyVersionText(basenameText(track));
-  if (!folderSegmentHasDrumless(track)) return versionClassFromMarks(marks);
-  return versionClassFromMarks({ ...marks, other: true });
+  return versionClassFromMarks(classifyVersionText(basenameText(track)));
 }
 
 /**
