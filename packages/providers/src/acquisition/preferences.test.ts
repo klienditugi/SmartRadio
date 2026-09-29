@@ -405,21 +405,6 @@ describe("wrong-song rows stay out of the pick", () => {
     },
     {
       filename:
-        "@@share086\\MUSIC\\complete\\lwl\\2025-10\\Daft Punk - Get Lucky 2k17 (Ash Simons Bangerz) (Ft. AURI) (Intro Clean).mp3",
-      size: 10544680,
-      bitRate: 320,
-      length: 262,
-      treatment: { kind: "class", versionClass: "other" },
-    },
-    {
-      filename: "media\\Music\\Sgt Slick\\Discography\\Daft Punk - Get Lucky (Sgt Slick ReCut).mp3",
-      size: 13954458,
-      bitRate: 320,
-      length: 339,
-      treatment: { kind: "class", versionClass: "other" },
-    },
-    {
-      filename:
         "@@share027\\~Essentials~\\Daft Punk - Essentials [2026] [MP3-320]-Sc4r3cr0w\\092 - Daft Punk - Get Lucky (Drumless Edition) (ft. Pharrell Williams and Nile Rodgers).mp3",
       size: 14813281,
       bitRate: 320,

@@ -82,7 +82,7 @@ Survivors are compared in this order. The first difference wins.
 | `original` | original mix, original version, original, album version, or a clean title with no version term. Cleared when a derived marker is also present. |
 | `extended` | extended, extended mix, extended version, club mix, 12 inch. A plain club mix stays here. |
 | `remix` | remix, rmx, bootleg, mashup, vs, mixshow, rework, re-edit, mix by, mixed by, and a named `<name> edit` / `<name> version` that is not radio, single, album, original, or extended. |
-| `other` | live, instrumental, karaoke, demo, a bare mix, a dangling edit, the phrase `intro clean`, or the whole word `drumless`, `recut`, or `re-cut`. This ranks last. `drumless` in a folder segment is also `other`. No other folder word sets the class. |
+| `other` | live, instrumental, karaoke, demo, a bare mix, a dangling edit, or the whole word `drumless`. This ranks last. `drumless` in a folder segment is also `other`. No other folder word sets the class. |
 
 `titleMatch` is 1 when the title tokens are in the basename or a folder, and 0 when no title was passed or the path lacks them. `artistInPath` is 1 when the artist tokens are in the path. Both are printed on the dry-run row. They are not ranking weights. A wrong title is rejected before ranking.
 

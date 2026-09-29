@@ -481,31 +481,6 @@ describe("ordered selector", () => {
     expect(withDrumlessLength.outcome).toBe("selected");
     if (withDrumlessLength.outcome === "selected") expect(withDrumlessLength.pick.peer).not.toBe("drumless-folder");
 
-    const recut = mp3("recut", "Daft Punk - Get Lucky (Sgt Slick ReCut).mp3", {
-      path: "media\\Music\\Sgt Slick\\Discography\\Daft Punk - Get Lucky (Sgt Slick ReCut).mp3",
-      sizeBytes: 13954458,
-      bitrateKbps: 320,
-      durationSeconds: 339,
-      availability: { freeSlot: true, queueLength: 0, speedBps: 9_000_000_000 },
-    });
-    const bangerz = mp3(
-      "bangerz",
-      "Daft Punk - Get Lucky 2k17 (Ash Simons Bangerz) (Ft. AURI) (Intro Clean).mp3",
-      {
-        sizeBytes: 10544680,
-        bitrateKbps: 320,
-        durationSeconds: 262,
-        availability: { freeSlot: true, queueLength: 0, speedBps: 9_000_000_000 },
-      },
-    );
-    expect(fileVersionClass(recut)).toBe("other");
-    expect(fileVersionClass(bangerz)).toBe("other");
-    const plain = mp3("plain-original", "08 - Get lucky.mp3", {
-      bitrateKbps: 192,
-      availability: { freeSlot: false, queueLength: 40, speedBps: 1 },
-    });
-    expect(selected([recut, bangerz, plain], { versionPreference: "original" }).pick.peer).toBe("plain-original");
-    expect(selected([recut, bangerz, plain], { versionPreference: "remix" }).pick.peer).toBe("plain-original");
     const inCoverFolder = mp3("album", "Daft Punk - Get Lucky.mp3", {
       path: "music\\cover\\Daft Punk - Get Lucky.mp3",
     });

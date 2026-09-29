@@ -114,9 +114,6 @@ const OTHER_VERSION_PHRASES = [
   "stems",
   "multitrack",
   "drumless",
-  "intro clean",
-  "recut",
-  "re cut",
 ] as const;
 const REMIX_WORDS = ["remix", "rmx"] as const;
 /**
