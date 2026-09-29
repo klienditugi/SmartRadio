@@ -1,10 +1,12 @@
 # Optional external slskd
 
-SmartRadio does not install slskd and does not put it in the SmartRadio image or in `deploy/docker-compose.yml`. Run slskd yourself, then enter its HTTP base URL and API key in the SmartRadio setup wizard or Settings. Use **Test connection** there. That action only calls `GET /api/v0/application` and `GET /api/v0/server` with header `X-API-Key`. It does not search or download.
+SmartRadio does not install slskd and does not put it in the SmartRadio image or in `deploy/docker-compose.yml`. The deployment definition is [`deploy/slskd/`](../deploy/slskd/README.md): image `slskd/slskd:0.26.0` (linux/amd64 and linux/arm64; override with `SLSKD_IMAGE`), started with `deploy/slskd/install-slskd.sh`. `./install.sh` does not start it. `deploy/examples/slskd/` only points at that directory.
 
-Soulseek username and password are slskd settings. They are not SmartRadio config and they are not files under `secrets/`.
+Run slskd yourself, then enter its HTTP base URL and API key in the SmartRadio setup wizard or Settings. Use **Test connection** there. That action only calls `GET /api/v0/application` and `GET /api/v0/server` with header `X-API-Key`. It does not search or download.
 
-The API key (16–255 characters) is written to `secrets/slskd_api_key`. The UI can replace it. It never displays the saved value.
+Soulseek username and password are slskd settings. In the compose example they live only in `deploy/slskd/.env` (empty placeholders in `.env.example`). They are not SmartRadio config and they are not files under `secrets/`.
+
+The API key (16–255 characters) is written to `secrets/slskd_api_key`. The UI can replace it. It never displays the saved value. `install-slskd.sh` generates a key into `deploy/slskd/.env` when that value is empty, and does not print it. Paste it into the setup UI.
 
 ## Paths
 
@@ -12,9 +14,20 @@ The API key (16–255 characters) is written to `secrets/slskd_api_key`. The UI 
 | --- | --- |
 | Completed downloads | The same directory SmartRadio uses as `paths.downloads` |
 | Incomplete downloads | A different directory |
-| Library | Do not give slskd the SmartRadio library path as a place it writes (downloads, incomplete, or shares) |
+| Config/state | Its own directory (`/app` in the `deploy/slskd` container). Not the library. |
+| Library | Do not give slskd the SmartRadio library path as a place it writes (downloads, incomplete, or shares). The compose file has no library volume. |
 
-Placeholders in `deploy/examples/slskd/` are not application defaults. Substitute directories that exist on the host you are using.
+Host paths belong in `deploy/slskd/.env` (`SLSKD_DOWNLOADS_DIR`, `SLSKD_INCOMPLETE_DIR`, `SLSKD_APP_DIR`) and in SmartRadio config (`paths.downloads`, `SUBWAVE_DOWNLOADS_DIR`). `./downloads` in the example is a local placeholder. `install-slskd.sh` creates missing directories as mode `0750`, refuses a library path, and does not make an existing directory world-writable.
+
+## Same host or a remote slskd
+
+SmartRadio uses `SLSKD_URL` (it overrides `acquisition.base_url` when the process starts), `secrets/slskd_api_key`, and `paths.downloads`. Application code does not choose a host, an address, or a directory.
+
+**Same host.** Leave `SLSKD_HTTP_BIND` at `127.0.0.1`. Set `SLSKD_URL` to `http://127.0.0.1:5030`, or to the `SLSKD_HTTP_PORT` you set. Paste `SLSKD_API_KEY` from `deploy/slskd/.env` into the setup wizard or Settings. Set the downloads directory to the same host path as `SLSKD_DOWNLOADS_DIR`.
+
+**Remote slskd.** Set `SLSKD_HTTP_BIND` so the SmartRadio host can open the API, and set `SLSKD_URL` to that HTTP base. Do not append `/api/v0`. The API key is still created on the slskd host and pasted into SmartRadio. Completed files must be readable at SmartRadio `paths.downloads`. Point `SLSKD_DOWNLOADS_DIR` at slskd's view of that shared directory and `SUBWAVE_DOWNLOADS_DIR` at SmartRadio's view. The path strings can differ. They must be the same files. Do not mount the library into slskd.
+
+If SmartRadio runs in Docker, `SLSKD_URL` has to be an address that container can route. `127.0.0.1` inside the container is not the host.
 
 ## What to verify
 
@@ -25,11 +38,13 @@ From the host that runs SmartRadio, the base URL saved in Settings must answer:
 
 with the same `X-API-Key` stored in `secrets/slskd_api_key`. **Test connection** does that and shows one of: Acquisition disabled, Not configured, Unreachable, Auth failed, Reachable, Soulseek not connected, Soulseek not logged in, Ready.
 
+Run it after you install slskd and point SmartRadio at it, and again after you upgrade SmartRadio. On a host, upgrade with `sudo ./update.sh` (see `docs/DEPLOY.md`). That script pulls, reinstalls dependencies, rebuilds the UI, and restarts this project's services. A manual `git pull` and a service restart is not the update path. `./update.sh` does not call slskd and does not store a verified result.
+
 `Ready` is the only result that stores a verified test-connection. The row lives in the database (`integration_checks`: integration, state, tested_at, and an HMAC-SHA256 fingerprint of the URL, provider, and API key). The HMAC key is `secrets/verification_hmac_key`, not the session secret. The fingerprint is not returned or logged. Yaml or env `verify_status` is ignored. Filling in the URL and key does not verify. An install that was verified by writing `verify_status: verified` into yaml shows `configured_unverified` until test-connection is run again.
 
-slskd's own HTTP port and Soulseek listen port are whatever you set in slskd. Upstream examples are HTTP `5030` and listen `50300`. Confirm the ports you actually configured, including that peers can reach the listen port if you want inbound Soulseek connections. Those ports are not SmartRadio requirements.
+slskd's own HTTP port and Soulseek listen port are whatever you set in slskd. The compose example defaults are HTTP `5030` (bind `127.0.0.1`), optional HTTPS `5031`, and listen `50300`. Confirm the ports that are actually listening, including that peers can reach the listen port if you want inbound Soulseek connections. Those ports are not SmartRadio requirements.
 
-Restart the SmartRadio worker after a successful test. It reads acquisition config when the process starts.
+Restart the SmartRadio worker after a successful test, including when `./update.sh` already restarted it before Test connection. It reads acquisition config when the process starts.
 
 ## Which search file is downloaded
 
@@ -127,32 +142,22 @@ A long-recording phrase is a reject, not a penalty. A missing duration does not 
 
 The enqueue body is `[{ filename, size }]` using that filename unchanged, including Windows backslashes. slskd search rows have no id. A later transfer matches on username + that exact filename + size. A basename match is used only when exactly one of that user's rows matches the basename and the size.
 
-## Example: Compose
+## Deploy
 
-`deploy/examples/slskd/docker-compose.example.yml` runs the upstream slskd image next to SmartRadio. It is not started by SmartRadio's compose file.
-
-Set `SLSKD_COMPLETE_DIR` to the SmartRadio downloads directory and `SLSKD_INCOMPLETE_DIR` to a different directory. Set `SLSKD_API_KEY` to the same value you enter in the SmartRadio UI. Set the Soulseek username and password only in that compose environment.
-
-Stop it without deleting music:
+`deploy/slskd/` is the only slskd deployment definition in this repo: compose file, `.env.example`, and `install-slskd.sh`. The image is `slskd/slskd:0.26.0`. Docker selects linux/amd64 or linux/arm64. Set `SLSKD_IMAGE` for another tag or for `ghcr.io/slskd/slskd:0.26.0`.
 
 ```bash
-docker compose -f deploy/examples/slskd/docker-compose.example.yml down
+./deploy/slskd/install-slskd.sh --prepare-only
+# Soulseek username and password go in deploy/slskd/.env only
+./deploy/slskd/install-slskd.sh
 ```
 
-Do not delete the completed-downloads directory or the library directory.
-
-## Example: systemd
-
-`deploy/examples/slskd/slskd.service.example` and `deploy/examples/slskd/slskd.example.yml` are sketches. Copy them where you keep host units and slskd config, replace the placeholders, then:
+Stop without deleting music:
 
 ```bash
-systemctl enable --now slskd
+./deploy/slskd/install-slskd.sh --down
 ```
 
-Remove the unit without deleting music:
+That runs `docker compose down` for project `smartradio-slskd`. It leaves completed downloads, incomplete downloads, slskd state, and the library in place. There is no library volume.
 
-```bash
-systemctl disable --now slskd
-```
-
-Leave the completed-downloads directory and the library directory in place.
+`deploy/examples/slskd/README.md` points here. Do not add a second compose file.

@@ -26,6 +26,7 @@ packages/providers  Ollama, Navidrome, SUB/WAVE, slskd (verified endpoints only)
 packages/shared   Types, config schema, path safety
 config/           Example YAML (copy; do not commit live values)
 deploy/           systemd units, Docker/Compose (host-mounted music/data)
+deploy/slskd/     optional external slskd example (not in the app image)
 docs/             Architecture, integration spec, OpenAPI, deploy, RC notes
 ```
 
@@ -34,12 +35,14 @@ docs/             Architecture, integration spec, OpenAPI, deploy, RC notes
 | Script | Role |
 | --- | --- |
 | `./install.sh` | OS/arch/resource checks, deps, dirs, secrets, systemd or Compose |
-| `./update.sh` | Pull, rebuild UI, restart this project's services |
+| `sudo ./update.sh` | On a host: pull, rebuild UI, restart this project's services. Not a manual git pull plus restart. |
 | `./uninstall.sh` | Stop this project only (`--purge --force` removes clone data) |
 | `./backup.sh` / `./restore.sh` | Config, secrets, SQLite; optional `--include-library` |
 | `./doctor.sh` | CLI diagnostics + `/api/v1/doctor` |
 
 Compose: `./install.sh --mode compose` with host paths `SUBWAVE_DATA_DIR` and `SUBWAVE_LIBRARY_DIR`. Music must not live only in an ephemeral container.
+
+Optional slskd is separate: [`deploy/slskd/`](deploy/slskd/README.md). It is not started by `./install.sh`. After it is up, and again after `sudo ./update.sh`, set `SLSKD_URL`, paste the API key in the setup UI (`secrets/slskd_api_key`), and run **Test connection**. `verified` is stored only when that probe reports Ready. Restart the worker afterwards.
 
 ## Local development
 

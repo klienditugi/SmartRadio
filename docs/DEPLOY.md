@@ -62,7 +62,7 @@ sudo ./install.sh --non-interactive
 | Script | Purpose |
 | --- | --- |
 | `./install.sh` | First install |
-| `./update.sh` | `git pull`, `pnpm install`, rebuild UI, restart this project's services |
+| `sudo ./update.sh` | On a host: `git pull`, `pnpm install`, rebuild UI, restart this project's services. Not a manual git pull plus restart. |
 | `./uninstall.sh` | Stop this project's units/compose. `--purge --force` deletes clone data/secrets/.env only |
 | `./backup.sh` | Archive config, secrets, SQLite. `--include-library` adds music (large) |
 | `./restore.sh [--force] backup.tar.gz` | Extract into the `subwave-ai` clone |
@@ -90,7 +90,11 @@ Relative `./data/downloads` and `./data/library` in the example yaml are **local
 
 ## Optional external slskd
 
-SmartRadio does not install or contain slskd. To run slskd yourself and point the setup UI at it, see `docs/SLSKD.md`. Completed downloads must be the directory SmartRadio uses as `paths.downloads`. Incomplete downloads stay on a different directory. slskd must not write the library directory. Soulseek username and password are slskd settings, not SmartRadio settings.
+SmartRadio does not install or contain slskd. `./install.sh` and the app image do not start it. The deployment definition is `deploy/slskd/` (`slskd/slskd:0.26.0`, `install-slskd.sh`; see `docs/SLSKD.md`). `deploy/examples/slskd/` only points there. Completed downloads must be the directory SmartRadio uses as `paths.downloads`. Incomplete downloads stay on a different directory. slskd must not write the library directory. Soulseek username and password are slskd secrets in that example's `.env`, not SmartRadio settings.
+
+Same host: `SLSKD_URL=http://127.0.0.1:5030` when the API is bound to loopback, and SmartRadio's downloads path is the same host path as `SLSKD_DOWNLOADS_DIR`. Remote slskd: `SLSKD_URL` is the HTTP base this host can reach, the API key is pasted into the setup UI (`secrets/slskd_api_key`), and completed files must be readable at `paths.downloads`. Those values stay in `.env` and the setup UI.
+
+After install, and again after `sudo ./update.sh`, run **Test connection** in the setup wizard or Settings. It is read-only. `verified` is stored only when it reports Ready (see `docs/SLSKD.md`). Restart the worker after that. `./update.sh` does not mark acquisition verified.
 
 ## Health
 
