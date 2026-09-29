@@ -434,6 +434,14 @@ describe("wrong-song rows stay out of the pick", () => {
       length: 369,
       treatment: { kind: "class", versionClass: "other" },
     },
+    {
+      filename:
+        "music\\Daft Punk\\2023 - Random Access Memories (Drumless Edition)\\08 - Get Lucky (feat. Pharrell Williams and Nile Rodgers).mp3",
+      size: 14824630,
+      bitRate: 320,
+      length: 369,
+      treatment: { kind: "class", versionClass: "other" },
+    },
   ];
 
   function basenameOf(filename: string): string {
@@ -441,9 +449,9 @@ describe("wrong-song rows stay out of the pick", () => {
   }
 
   function isKnownWrong(filename: string): boolean {
+    if (/drumless/i.test(filename)) return true;
     const base = basenameOf(filename);
-    if (/\bdrumless\b/i.test(base)) return true;
-    return rows.some((row) => basenameOf(row.filename) === base);
+    return rows.some((row) => !/drumless/i.test(row.filename) && basenameOf(row.filename) === base);
   }
 
   function asFile(row: { filename: string; size: number; bitRate: number; length: number }) {
@@ -464,23 +472,6 @@ describe("wrong-song rows stay out of the pick", () => {
       searchText: "Daft Punk Get Lucky",
     };
   }
-
-  it("leaves a Drumless Edition folder with a clean basename for an owner decision", () => {
-    const folderOnly = {
-      filename:
-        "music\\Daft Punk\\2023 - Random Access Memories (Drumless Edition)\\08 - Get Lucky (feat. Pharrell Williams and Nile Rodgers).mp3",
-      size: 14824630,
-      bitRate: 320,
-      length: 369,
-    };
-    const decision = run(solo(folderOnly));
-    expect(decision.outcome).toBe("selected");
-    if (decision.outcome !== "selected") return;
-    expect(decision.versionClass).toBe("original");
-    expect(decision.removed.stem).toBe(0);
-    expect(decision.file.size).toBe(folderOnly.size);
-    expect(decision.file.bitRate).toBe(folderOnly.bitRate);
-  });
 
   it("rejects or reclassifies each real filename", () => {
     for (const row of rows) {

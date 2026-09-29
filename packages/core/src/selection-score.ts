@@ -36,7 +36,9 @@
  * the front. The rest stay in the default order. Club mix is the extended class.
  * A hybrid title keeps the most derived marker, so a club remix is a remix.
  * Version class and an explicit version match use the basename only.
- * A folder does not set the class. An unmarked file is original, and it is
+ * A folder does not set the class, except the whole word drumless in a folder
+ * segment, which marks the file other the same way the basename word does.
+ * That does not reject the file. An unmarked file is original, and it is
  * not an explicit Original Mix match.
  *
  * Acceptable quality is 192 kbps or more CBR, an MP3 VBR average around 170 kbps
@@ -624,11 +626,19 @@ function versionClassFromMarks(marks: VersionMarks): VersionClass {
 }
 
 /**
- * Basename only. A folder named Mashup or ORIGINAL_BACKUP does not set the class.
- * An unmarked basename is original.
+ * Basename only, plus one folder exception: a folder segment with the whole
+ * word drumless marks the file other, the same way that word does in the basename.
+ * It does not clear a remix, extended, radio edit, or explicit original phrase,
+ * and it does not satisfy an explicit request. No other folder word sets the class.
  */
+function folderSegmentHasDrumless(track: CandidateTrack): boolean {
+  return track.folders.some((folder) => hasPhrase(normalizeMatchText(folder), "drumless"));
+}
+
 export function fileVersionClass(track: CandidateTrack): VersionClass {
-  return versionClassFromMarks(classifyVersionText(basenameText(track)));
+  const marks = classifyVersionText(basenameText(track));
+  if (!folderSegmentHasDrumless(track)) return versionClassFromMarks(marks);
+  return versionClassFromMarks({ ...marks, other: true });
 }
 
 /**

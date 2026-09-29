@@ -439,12 +439,22 @@ describe("ordered selector", () => {
     );
     expect(fileVersionClass(drumlessName)).toBe("other");
     expect(selected([drumlessName]).removed.stem).toBe(0);
+    expect(fileVersionClass(drumlessFolder)).toBe("other");
     const folderDecision = selectTracks([drumlessFolder], { query });
     expect(folderDecision.outcome).toBe("selected");
     if (folderDecision.outcome === "selected") {
-      expect(folderDecision.versionClass).toBe("original");
+      expect(folderDecision.versionClass).toBe("other");
       expect(folderDecision.removed.stem).toBe(0);
+      expect(folderDecision.removed.short_recording).toBe(0);
     }
+    const remixInDrumlessFolder = mp3("remix-in-folder", "Daft Punk - Get Lucky (Remix).mp3", {
+      path: "music\\Daft Punk\\Random Access Memories (Drumless Edition)\\Daft Punk - Get Lucky (Remix).mp3",
+    });
+    const instrumentalFolder = mp3("instrumental-folder", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Daft Punk\\Instrumental\\Daft Punk - Get Lucky.mp3",
+    });
+    expect(fileVersionClass(remixInDrumlessFolder)).toBe("remix");
+    expect(fileVersionClass(instrumentalFolder)).toBe("original");
     const slowOriginal = mp3("slow-original", "08 - Get lucky.mp3", {
       bitrateKbps: 192,
       availability: { freeSlot: false, queueLength: 40, speedBps: 1 },
@@ -454,7 +464,22 @@ describe("ordered selector", () => {
       peer: "fast-folder",
       availability: { freeSlot: true, queueLength: 0, speedBps: 9_000_000_000 },
     });
-    expect(selected([fastFolder, slowOriginal], { versionPreference: "original" }).pick.peer).toBe("fast-folder");
+    expect(selected([fastFolder, slowOriginal], { versionPreference: "original" }).pick.peer).toBe("slow-original");
+    const longs = [0, 1, 2].map((index) =>
+      mp3(`long-${index}`, "Daft Punk - Get Lucky.mp3", {
+        path: `music\\Album\\copy-${index}\\Daft Punk - Get Lucky.mp3`,
+        durationSeconds: 400,
+      }),
+    );
+    const borderline = mp3("border", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Short\\Daft Punk - Get Lucky.mp3",
+      durationSeconds: 200,
+    });
+    expect(selectTracks([borderline, ...longs], { query }).removed.short_recording).toBe(0);
+    const withDrumlessLength = selectTracks([drumlessFolder, borderline, ...longs], { query });
+    expect(withDrumlessLength.removed.short_recording).toBe(1);
+    expect(withDrumlessLength.outcome).toBe("selected");
+    if (withDrumlessLength.outcome === "selected") expect(withDrumlessLength.pick.peer).not.toBe("drumless-folder");
 
     const recut = mp3("recut", "Daft Punk - Get Lucky (Sgt Slick ReCut).mp3", {
       path: "media\\Music\\Sgt Slick\\Discography\\Daft Punk - Get Lucky (Sgt Slick ReCut).mp3",
