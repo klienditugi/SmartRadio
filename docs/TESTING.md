@@ -31,9 +31,12 @@ Happy-path ingest does **not** require SmartRadio to trigger a Navidrome scan (N
 
 ```bash
 bash -n install.sh update.sh uninstall.sh backup.sh restore.sh doctor.sh scripts/ops-common.sh deploy/slskd/install-slskd.sh
+bash scripts/test-update-mode.sh   # stubbed systemctl/docker; also run by pnpm test
 pnpm test   # includes scripts/ops-scripts.test.ts
 ./doctor.sh # when the API is not running, health is expected to FAIL
 ```
+
+`scripts/test-update-mode.sh` covers update mode selection. The old `systemctl list-unit-files | grep -q` test is false under `set -o pipefail` when the unit is present (SIGPIPE, exit 141). The harness reproduces that with a stub `systemctl` and a stub `docker`, and checks that a systemd install restarts units and does not run Compose.
 
 `install.sh --help` must mention that Ollama is never installed.
 

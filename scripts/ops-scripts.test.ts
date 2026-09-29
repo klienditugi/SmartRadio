@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -36,5 +37,25 @@ describe("ops scripts", () => {
     expect(compose).toMatch(/SUBWAVE_DATA_DIR/);
     expect(compose).not.toMatch(/image:\s*ollama/i);
     expect(compose).not.toMatch(/services:\s*\n\s*ollama/i);
+  });
+
+  it("stays on systemd when units and docker are both present", () => {
+    const update = read("update.sh");
+    const uninstall = read("uninstall.sh");
+    expect(update).not.toMatch(/systemctl list-unit-files/);
+    expect(uninstall).not.toMatch(/systemctl list-unit-files/);
+    expect(update).toMatch(/restart_managed_services/);
+    expect(read("install.sh")).toMatch(/write_install_mode/);
+    expect(read(".gitignore")).toMatch(/\.subwave-install-mode/);
+    const result = spawnSync("bash", ["scripts/test-update-mode.sh"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+    if (result.status !== 0) {
+      throw new Error(output);
+    }
+    expect(output).toMatch(/pipefail fall-through is fixed/);
+    expect(output).toMatch(/does not compose up/);
   });
 });

@@ -35,14 +35,14 @@ docs/             Architecture, integration spec, OpenAPI, deploy, RC notes
 | Script | Role |
 | --- | --- |
 | `./install.sh` | OS/arch/resource checks, deps, dirs, secrets, systemd or Compose |
-| `sudo ./update.sh` | On a host: pull, rebuild UI, restart this project's services. Not a manual git pull plus restart. |
+| `sudo ./update.sh` | Pull, rebuild the UI, restart the install mode already in use. systemd and Docker Compose are exclusive. Docker used by slskd does not switch this app to Compose. |
 | `./uninstall.sh` | Stop this project only (`--purge --force` removes clone data) |
 | `./backup.sh` / `./restore.sh` | Config, secrets, SQLite; optional `--include-library` |
 | `./doctor.sh` | CLI diagnostics + `/api/v1/doctor` |
 
 Compose: `./install.sh --mode compose` with host paths `SUBWAVE_DATA_DIR` and `SUBWAVE_LIBRARY_DIR`. Music must not live only in an ephemeral container.
 
-Optional slskd is separate: [`deploy/slskd/`](deploy/slskd/README.md). It is not started by `./install.sh`. After it is up, and again after `sudo ./update.sh`, set `SLSKD_URL`, paste the API key in the setup UI (`secrets/slskd_api_key`), and run **Test connection**. `verified` is stored only when that probe reports Ready. Restart the worker afterwards.
+Optional slskd is separate: [`deploy/slskd/`](deploy/slskd/README.md). It is not started by `./install.sh`, and its compose project (`smartradio-slskd`) is not the SmartRadio app. systemd and Docker Compose for this app are exclusive; Docker being installed for slskd does not make `./update.sh` start `deploy/docker-compose.yml`. After slskd is up, and again after `sudo ./update.sh`, set `SLSKD_URL`, paste the API key in the setup UI (`secrets/slskd_api_key`), and run **Test connection**. `verified` is stored only when that probe reports Ready. Restart the worker afterwards.
 
 ## Local development
 

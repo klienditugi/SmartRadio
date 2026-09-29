@@ -84,7 +84,7 @@ When the container is up, configure SmartRadio and run **Test connection** in th
 4. Save, then **Test connection**. That action is read-only (`GET /api/v0/application` and `GET /api/v0/server` with `X-API-Key`). Saving the form does not store `verified`. `verified` is stored only when the probe reports Ready. Yaml or env `verify_status` is ignored. The stored row is described in `docs/SLSKD.md`.
 5. Restart the SmartRadio worker after a successful test so it reloads that config.
 
-Do the same after a SmartRadio upgrade. On a host, upgrade with `sudo ./update.sh`. That pulls, reinstalls dependencies, rebuilds the UI, and restarts this project's services. A manual `git pull` and a service restart is not the update path. `./update.sh` does not call slskd and does not store `verified`. Run **Test connection** again, and restart the worker after it reports Ready, even if `update.sh` already restarted the worker.
+Do the same after a SmartRadio upgrade. On a host, upgrade with `sudo ./update.sh`. That pulls, reinstalls dependencies, rebuilds the UI, and restarts this project's services in the mode already installed. systemd and Docker Compose for SmartRadio are exclusive. This slskd project (`smartradio-slskd`) is not that Compose install, and `update.sh` does not start or stop it. A manual `git pull` and a service restart is not the update path. `./update.sh` does not call slskd and does not store `verified`. Run **Test connection** again, and restart the worker after it reports Ready, even if `update.sh` already restarted the worker.
 
 ## Stop without deleting music
 

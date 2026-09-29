@@ -46,6 +46,20 @@ Playback handoff uses verified SUB/WAVE admin `/dj/search` then `/dj/queue-track
 | `./install.sh` (systemd, default) | Linux host with Node 20+ | Host paths under `data/` or `SUBWAVE_LIBRARY_DIR` / `SUBWAVE_DOWNLOADS_DIR` |
 | `./install.sh --mode compose` | Docker available | **Required** host mounts: `SUBWAVE_DATA_DIR`, `SUBWAVE_LIBRARY_DIR`, `SUBWAVE_SECRETS_DIR`. Point host dirs at `/music/library` and `/music/downloads` when that is the live layout. |
 
+The two modes are exclusive. `install.sh` records the choice in `.subwave-install-mode` (`systemd` or `compose`, gitignored). `sudo ./update.sh` restarts that mode only.
+
+- A systemd install is `subwave-api.service` and `subwave-worker.service`. Update restarts those units. It does not run Compose for this repo, including when Docker is installed for something else.
+- A Compose install is the `subwave-ai` project in `deploy/docker-compose.yml`. Update rebuilds that project only.
+- slskd is a different compose project, `smartradio-slskd` (`deploy/slskd/`). It is not this app. Docker being installed, or that project running, does not make this a Compose install.
+
+On a systemd install, `./update.sh` must be run as root (`sudo ./update.sh`). If it is not root, it exits and says to re-run with sudo. It does not start Compose instead.
+
+Before a start or restart, if the API port (`SUBWAVE_API_PORT`, otherwise `server.port` in the config file, otherwise 8788) is held by a process that is not the unit or container being restarted, the script stops and names that process. It does not kill it.
+
+Created or Exited containers left over from the `subwave-ai` project are reported with the command to remove them. They are not deleted. Running `subwave-ai` containers on a systemd install stop the update. `smartradio-slskd` is not inspected or changed.
+
+After a systemd restart the script checks that both units are active and that `GET /api/v1/health` returns 200, and it prints the deployed commit.
+
 Compose never stores the library only in an ephemeral container layer.
 
 Non-interactive:
@@ -62,7 +76,7 @@ sudo ./install.sh --non-interactive
 | Script | Purpose |
 | --- | --- |
 | `./install.sh` | First install |
-| `sudo ./update.sh` | On a host: `git pull`, `pnpm install`, rebuild UI, restart this project's services. Not a manual git pull plus restart. |
+| `sudo ./update.sh` | On a host: `git pull`, `pnpm install`, rebuild UI, restart the recorded mode only (systemd units or the `subwave-ai` compose project, never both). Not a manual git pull plus restart. Does not touch slskd. |
 | `./uninstall.sh` | Stop this project's units/compose. `--purge --force` deletes clone data/secrets/.env only |
 | `./backup.sh` | Archive config, secrets, SQLite. `--include-library` adds music (large) |
 | `./restore.sh [--force] backup.tar.gz` | Extract into the `subwave-ai` clone |

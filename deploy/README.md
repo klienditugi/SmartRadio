@@ -13,5 +13,8 @@
 #
 # Music must never live only in the container writable layer.
 # Ollama is not started here. slskd is not a service in this file.
+# This project (name: subwave-ai) is only used when SmartRadio itself was
+# installed with --mode compose. A systemd install does not start it.
+# slskd's compose project is smartradio-slskd and is separate.
 # Optional external slskd: deploy/slskd/ (not part of the SmartRadio image).
 # See docs/SLSKD.md. deploy/examples/slskd/ only points at deploy/slskd/.

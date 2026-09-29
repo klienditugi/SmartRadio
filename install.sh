@@ -30,6 +30,9 @@ Configures Sub Wave AI in the local clone directory named subwave-ai.
                    touches unrelated services such as Ollama)
   --skip-build     Skip pnpm install/build (deps already present)
 
+systemd and compose are exclusive. The choice is recorded in .subwave-install-mode.
+Docker used by another project (such as slskd) does not select compose.
+
 Environment (no hard-coded production IPs/hosts/creds/models):
   SUBWAVE_API_HOST SUBWAVE_API_PORT
   SUBWAVE_LIBRARY_DIR SUBWAVE_DOWNLOADS_DIR SUBWAVE_STAGING_DIR SUBWAVE_DB_PATH
@@ -259,6 +262,9 @@ else
     fi
   fi
 fi
+
+write_install_mode "${ROOT}" "${MODE}"
+info "recorded install mode ${MODE} in $(install_mode_file "${ROOT}")"
 
 load_env_file "${ENV_OUT}"
 print_web_url
