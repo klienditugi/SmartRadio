@@ -11,11 +11,19 @@
  *   wrong title (the phrase must start at a boundary in the original basename;
  *   punctuation is spaces only for that comparison, and anything after the
  *   phrase is allowed; a closing ) or ] , or the requested artist name, is
- *   also a boundary), a medley (two other songs, or the whole word mashup,
- *   mash up, segue, transition, vs, or versus in the basename), a tribute or the word
- *   cover in the basename,
- *   a different artist leading the basename when this artist is only in folders,
- *   stems, long-recording phrases, bitrate under 128 kbps,
+ *   also a boundary), a medley (two other songs joined by ` _ `, ` / `, ` | `,
+ *   ` + `, or a tight capitalised hyphen, or the whole word mashup, mash up,
+ *   segue, transition, vs, or versus in the basename; vs or versus also counts
+ *   in a folder the artist was taken from), a tribute, the word cover in the
+ *   basename, or the whole word cover or covers in any folder, a different
+ *   artist leading the basename when this artist is only
+ *   a bare bracket credit or only in folders, stems (including the whole word
+ *   drumless in the basename or a folder), an unaccepted version (class other,
+ *   or a basename whole word
+ *   intro, outro, instrumental, recut, re-cut, bootleg, or 2k plus two digits;
+ *   a reject label wins over remix, club, extended, radio edit, album, or
+ *   original; folders do not trigger these labels), long-recording phrases,
+ *   bitrate under 128 kbps,
  *   files over max_file_size_mb (default 30 MiB), duration, sample rate, bit depth,
  *   and a short recording (same detector as before: under 90s, or under 0.6 of the
  *   median once five lengths are known).
@@ -76,7 +84,7 @@ const BITRATE_KNOWN_MIN = 32;
 const BITRATE_KNOWN_MAX = 320;
 
 /** Version terms that mean "this is not a full mix" rather than a desirable remix. */
-const STEM_VERSION_TERMS = ["stem", "stems", "multitrack", "acapella", "a cappella", "acappella"] as const;
+const STEM_VERSION_TERMS = ["stem", "stems", "multitrack", "acapella", "a cappella", "acappella", "drumless"] as const;
 
 const TITLE_STOPWORDS = new Set(["a", "an", "the", "and", "of", "feat", "ft"]);
 const CREDIT_WORDS = new Set(["feat", "ft", "featuring", "and"]);
@@ -119,7 +127,6 @@ const REMIX_WORDS = ["remix", "rmx"] as const;
  */
 const DERIVED_VERSION_PHRASES = [
   ...REMIX_WORDS,
-  "bootleg",
   "mashup",
   "mash up",
   "vs",
@@ -155,6 +162,12 @@ const CLASSIFIED_OVERLAP = new Set(["remix", "edit", "extended", "radio edit"]);
 
 /** Spaced joins only. A bare underscore is a space, not a medley separator. ` - ` is not one either. */
 const MEDLEY_SPLIT = / _ | \/ | \| | \+ |\b(?:medley|megamix)\b/i;
+/**
+ * `Get Lucky-Freak Out-Another Star`. The capital after the hyphen starts the next title.
+ * Case-sensitive on purpose, so `daft_punk-get_lucky` and `my-free-mp3` are not joins.
+ * Spaced ` - ` stays a normal artist/title separator.
+ */
+const TIGHT_TITLE_HYPHEN = /(?<=[A-Za-z])-(?=[A-Z])/;
 
 export const SCORE_COMPONENTS = [
   "requestedVersion",
@@ -207,6 +220,7 @@ export type FilterRemovalCounts = {
   tribute_or_cover: number;
   artist_mismatch: number;
   stem: number;
+  unaccepted_version: number;
   long_recording: number;
   under_bitrate: number;
   short_recording: number;
@@ -227,6 +241,7 @@ const REMOVAL_ORDER = [
   "tribute_or_cover",
   "artist_mismatch",
   "stem",
+  "unaccepted_version",
   "long_recording",
   "under_bitrate",
   "short_recording",
@@ -379,6 +394,7 @@ function emptyRemovals(): FilterRemovalCounts {
     tribute_or_cover: 0,
     artist_mismatch: 0,
     stem: 0,
+    unaccepted_version: 0,
     long_recording: 0,
     under_bitrate: 0,
     short_recording: 0,
@@ -574,7 +590,7 @@ function hasNamedProducerEdit(text: string): boolean {
 
 /**
  * Version marks on already-normalized text. The most specific marker wins.
- * A derived marker (remix, club, mix by, bootleg, mashup, "vs", mixshow,
+ * A derived marker (remix, club, mix by, mashup, "vs", mixshow,
  * rework, or a named-producer edit) is remix or extended/club, never original
  * or radio edit, even when the name also says original, vocal, radio edit, or edit.
  * "original vocal" inside that title is not an original.
@@ -665,10 +681,14 @@ function mentionsTitle(text: string, titleTokens: readonly string[]): boolean {
 }
 
 function medleyPieces(raw: string): string[] {
-  return raw
-    .split(MEDLEY_SPLIT)
-    .map((piece) => piece.trim())
-    .filter((piece) => piece.length > 0);
+  const pieces: string[] = [];
+  for (const part of raw.split(MEDLEY_SPLIT)) {
+    for (const tighter of part.split(TIGHT_TITLE_HYPHEN)) {
+      const trimmed = tighter.trim();
+      if (trimmed.length > 0) pieces.push(trimmed);
+    }
+  }
+  return pieces;
 }
 
 function leftoverTitleTokens(piece: string, titleTokens: readonly string[], artistTokens: readonly string[]): string[] {
@@ -682,9 +702,11 @@ function leftoverTitleTokens(piece: string, titleTokens: readonly string[], arti
 
 /**
  * A medley names at least two other titles beside this song, joined by
- * ` _ `, ` / `, ` | `, or ` + `, or it uses the word medley / megamix.
+ * ` _ `, ` / `, ` | `, ` + `, or a tight capitalised hyphen (`Title-Other`),
+ * or it uses the word medley / megamix.
  * One extra piece (an artist, or a single other title) is not enough.
  * A repeated title, a track number, the artist, a feat credit, and a version marker are not another title.
+ * Spaced ` - ` is not a join. A lowercase hyphen (`artist-title`, a URL) is not one either.
  */
 function isMedleyName(raw: string, titleTokens: readonly string[] | null, artistTokens: readonly string[]): boolean {
   if (!titleTokens || titleTokens.length === 0 || !raw.trim()) return false;
@@ -802,20 +824,96 @@ function titleEvidence(track: CandidateTrack, titleTokens: readonly string[] | n
   return track.folders.some((folder) => titleAtBoundary(folder, phrase));
 }
 
-/** Whole word in the basename only. A folder named cover, or cover.jpg, is not this. */
+/** Whole word in the basename. `Discover` and `Coverage` do not match. */
 function basenameHasCoverWord(track: CandidateTrack): boolean {
   return /\bcovers?\b/.test(basenameText(track));
 }
 
+/** Whole word `cover` or `covers` in any folder segment. `Discover` and `Coverage` do not match. */
+function folderHasCoverWord(track: CandidateTrack): boolean {
+  return track.folders.some((folder) => /\bcovers?\b/.test(normalizeMatchText(folder)));
+}
+
 /**
  * Whole word or phrase in the basename only. `mash-up` normalizes to `mash up`,
- * and `vs.` normalizes to `vs`. A folder name does not count.
+ * and `vs.` normalizes to `vs`. A folder name does not count, except the
+ * artist-folder case below.
  * bootleg, edit, remix, x, feat, and ft do not.
  */
 const MEDLEY_BASENAME_PHRASES = ["mashup", "mash up", "segue", "transition", "versus", "vs"] as const;
 
 function basenameHasMedleyWord(track: CandidateTrack): boolean {
   return hasAnyPhrase(basenameText(track), MEDLEY_BASENAME_PHRASES);
+}
+
+/**
+ * The basename does not name the artist, so the artist is read from a folder.
+ * Whole-word vs/versus in that same folder segment is the basename medley rule.
+ * A vs folder that does not carry the artist, and a basename that already names
+ * the artist, are left alone.
+ */
+/**
+ * Version words that keep a remixer-first name (or a bracketed remix credit)
+ * out of the bare-credit cover rule. A folder is not read.
+ */
+const BRACKET_CREDIT_VERSION_WORDS = [
+  "remix",
+  "rmx",
+  "mix",
+  "club",
+  "extended",
+  "edit",
+  "re edit",
+  "reedit",
+  "rework",
+  "dub",
+  "bootleg",
+] as const;
+
+function bracketGroups(raw: string): string[] {
+  const groups: string[] = [];
+  for (const match of raw.matchAll(/\(([^)]*)\)|\[([^\]]*)\]|\{([^}]*)\}/g)) {
+    groups.push(match[1] ?? match[2] ?? match[3] ?? "");
+  }
+  return groups;
+}
+
+/** The bracket holds the artist name and nothing else, as in `[Daft Punk]` or `(Daft Punk)`. */
+function isBareArtistCredit(group: string, artistTokens: readonly string[]): boolean {
+  const tokens = significantTokens(normalizeMatchText(group));
+  return tokens.length === artistTokens.length && artistTokens.every((token) => tokens.includes(token));
+}
+
+/**
+ * A different artist leads `<Other Artist> - <Title>`, and the requested artist
+ * appears only as a bare `[Artist]` or `(Artist)` credit. A version word in
+ * that bracket or anywhere else in the basename keeps the file (a remixer
+ * credit). Folders are not read.
+ */
+function bareBracketArtistCredit(
+  rawBase: string,
+  artistTokens: readonly string[],
+  titleTokens: readonly string[] | null,
+): boolean {
+  if (artistTokens.length === 0) return false;
+  if (!differentArtistLeads(rawBase, artistTokens, titleTokens)) return false;
+  const normalized = normalizeMatchText(rawBase);
+  if (hasAnyPhrase(normalized, BRACKET_CREDIT_VERSION_WORDS)) return false;
+  if (!hasEveryToken(normalized, artistTokens)) return false;
+  const holdingArtist = bracketGroups(rawBase).filter((group) => hasEveryToken(normalizeMatchText(group), artistTokens));
+  if (holdingArtist.length === 0 || !holdingArtist.every((group) => isBareArtistCredit(group, artistTokens))) return false;
+  const outside = rawBase.replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ");
+  return !hasEveryToken(normalizeMatchText(outside), artistTokens);
+}
+
+function artistTakenFromVsFolder(track: CandidateTrack, artistTokens: readonly string[]): boolean {
+  if (artistTokens.length === 0) return false;
+  if (hasEveryToken(basenameText(track), artistTokens)) return false;
+  return track.folders.some((folder) => {
+    const text = normalizeMatchText(folder);
+    if (!hasEveryToken(text, artistTokens)) return false;
+    return hasPhrase(text, "vs") || hasPhrase(text, "versus");
+  });
 }
 
 function identityRejection(
@@ -826,12 +924,13 @@ function identityRejection(
   const artists = artistTokenList(policy.query);
   const artist = typeof policy.query.artist === "string" ? policy.query.artist : "";
   const base = rawBasename(track);
-  if (basenameHasCoverWord(track)) return "tribute_or_cover";
+  if (basenameHasCoverWord(track) || folderHasCoverWord(track)) return "tribute_or_cover";
   if (titleTokens && !titleEvidence(track, titleTokens, artists)) return "title_mismatch";
   if (
     basenameHasMedleyWord(track) ||
     isMedleyName(base, titleTokens, artists) ||
-    isMedleyName(albumFolderRaw(track), titleTokens, artists)
+    isMedleyName(albumFolderRaw(track), titleTokens, artists) ||
+    artistTakenFromVsFolder(track, artists)
   ) {
     return "medley";
   }
@@ -840,6 +939,7 @@ function identityRejection(
   const artistOutsideTribute = hasEveryToken(normalizeMatchText(stripTributePhrases(base, artist)), artists);
   const otherLeads = differentArtistLeads(base, artists, titleTokens);
   if (otherLeads && artistInBasename && !artistOutsideTribute) return "tribute_or_cover";
+  if (bareBracketArtistCredit(base, artists, titleTokens)) return "tribute_or_cover";
   if (otherLeads && !artistInBasename) return "artist_mismatch";
   return null;
 }
@@ -887,6 +987,21 @@ function medianOf(values: readonly number[]): number {
   return (lower + upper) / 2;
 }
 
+/** Basename whole words. A folder does not count. `2k17` is `2k` plus two digits. */
+const UNACCEPTED_BASENAME_PHRASES = ["intro", "outro", "instrumental", "recut", "re cut", "bootleg"] as const;
+const YEAR_EDIT = /\b2k\d{2}\b/;
+
+/**
+ * Class other is not an accepted version. The basename labels above reject
+ * even when the same name is also remix, club, extended, radio edit, album,
+ * or original. A clean title with none of these stays original.
+ */
+function unacceptedVersion(track: CandidateTrack): boolean {
+  const text = basenameText(track);
+  if (hasAnyPhrase(text, UNACCEPTED_BASENAME_PHRASES) || YEAR_EDIT.test(text)) return true;
+  return fileVersionClass(track) === "other";
+}
+
 function incidentalStem(
   track: CandidateTrack,
   policy: ResolvedPolicy,
@@ -918,6 +1033,7 @@ function firstRejection(
   if (identity) return identity;
   const asked = matchedTerms(requestedBlob(policy.query), policy.versionPenaltyTerms);
   if (incidentalStem(track, policy, titleTokens, asked)) return "stem";
+  if (unacceptedVersion(track)) return "unaccepted_version";
   if (matchesLongRecording(track, policy.longRecordingPhrases)) return "long_recording";
   if (underBitrate(track)) return "under_bitrate";
   if (policy.maxFileSizeMb !== null && track.sizeBytes > policy.maxFileSizeMb * MIB) return "max_file_size";

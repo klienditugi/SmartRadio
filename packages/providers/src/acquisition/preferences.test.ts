@@ -282,17 +282,14 @@ describe("real-data traps", () => {
     expect(fileVersionClass(asTrack("peer-137", segueFile.filename))).not.toBe("remix");
   });
 
-  it("rejects You Get Lucky and keeps the Dj Allan remix", () => {
+  it("rejects You Get Lucky and the Dj Allan bootleg", () => {
     const wrong = run(one("peer-137", "You Get Lucky"));
     expect(wrong.outcome).toBe("no_suitable_result");
     if (wrong.outcome === "no_suitable_result") expect(wrong.removed.title_mismatch).toBe(1);
 
-    const remix = run(one("peer-137", "Dj Allan"));
-    expect(remix.outcome).toBe("selected");
-    if (remix.outcome !== "selected") return;
-    expect(remix.versionClass).toBe("remix");
-    expect(remix.breakdown.titleMatch).toBe(1);
-    expect(remix.file.size).toBeLessThanOrEqual(30 * MIB);
+    const bootleg = run(one("peer-137", "Dj Allan"));
+    expect(bootleg.outcome).toBe("no_suitable_result");
+    if (bootleg.outcome === "no_suitable_result") expect(bootleg.removed.unaccepted_version).toBe(1);
   });
 
   it("rejects the 105 second HOME files against the song median, including the remix FLAC", () => {
@@ -345,8 +342,8 @@ describe("dry-run grid", () => {
     expect(rows).toHaveLength(20);
     const balanced = rows.find((row) => row.versionPreference === "balanced" && row.formatPreference === "prefer_mp3");
     expect(balanced?.versionClass).toBe("remix");
-    expect(balanced?.basename).toContain("Dj Allan");
-    expect(balanced?.basename).toContain("Bootleg");
+    expect(balanced?.basename).toBe("Daft Punk - Get Lucky (Daft Punk remix) - 01 - Get Lucky (Daft Punk remix).mp3");
+    expect(balanced?.sizeMiB).toBe(24.28);
     expect(rows.every((row) => row.outcome === "selected" && (row.titleMatch ?? 0) > 0 && (row.artistInPath ?? 0) > 0)).toBe(
       true,
     );
@@ -354,5 +351,254 @@ describe("dry-run grid", () => {
     expect(explicit.map((row) => row.queryTitle)).toEqual(["Get Lucky (Radio Edit)", "Get Lucky (Album Version)"]);
     expect(explicit[0]?.versionClass).toBe("radio_edit");
     expect(explicit[1]?.versionClass).toBe("original");
+  });
+});
+
+describe("wrong-song rows stay out of the pick", () => {
+  const rows: {
+    filename: string;
+    size: number;
+    bitRate: number;
+    length: number;
+    reason: "medley" | "stem" | "unaccepted_version" | "tribute_or_cover";
+  }[] = [
+    {
+      filename:
+        "@@share052\\MUSICA\\DAFT PUNK\\DAFT PUNK - COLLECTION\\Daft Punk - Get Lucky-Freak Out-Another Star (with Stevie Wonder, Pharrell Williams & Nile Rodgers) (Grammy Awards 2014).mp3",
+      size: 13631033,
+      bitRate: 320,
+      length: 339,
+      reason: "medley",
+    },
+    {
+      filename:
+        "@@share052\\MUSICA\\DAFT PUNK\\Daft Punk - MashUps\\Daft Punk - Get Lucky-Freak Out-Another Star (with Stevie Wonder, Pharrell Williams & Nile Rodgers) (Grammy Awards 2014).mp3",
+      size: 13631033,
+      bitRate: 320,
+      length: 339,
+      reason: "medley",
+    },
+    {
+      filename:
+        "@@share052\\MUSICA\\STEVIE WONDER\\Stevie Wonder - Duets & Collaborations\\Stevie Wonder - Get Lucky-Freak Out-Another Star (with Daft Punk, Pharrell Williams & Nile Rodgers).mp3",
+      size: 13631033,
+      bitRate: 320,
+      length: 339,
+      reason: "medley",
+    },
+    {
+      filename:
+        "@@share002\\Música\\Media.localized\\Music\\Daft Punk vs Georgio Schultz & The Cube Guys\\Unknown Album\\Get Lucky For The Music (ATK 2024) - 11A - 126.mp3",
+      size: 14533708,
+      bitRate: 320,
+      length: 363,
+      reason: "medley",
+    },
+    {
+      filename:
+        "@@share002\\Música\\Media.localized\\Music\\Daft Punk vs Georgio Schultz & The Cube Guys\\Unknown Album\\Get Lucky Music (Abel The Kid 2013) - 11A - 126.mp3",
+      size: 14531633,
+      bitRate: 320,
+      length: 363,
+      reason: "medley",
+    },
+    {
+      filename:
+        "@@share027\\~Essentials~\\Daft Punk - Essentials [2026] [MP3-320]-Sc4r3cr0w\\092 - Daft Punk - Get Lucky (Drumless Edition) (ft. Pharrell Williams and Nile Rodgers).mp3",
+      size: 14813281,
+      bitRate: 320,
+      length: 369,
+      reason: "stem",
+    },
+    {
+      filename:
+        "@@share016\\Music\\Daft Punk\\Random Access Memories (Drumless Edition)\\08 Get Lucky (Drumless Edition) (feat. Pharrell Williams and Nile Rodgers).mp3",
+      size: 14868623,
+      bitRate: 320,
+      length: 369,
+      reason: "stem",
+    },
+    {
+      filename:
+        "@@share040\\Music\\Daft Punk\\Random Access Memories (Drumless Edition\\08 Get Lucky (Drumless Edition) (fea.mp3",
+      size: 14860412,
+      bitRate: 320,
+      length: 369,
+      reason: "stem",
+    },
+    {
+      filename:
+        "music\\Daft Punk\\2023 - Random Access Memories (Drumless Edition)\\08 - Get Lucky (feat. Pharrell Williams and Nile Rodgers).mp3",
+      size: 14824630,
+      bitRate: 320,
+      length: 369,
+      reason: "stem",
+    },
+    {
+      filename:
+        "@@share001\\complete\\Old Download\\WATCH FOLDER\\Daft. Punk, Pharrell, Nile Rodgers - Get Lucky (Intro) (Clean) (10s Redrum).mp3",
+      size: 10450754,
+      bitRate: 320,
+      length: 259,
+      reason: "unaccepted_version",
+    },
+    {
+      filename:
+        "@@share101\\MIXING TRACKS\\116 bpm - Daft Punk ft Pharrell Williams - Get Lucky [Intro - CLEAN] 2.mp3",
+      size: 10327076,
+      bitRate: 320,
+      length: 256,
+      reason: "unaccepted_version",
+    },
+    {
+      filename:
+        "@@share086\\MUSIC\\complete\\lwl\\2025-10\\Daft Punk - Get Lucky 2k17 (Ash Simons Bangerz) (Ft. AURI) (Intro Clean).mp3",
+      size: 10544680,
+      bitRate: 320,
+      length: 262,
+      reason: "unaccepted_version",
+    },
+    {
+      filename: "media\\Music\\Sgt Slick\\Discography\\Daft Punk - Get Lucky (Sgt Slick ReCut).mp3",
+      size: 13954458,
+      bitRate: 320,
+      length: 339,
+      reason: "unaccepted_version",
+    },
+    {
+      filename:
+        "Music\\Daft Punk\\2021 - About And Technologic Mashup (2021)\\06. Dj Allan _ Daft Punk X Rob & Jack - Get Lucky (Dj Allan I Got U Bootleg)[Clean].mp3",
+      size: 9581047,
+      bitRate: 320,
+      length: 227,
+      reason: "unaccepted_version",
+    },
+    {
+      filename: "Music\\Daft Punk\\About and Technologic Mashup\\6 - Get Lucky (DJ Allan I got U bootleg).flac",
+      size: 29059521,
+      bitRate: 0,
+      length: 215,
+      reason: "unaccepted_version",
+    },
+    {
+      filename:
+        "@@share097\\Music\\Daft Punk\\Random Access Memories\\Get Lucky (Extended Instrumental).mp3",
+      size: 23870482,
+      bitRate: 320,
+      length: 595,
+      reason: "unaccepted_version",
+    },
+    {
+      filename:
+        "@@share026\\music\\Soulseek Downloads\\complete\\guitareti\\Music\\[INSTRUMENTAL] Daft Punk - Get Lucky Ft. Pharrell Williams, Nile Rodgers.mp3",
+      size: 4618063,
+      bitRate: 128,
+      length: 288,
+      reason: "unaccepted_version",
+    },
+    {
+      filename:
+        "@@share097\\Music\\Unknown Artist\\Unknown Album\\daft punk - get lucky [8 bit instrumental].mp3",
+      size: 5672956,
+      bitRate: 320,
+      length: 141,
+      reason: "unaccepted_version",
+    },
+    {
+      filename: "music\\1001 Awesome Cover Songs\\Halestorm - Get Lucky [Daft Punk].mp3",
+      size: 7680294,
+      bitRate: 320,
+      length: 188,
+      reason: "tribute_or_cover",
+    },
+    {
+      filename: "Music\\Umphreys Mcgee\\UM Covers the World\\UM Covers 2013\\Get Lucky (Daft Punk).mp3",
+      size: 19283935,
+      bitRate: 320,
+      length: 447,
+      reason: "tribute_or_cover",
+    },
+  ];
+
+  function basenameOf(filename: string): string {
+    return filename.split(/[/\\]/).pop() ?? filename;
+  }
+
+  function isKnownWrong(filename: string): boolean {
+    if (/drumless/i.test(filename)) return true;
+    const base = basenameOf(filename);
+    return rows.some((row) => !/drumless/i.test(row.filename) && basenameOf(row.filename) === base);
+  }
+
+  function asFile(row: { filename: string; size: number; bitRate: number; length: number }) {
+    return { filename: row.filename, size: row.size, bitRate: row.bitRate, length: row.length, extension: "", isLocked: false };
+  }
+
+  function solo(row: { filename: string; size: number; bitRate: number; length: number }): SearchPayload {
+    return {
+      responses: [
+        {
+          username: "peer-known",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 1,
+          files: [asFile(row)],
+        },
+      ],
+      searchText: "Daft Punk Get Lucky",
+    };
+  }
+
+  it("rejects each real filename", () => {
+    for (const row of rows) {
+      const decision = run(solo(row));
+      expect(decision.outcome, row.filename).toBe("no_suitable_result");
+      if (decision.outcome === "no_suitable_result") expect(decision.removed[row.reason], row.filename).toBe(1);
+    }
+  });
+
+  it("does not pick a known wrong row when that row has the best peer", () => {
+    const bestFiles = rows.map(asFile);
+    const responses: SlskdResponse[] = curated.responses.map((response) => ({
+      ...response,
+      hasFreeUploadSlot: false,
+      queueLength: 1_000_000,
+      uploadSpeed: 1,
+      files: (response.files ?? []).filter((file) => !isKnownWrong(file.filename)),
+    }));
+    responses.push({
+      username: "peer-fast",
+      hasFreeUploadSlot: true,
+      queueLength: 0,
+      uploadSpeed: 1_000_000_000_000,
+      files: bestFiles,
+    });
+    const payload: SearchPayload = { responses, searchText: curated.searchText };
+    const versions = ["balanced", "original", "extended", "remix", "radio_edit"] as const;
+    const formats = ["prefer_mp3", "prefer_flac", "mp3_only", "flac_only"] as const;
+    for (const versionPreference of versions) {
+      for (const formatPreference of formats) {
+        const decision = run(payload, { versionPreference, formatPreference });
+        expect(decision.outcome, `${versionPreference}/${formatPreference}`).toBe("selected");
+        if (decision.outcome !== "selected") continue;
+        expect(isKnownWrong(decision.file.filename), `${versionPreference}/${formatPreference} ${decision.file.filename}`).toBe(
+          false,
+        );
+      }
+    }
+    const explicit = [
+      { versionPreference: "extended" as const, title: "Get Lucky (Radio Edit)" },
+      { versionPreference: "remix" as const, title: "Get Lucky (Album Version)" },
+    ];
+    for (const item of explicit) {
+      const decision = run(payload, {
+        versionPreference: item.versionPreference,
+        formatPreference: "prefer_mp3",
+        query: { artist: "Daft Punk", title: item.title },
+      });
+      expect(decision.outcome, item.title).toBe("selected");
+      if (decision.outcome !== "selected") continue;
+      expect(isKnownWrong(decision.file.filename), item.title).toBe(false);
+    }
   });
 });

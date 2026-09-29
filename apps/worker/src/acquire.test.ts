@@ -570,7 +570,7 @@ describe("A5 acquisition worker", () => {
     const row = getRequest(db, request.id);
     expect(row?.status).toBe("FAILED");
     expect(row?.error).toBe(
-      "no_suitable_result: locked=2, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=3, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, long_recording=0, under_bitrate=0, short_recording=0",
+      "no_suitable_result: locked=2, junk=0, extensions=1, format_preference=0, min_file_size=0, max_file_size=0, max_duration=0, max_sample_rate=0, max_bit_depth=0, title_mismatch=3, medley=0, tribute_or_cover=0, artist_mismatch=0, stem=0, unaccepted_version=0, long_recording=0, under_bitrate=0, short_recording=0",
     );
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
     expect(failed?.from_status).toBe("QUEUED");
