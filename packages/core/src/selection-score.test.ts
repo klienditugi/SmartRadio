@@ -336,12 +336,49 @@ describe("ordered selector", () => {
       durationSeconds: 247,
       bitrateKbps: 320,
     });
+    const halestormBare = mp3("halestorm-bare", "Halestorm - Get Lucky [Daft Punk].mp3", {
+      folders: ["Album"],
+    });
+    const umphreys = mp3("umphreys", "Get Lucky (Daft Punk).mp3", {
+      sizeBytes: 19_283_935,
+      durationSeconds: 447,
+      bitrateKbps: 320,
+      folders: ["Umphreys Mcgee", "UM Covers the World", "UM Covers 2013"],
+    });
+    const discover = mp3("discover", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Discover Weekly\\Daft Punk - Get Lucky.mp3",
+    });
+    const coverage = mp3("coverage", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Coverage\\Daft Punk - Get Lucky.mp3",
+    });
+    const gala = mp3("gala", "Daft Punk - Get Lucky (ATCG x About Gala Edit).mp3", {
+      sizeBytes: 16_584_705,
+      durationSeconds: 414,
+      bitrateKbps: 320,
+      folders: ["DJ", "bootlegs (alot)"],
+    });
+    const fatTony = mp3("fat-tony", "Daft Punk - Get Lucky (FAT TONY Remix).mp3", {
+      sizeBytes: 11_761_511,
+      durationSeconds: 293,
+      bitrateKbps: 320,
+      folders: ["DJ", "bootlegs (alot)"],
+    });
     const halestormOnly = selectTracks([halestorm], { query });
+    const halestormBareOnly = selectTracks([halestormBare], { query });
+    const umphreysOnly = selectTracks([umphreys], { query });
     const parenOnly = selectTracks([paren], { query });
     expect(halestormOnly.outcome).toBe("no_suitable_result");
+    expect(halestormBareOnly.outcome).toBe("no_suitable_result");
+    expect(umphreysOnly.outcome).toBe("no_suitable_result");
     expect(parenOnly.outcome).toBe("no_suitable_result");
     if (halestormOnly.outcome === "no_suitable_result") expect(halestormOnly.removed.tribute_or_cover).toBe(1);
+    if (halestormBareOnly.outcome === "no_suitable_result") expect(halestormBareOnly.removed.tribute_or_cover).toBe(1);
+    if (umphreysOnly.outcome === "no_suitable_result") expect(umphreysOnly.removed.tribute_or_cover).toBe(1);
     if (parenOnly.outcome === "no_suitable_result") expect(parenOnly.removed.tribute_or_cover).toBe(1);
+    expect(selected([discover]).pick.peer).toBe("discover");
+    expect(selected([coverage]).pick.peer).toBe("coverage");
+    expect(selected([gala]).pick.peer).toBe("gala");
+    expect(selected([fatTony]).pick.peer).toBe("fat-tony");
     expect(selected([remixCredit]).pick.peer).toBe("remixer");
     expect(fileVersionClass(remixCredit)).toBe("remix");
     const remixerOnly = selectTracks([remixerFirst], { query });
@@ -548,13 +585,15 @@ describe("ordered selector", () => {
       path: "music\\cover\\Daft Punk - Get Lucky.mp3",
     });
     const image = mp3("image", "cover.jpg", { path: "music\\Daft Punk - Get Lucky\\cover.jpg" });
-    const withImage = selectTracks([inCoverFolder, image], {
+    const coverFolder = selectTracks([inCoverFolder], { query });
+    expect(coverFolder.outcome).toBe("no_suitable_result");
+    if (coverFolder.outcome === "no_suitable_result") expect(coverFolder.removed.tribute_or_cover).toBe(1);
+    const withImage = selectTracks([image], {
       query,
       allowedExtensions: [".mp3", ".flac", ".m4a", ".ogg", ".wav"],
     });
-    expect(withImage.outcome).toBe("selected");
-    if (withImage.outcome === "selected") {
-      expect(withImage.pick.peer).toBe("album");
+    expect(withImage.outcome).toBe("no_suitable_result");
+    if (withImage.outcome === "no_suitable_result") {
       expect(withImage.removed.tribute_or_cover).toBe(0);
       expect(withImage.removed.extensions).toBe(1);
     }

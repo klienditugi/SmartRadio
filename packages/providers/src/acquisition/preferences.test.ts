@@ -511,6 +511,13 @@ describe("wrong-song rows stay out of the pick", () => {
       length: 188,
       reason: "tribute_or_cover",
     },
+    {
+      filename: "Music\\Umphreys Mcgee\\UM Covers the World\\UM Covers 2013\\Get Lucky (Daft Punk).mp3",
+      size: 19283935,
+      bitRate: 320,
+      length: 447,
+      reason: "tribute_or_cover",
+    },
   ];
 
   function basenameOf(filename: string): string {

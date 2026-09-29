@@ -14,8 +14,9 @@
  *   also a boundary), a medley (two other songs joined by ` _ `, ` / `, ` | `,
  *   ` + `, or a tight capitalised hyphen, or the whole word mashup, mash up,
  *   segue, transition, vs, or versus in the basename; vs or versus also counts
- *   in a folder the artist was taken from), a tribute or the word cover in the
- *   basename, a different artist leading the basename when this artist is only
+ *   in a folder the artist was taken from), a tribute, the word cover in the
+ *   basename, or the whole word cover or covers in any folder, a different
+ *   artist leading the basename when this artist is only
  *   a bare bracket credit or only in folders, stems (including the whole word
  *   drumless in the basename or a folder), an unaccepted version (class other,
  *   or a basename whole word
@@ -823,9 +824,14 @@ function titleEvidence(track: CandidateTrack, titleTokens: readonly string[] | n
   return track.folders.some((folder) => titleAtBoundary(folder, phrase));
 }
 
-/** Whole word in the basename only. A folder named cover, or cover.jpg, is not this. */
+/** Whole word in the basename. `Discover` and `Coverage` do not match. */
 function basenameHasCoverWord(track: CandidateTrack): boolean {
   return /\bcovers?\b/.test(basenameText(track));
+}
+
+/** Whole word `cover` or `covers` in any folder segment. `Discover` and `Coverage` do not match. */
+function folderHasCoverWord(track: CandidateTrack): boolean {
+  return track.folders.some((folder) => /\bcovers?\b/.test(normalizeMatchText(folder)));
 }
 
 /**
@@ -918,7 +924,7 @@ function identityRejection(
   const artists = artistTokenList(policy.query);
   const artist = typeof policy.query.artist === "string" ? policy.query.artist : "";
   const base = rawBasename(track);
-  if (basenameHasCoverWord(track)) return "tribute_or_cover";
+  if (basenameHasCoverWord(track) || folderHasCoverWord(track)) return "tribute_or_cover";
   if (titleTokens && !titleEvidence(track, titleTokens, artists)) return "title_mismatch";
   if (
     basenameHasMedleyWord(track) ||
