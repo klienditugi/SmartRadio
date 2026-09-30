@@ -80,8 +80,9 @@ library:
 # SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS overrides it. The library file stays if the wait expires
 # (search_visible_timeout). The defined search hit is string id and title, optional artist and album.
 # It has no path, filename, or duration, and the id cannot be tied to the file just placed.
-# A hit matches request artist and title only. That is not a file identity match.
-# Other visible hits keep waiting, then fail as handoff_no_match. Nothing is queued until one matches.
+# A hit matches request artist and title, then the selected file's version class.
+# That is not a file identity match. Several hits in that class fail as handoff_ambiguous.
+# Hits that do not match artist and title keep waiting, then fail as handoff_no_match.
 # /dj/search cannot be reached after retries: radio_unreachable. No TRACK_READY then.
 # Do not use public POST /request for announcements. URL and admin password come from this file and secrets/.
 # verify_status in yaml or env is deprecated and ignored. Test connection stores the result.

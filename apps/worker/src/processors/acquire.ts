@@ -41,6 +41,8 @@ type DownloadPayload = {
   /** Set once enqueue has succeeded. Retries must not extend it. */
   download_started_at?: number;
   selection_score?: { breakdown: Record<string, number>; total: number; signals: unknown };
+  /** Selector version class of `selected`. Copied through to the radio handoff. */
+  version_class?: string;
 };
 
 function acquisitionUnavailable(provider: AcquisitionProvider): boolean {
@@ -172,6 +174,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   let payload = parsePayload(job.payload_json);
   let selected = selectedFromPayload(payload);
   let selectionScore = payload.selection_score;
+  let versionClass = payload.version_class;
 
   // --- Phase 1: poll search + select + enqueue (QUEUED) ---
   if (request.status === "QUEUED") {
@@ -214,6 +217,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       });
       if (decision.outcome === "selected") {
         selected = decision.file;
+        versionClass = decision.versionClass;
         selectionScore = {
           breakdown: decision.breakdown,
           total: decision.total,
@@ -259,6 +263,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       download_started_at: started,
       ...(transferId ? { transferId } : {}),
       ...(selectionScore ? { selection_score: selectionScore } : {}),
+      ...(versionClass ? { version_class: versionClass } : {}),
     };
     const existing = listAcquisitionItems(ctx.db, request.id);
     const itemId =
@@ -415,6 +420,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       ...(selected.durationSeconds !== undefined && selected.durationSeconds > 0
         ? { duration_seconds: selected.durationSeconds }
         : {}),
+      ...(payload.version_class ? { version_class: payload.version_class } : {}),
     },
   });
   return {

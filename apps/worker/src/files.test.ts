@@ -174,7 +174,7 @@ async function placeInLibrary(ctx: WorkerContext, requestId: string, filename: s
   const validate = enqueueJob(ctx.db, {
     type: "validate_file",
     requestId,
-    payload: { filename, size: statSync(safeDownload(ctx, filename)).size },
+    payload: { filename, size: statSync(safeDownload(ctx, filename)).size, duration_seconds: 180 },
   });
   await handleValidateFile(ctx, validate);
   const imported = listJobsForRequest(ctx.db, requestId).find((job) => job.type === "import_library");
@@ -267,7 +267,7 @@ describe("file moves", () => {
     const job = enqueueJob(db, {
       type: "validate_file",
       requestId: request.id,
-      payload: { filename: "track.mp3", size: body.length },
+      payload: { filename: "track.mp3", size: body.length, duration_seconds: 180 },
     });
     await expect(handleValidateFile(ctx, job)).rejects.toThrow(/move verification failed/);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
@@ -368,6 +368,26 @@ describe("file moves", () => {
       ),
     ).rejects.toThrow(/ffprobe_format_mismatch/);
     expect(readFileSync(path.join(downloads, "track.mp3"), "utf8")).toBe("audio");
+  });
+
+  it("fails validation when the selected file has no length and leaves the download in place", async () => {
+    const { ctx, db, downloads, cleanup } = fixture();
+    cleanups.push(cleanup);
+    setFfprobeRunner(async () => ({ codecName: "mp3", formatName: "mp3", durationSeconds: 180 }));
+    mkdirSync(downloads, { recursive: true });
+    writeFileSync(path.join(downloads, "track.mp3"), "audio");
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "DOWNLOAD_COMPLETE");
+    await expect(
+      handleValidateFile(
+        ctx,
+        enqueueJob(db, { type: "validate_file", requestId: request.id, payload: { filename: "track.mp3", size: 5 } }),
+      ),
+    ).rejects.toThrow(/duration_unknown/);
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("duration_unknown");
+    expect(readFileSync(path.join(downloads, "track.mp3"), "utf8")).toBe("audio");
+    expect(listJobsForRequest(db, request.id).some((job) => job.type === "import_library")).toBe(false);
   });
 
   it("fails validation when the probed duration is outside the selected length", async () => {

@@ -196,8 +196,8 @@ describe("A5 acquisition worker", () => {
   beforeEach(() => {
     setFfprobeRunner(async (_bin, filePath) => {
       const ext = path.extname(filePath).toLowerCase();
-      if (ext === ".flac") return { codecName: "flac", formatName: "flac" };
-      if (ext === ".mp3") return { codecName: "mp3", formatName: "mp3" };
+      if (ext === ".flac") return { codecName: "flac", formatName: "flac", durationSeconds: 180 };
+      if (ext === ".mp3") return { codecName: "mp3", formatName: "mp3", durationSeconds: 180 };
       return "failed";
     });
   });
@@ -327,7 +327,13 @@ describe("A5 acquisition worker", () => {
         requestId: request.id,
         payload: {
           enqueued: true,
-          selected: { username: "peer-a", filename: "\\\\music\\\\track.flac", size: 100, fileId: "7" },
+          selected: {
+            username: "peer-a",
+            filename: "\\\\music\\\\track.flac",
+            size: 100,
+            fileId: "7",
+            durationSeconds: 180,
+          },
         },
       }),
     );
@@ -339,6 +345,7 @@ describe("A5 acquisition worker", () => {
       filename: path.join("music", "track.flac"),
       path: path.join(downloads, "music", "track.flac"),
       size: 100,
+      duration_seconds: 180,
     });
     await handleValidateFile(
       {

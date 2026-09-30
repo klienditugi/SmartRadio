@@ -327,7 +327,11 @@ describe("A4 radio events", () => {
     };
     await handleImportLibrary(
       ctx,
-      enqueueJob(db, { type: "import_library", requestId: request.id, payload: { filename: "track.mp3" } }),
+      enqueueJob(db, {
+        type: "import_library",
+        requestId: request.id,
+        payload: { filename: "track.mp3", version_class: "original" },
+      }),
     );
     const jobs = listJobsForRequest(db, request.id);
     expect(jobs.map((job) => job.type).sort()).toEqual(["import_library", "queue_radio"]);
@@ -414,7 +418,7 @@ describe("A4 radio events", () => {
       enqueueJob(db, {
         type: "queue_radio",
         requestId: request.id,
-        payload: { track_ready: true, filename: "blocked.mp3" },
+        payload: { track_ready: true, filename: "blocked.mp3", version_class: "original" },
       }),
     );
     expect(order).toEqual(["search", "say", "queue"]);
@@ -578,7 +582,12 @@ describe("A4 radio events", () => {
       enqueueJob(db, {
         type: "queue_radio",
         requestId: request.id,
-        payload: { track_ready: true, filename: "track.mp3", search_wait_started_at: Date.now() },
+        payload: {
+          track_ready: true,
+          filename: "track.mp3",
+          search_wait_started_at: Date.now(),
+          version_class: "original",
+        },
       }),
     );
     expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
@@ -638,17 +647,17 @@ describe("A4 radio events", () => {
     { name: "left curly apostrophe", title: "Don't Go", hitTitle: "Don\u2018t Go", artist: "O\u2018Brien", hitArtist: "O'Brien", match: true },
     { name: "case and extra spaces", title: "don't   go", hitTitle: "  Don't  Go ", artist: "adam  beyer", hitArtist: "Adam Beyer", match: true },
     { name: "original mix in parentheses", title: "Don't Go", hitTitle: "Don't Go (Original Mix)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
-    { name: "extended mix in brackets", title: "Don't Go", hitTitle: "Don't Go [Extended Mix]", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
-    { name: "radio edit", title: "Don't Go", hitTitle: "Don't Go (Radio Edit)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
-    { name: "club mix", title: "Don't Go", hitTitle: "Don't Go [Club Mix]", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
-    { name: "remix in parentheses", title: "Don't Go", hitTitle: "Don't Go (Remix)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "extended mix in brackets", title: "Don't Go", hitTitle: "Don't Go [Extended Mix]", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true, versionClass: "extended" },
+    { name: "radio edit", title: "Don't Go", hitTitle: "Don't Go (Radio Edit)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true, versionClass: "radio_edit" },
+    { name: "club mix", title: "Don't Go", hitTitle: "Don't Go [Club Mix]", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true, versionClass: "extended" },
+    { name: "remix in parentheses", title: "Don't Go", hitTitle: "Don't Go (Remix)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true, versionClass: "remix" },
     { name: "album version", title: "Don't Go", hitTitle: "Don't Go [Album Version]", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
     { name: "bootleg label", title: "Don't Go", hitTitle: "Don't Go (Bootleg)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: false },
     { name: "two bracket groups", title: "Don't Go", hitTitle: "Don't Go (Original Mix) (Remix)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: false },
     { name: "longer title", title: "Don't Go", hitTitle: "Don't Go Now", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: false },
     { name: "remix without brackets", title: "Don't Go", hitTitle: "Don't Go Remix", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: false },
     { name: "artist mismatch", title: "Don't Go", hitTitle: "Don't Go", artist: "Adam Beyer", hitArtist: "Someone Else", match: false },
-  ])("handoff $name", async ({ title, hitTitle, artist, hitArtist, match }) => {
+  ])("handoff $name", async ({ title, hitTitle, artist, hitArtist, match, versionClass = "original" }) => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const hit = { id: "nd-song-1", title: hitTitle, artist: hitArtist, album: "Beatport Top 100 Techno (Peak Time, Driving) April 2025" };
@@ -665,7 +674,12 @@ describe("A4 radio events", () => {
       enqueueJob(db, {
         type: "queue_radio",
         requestId: request.id,
-        payload: { track_ready: true, filename: "track.mp3", search_wait_started_at: Date.now() },
+        payload: {
+          track_ready: true,
+          filename: "track.mp3",
+          search_wait_started_at: Date.now(),
+          version_class: versionClass,
+        },
       }),
     );
     if (match) {
@@ -676,6 +690,98 @@ describe("A4 radio events", () => {
       expect(queued).toEqual([]);
       expect(getRequest(db, request.id)?.status).toBe("IMPORTING");
     }
+  });
+
+  it.each([
+    {
+      name: "original selection picks the bare title",
+      versionClass: "original",
+      chosen: "bare",
+    },
+    {
+      name: "extended selection picks Extended Mix",
+      versionClass: "extended",
+      chosen: "extended",
+    },
+  ])("handoff $name", async ({ versionClass, chosen }) => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const bare = { id: "bare", title: "Don't Go", artist: "Adam Beyer", album: "LP" };
+    const extended = { id: "extended", title: "Don't Go (Extended Mix)", artist: "Adam Beyer", album: "LP" };
+    const { radio, library, acquisition, queued } = harness({ search: djSearchResponse([bare, extended]) });
+    const request = createRequest(db, { rawQuery: "Adam Beyer - Don't Go" });
+    advance(db, request.id, "IMPORTING", { artist: "Adam Beyer", title: "Don't Go" });
+    const result = await handleQueueRadio(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "queue_radio",
+        requestId: request.id,
+        payload: {
+          track_ready: true,
+          filename: "track.mp3",
+          search_wait_started_at: Date.now(),
+          version_class: versionClass,
+        },
+      }),
+    );
+    expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
+    expect(queued).toEqual([chosen === "bare" ? bare : extended]);
+  });
+
+  it.each([
+    {
+      name: "bare title and Original Mix",
+      hits: [
+        { id: "bare", title: "Don't Go", artist: "Adam Beyer", album: "LP" },
+        { id: "original", title: "Don't Go (Original Mix)", artist: "Adam Beyer", album: "LP" },
+      ],
+    },
+    {
+      name: "two identical hits",
+      hits: [
+        { id: "one", title: "Don't Go", artist: "Adam Beyer", album: "LP" },
+        { id: "two", title: "Don't Go", artist: "Adam Beyer", album: "LP" },
+      ],
+    },
+  ])("fails handoff_ambiguous for $name and keeps the library file", async ({ hits }) => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const libraryFile = path.join(config.paths.library, "track.mp3");
+    mkdirSync(config.paths.library, { recursive: true });
+    writeFileSync(libraryFile, "kept-in-library");
+    const { radio, library, acquisition, queued, say } = harness({ search: djSearchResponse(hits) });
+    const request = createRequest(db, { rawQuery: "Adam Beyer - Don't Go" });
+    advance(db, request.id, "IMPORTING", { artist: "Adam Beyer", title: "Don't Go" });
+    const result = await handleQueueRadio(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "queue_radio",
+        requestId: request.id,
+        payload: {
+          track_ready: true,
+          filename: "track.mp3",
+          search_wait_started_at: Date.now(),
+          version_class: "original",
+        },
+      }),
+    );
+    expect(result).toEqual({ failed: true, reason: "handoff_ambiguous" });
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("handoff_ambiguous");
+    expect(queued).toEqual([]);
+    expect(say).toEqual([]);
+    expect(readLibrary(libraryFile)).toBe("kept-in-library");
+    expect(listJobsForRequest(db, request.id).map((job) => job.type)).toEqual(["queue_radio"]);
   });
 });
 

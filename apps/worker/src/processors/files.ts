@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { fileVersionClass, type CandidateTrack, type VersionClass } from "@subwave-ai/core";
 import { enqueueJob, getRequest, transitionRequest, updateJobPayload, type JobRow } from "@subwave-ai/db";
 import { NeverPlayError, NotConfiguredError, ProviderHttpError } from "@subwave-ai/providers";
 import { isAllowedAudioExtension, safeJoin } from "@subwave-ai/shared";
@@ -14,6 +15,7 @@ const TRACK_READY_POLL_MS = 15_000;
 const RADIO_UNREACHABLE = "radio_unreachable";
 const SEARCH_VISIBLE_TIMEOUT = "search_visible_timeout";
 const HANDOFF_NO_MATCH = "handoff_no_match";
+const HANDOFF_AMBIGUOUS = "handoff_ambiguous";
 
 const NETWORK_CODES = new Set([
   "ECONNREFUSED",
@@ -38,6 +40,8 @@ type FilePayload = {
   size?: number;
   /** Selected search `length`, when the candidate had one. */
   duration_seconds?: number;
+  /** Selector version class of the file that was downloaded. */
+  version_class?: string;
 };
 
 type TrackReadyPayload = FilePayload & {
@@ -133,24 +137,55 @@ function titlesMatch(requestTitle: string, hitTitle: string): boolean {
   return ACCEPTED_VERSION_LABELS.has(label);
 }
 
+type HandoffPick =
+  | { kind: "match"; track: VisibleTrack }
+  | { kind: "none" }
+  | { kind: "ambiguous" };
+
+function isVersionClass(value: string | undefined): value is VersionClass {
+  return value === "remix" || value === "extended" || value === "original" || value === "radio_edit" || value === "other";
+}
+
 /**
- * Strongest match the defined `/dj/search` body allows.
- * Artist and title only, with the normalization above. Not a file identity
- * match: the response has no path, and its string `id` is assigned by
- * Navidrome after the scan, not by this file.
+ * Selector class of a search title. A bare title and Original Mix / Album
+ * Version are `original`. Club Mix is `extended`. The names are the selector's.
+ */
+function hitVersionClass(title: string): VersionClass {
+  const track: CandidateTrack = {
+    peer: "handoff",
+    path: title,
+    basename: `${title}.mp3`,
+    folders: [],
+    sizeBytes: 1,
+    format: { ext: ".mp3", lossless: false },
+    locked: false,
+  };
+  return fileVersionClass(track);
+}
+
+/**
+ * Every artist/title hit, then only those in the selected file's version class.
+ * Exactly one may be queued. None or several is ambiguous. Not a file identity
+ * match: the response has no path, and its string `id` is assigned after the scan.
  */
 function matchImportedTrack(
   search: unknown,
   request: { artist: string | null; title: string | null },
-): VisibleTrack | null {
-  if (!request.title) return null;
+  versionClass: string | undefined,
+): HandoffPick {
+  if (!request.title) return { kind: "none" };
   const wantedArtist = request.artist ? normalizeMatchText(request.artist) : "";
+  const matches: VisibleTrack[] = [];
   for (const hit of searchHits(search)) {
     if (!titlesMatch(request.title, hit.title)) continue;
     if (wantedArtist && normalizeMatchText(hit.artist ?? "") !== wantedArtist) continue;
-    return hit;
+    matches.push(hit);
   }
-  return null;
+  if (matches.length === 0) return { kind: "none" };
+  if (!isVersionClass(versionClass)) return { kind: "ambiguous" };
+  const sameClass = matches.filter((hit) => hitVersionClass(hit.title) === versionClass);
+  if (sameClass.length === 1) return { kind: "match", track: sameClass[0]! };
+  return { kind: "ambiguous" };
 }
 
 function recordFailure(ctx: Parameters<JobHandler>[0], requestId: string, message: string): void {
@@ -242,20 +277,22 @@ export const handleValidateFile: JobHandler = async (ctx, job) => {
   if (probe === "failed") fail(ctx, request.id, "ffprobe_failed");
   if (!probeMatchesExtension(filename, probe)) fail(ctx, request.id, "ffprobe_format_mismatch");
   const expectedDuration = finiteNumber(payload.duration_seconds);
-  if (expectedDuration !== undefined && expectedDuration > 0) {
-    if (
-      probe.durationSeconds === undefined ||
-      Math.abs(probe.durationSeconds - expectedDuration) > FFPROBE_DURATION_TOLERANCE_SECONDS
-    ) {
-      fail(ctx, request.id, "ffprobe_duration_mismatch");
-    }
+  if (expectedDuration === undefined || expectedDuration <= 0) {
+    fail(ctx, request.id, "duration_unknown");
+  }
+  if (
+    probe.durationSeconds === undefined ||
+    Math.abs(probe.durationSeconds - expectedDuration) > FFPROBE_DURATION_TOLERANCE_SECONDS
+  ) {
+    fail(ctx, request.id, "ffprobe_duration_mismatch");
   }
   const dest = safeJoin(ctx.config.paths.staging, filename);
   moveInto(ctx, request.id, source, dest, expected, `staging file already exists: ${filename}`);
   removeEmptyChildDirectory(ctx.config.paths.downloads, source);
   const importPayload: FilePayload = { filename };
   if (expected !== undefined) importPayload.size = expected;
-  if (expectedDuration !== undefined && expectedDuration > 0) importPayload.duration_seconds = expectedDuration;
+  importPayload.duration_seconds = expectedDuration;
+  if (payload.version_class) importPayload.version_class = payload.version_class;
   enqueueJob(ctx.db, { type: "import_library", requestId: request.id, payload: importPayload });
   return { staging: dest };
 };
@@ -286,6 +323,7 @@ export const handleImportLibrary: JobHandler = async (ctx, job) => {
   const queuePayload: TrackReadyPayload = { filename, track_ready: true, search_wait_started_at: Date.now() };
   const duration = finiteNumber(payload.duration_seconds);
   if (duration !== undefined && duration > 0) queuePayload.duration_seconds = duration;
+  if (payload.version_class) queuePayload.version_class = payload.version_class;
   enqueueJob(ctx.db, {
     type: "queue_radio",
     requestId: request.id,
@@ -405,7 +443,12 @@ async function queueRadio(
       return { failed: true, reason };
     }
     const search = await runIntegration(ctx, request.id, () => ctx.providers.radio.djSearch(radioQuery(request)));
-    const track = matchImportedTrack(search, request);
+    const picked = matchImportedTrack(search, request, optionalString(payload.version_class));
+    if (picked.kind === "ambiguous") {
+      recordFailure(ctx, request.id, HANDOFF_AMBIGUOUS);
+      return { failed: true, reason: HANDOFF_AMBIGUOUS };
+    }
+    const track = picked.kind === "match" ? picked.track : null;
     if (!track) {
       const start = started ?? Date.now();
       const unmatched = searchHits(search).length > 0;

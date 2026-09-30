@@ -36,13 +36,17 @@ export function probeMatchesExtension(filename: string, info: ProbeInfo): boolea
   return tokens.some((token) => rule.formats.includes(token));
 }
 
+/** Argument vector for one ffprobe invocation. The path is a single argv entry. */
+export function ffprobeArgs(filePath: string): string[] {
+  return ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", filePath];
+}
+
 function defaultRunner(ffprobePath: string, filePath: string): Promise<ProbeResult> {
   return new Promise((resolve) => {
-    const child = spawn(
-      ffprobePath,
-      ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", filePath],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const child = spawn(ffprobePath, ffprobeArgs(filePath), {
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
