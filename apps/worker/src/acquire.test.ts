@@ -15,7 +15,7 @@ import {
   updateJobPayload,
   type RequestRow,
 } from "@subwave-ai/db";
-import { UnverifiedAcquisitionProvider, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
+import { ProviderHttpError, UnverifiedAcquisitionProvider, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
 import { loadConfig, type RequestStatus } from "@subwave-ai/shared";
 import type { WorkerContext } from "./context.js";
 import { handleDownload, handleSearchAcquisition } from "./processors/acquire.js";
@@ -265,7 +265,7 @@ describe("A5 acquisition worker", () => {
     expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
   });
 
-  it("fails enqueue without announcing REQUEST_ACCEPTED", async () => {
+  it("does not announce REQUEST_ACCEPTED when enqueue has no HTTP response", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const { acquisition, radio, library, order, say } = harness({
@@ -274,18 +274,17 @@ describe("A5 acquisition worker", () => {
     });
     const request = createRequest(db, { rawQuery: "x" });
     advance(db, request.id, "QUEUED");
-    await expect(
-      handleDownload(
-        {
-          db,
-          config,
-          providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
-          workerId: "worker-test",
-        },
-        enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
-      ),
-    ).rejects.toThrow(/enqueue refused/);
-    expect(order).toContain("enqueue");
+    const result = await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
+    );
+    expect(result).toEqual({ waiting: true, reason: "enqueue_attempted" });
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
     expect(order).not.toContain("say");
     expect(say).toEqual([]);
     expect(getRequest(db, request.id)?.status).toBe("QUEUED");
@@ -609,7 +608,8 @@ describe("A5 acquisition worker", () => {
       workerId: "worker-test",
     };
     const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
-    await expect(handleDownload(ctx, job)).rejects.toThrow(/crash before state save/);
+    const crashed = await handleDownload(ctx, job);
+    expect(crashed).toEqual({ waiting: true, reason: "enqueue_attempted" });
     expect(enqueued).toHaveLength(1);
     const saved = getJob(db, job.id);
     const body = JSON.parse(saved?.payload_json ?? "{}") as {
@@ -652,7 +652,9 @@ describe("A5 acquisition worker", () => {
       workerId: "worker-test",
     };
     const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
-    await expect(handleDownload(ctx, job)).rejects.toThrow(/crash before state save/);
+    const crashed = await handleDownload(ctx, job);
+    expect(crashed).toEqual({ waiting: true, reason: "enqueue_attempted" });
+    expect(enqueued).toHaveLength(1);
     setTransfers([
       {
         username: "peer-a",
@@ -671,6 +673,97 @@ describe("A5 acquisition worker", () => {
     const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as { transferId?: string; enqueued?: boolean };
     expect(saved.enqueued).toBe(true);
     expect(saved.transferId).toBe("tx-late");
+  });
+
+  it.each([409, 500])("fails enqueue HTTP %s at once, posts once, and keeps the marker", async (status) => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, enqueued, order, say } = harness({ responses: [HIT] });
+    acquisition.enqueueDownload = async (user, files) => {
+      order.push("enqueue");
+      enqueued.push({ user, files });
+      throw new ProviderHttpError(`HTTP ${status}`, status);
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    const result = await handleDownload(ctx, job);
+    expect(result).toEqual({ failed: true, reason: "enqueue_failed", status });
+    expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(say).toEqual([]);
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("enqueue_failed");
+    const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
+    expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({
+      error: "enqueue_failed",
+      reason: "enqueue_failed",
+      status,
+    });
+    const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as {
+      enqueued?: boolean;
+      enqueue_attempted?: { username: string; filename: string; size: number };
+    };
+    expect(saved.enqueued).toBeUndefined();
+    expect(saved.enqueue_attempted).toMatchObject({
+      username: "peer-a",
+      filename: "\\\\music\\\\track.flac",
+      size: TRACK_SIZE,
+    });
+    expect(listJobsForRequest(db, request.id).filter((row) => row.type === "download")).toHaveLength(1);
+    const again = await handleDownload(ctx, getJob(db, job.id)!);
+    expect(again).toMatchObject({ skipped: true, status: "FAILED" });
+    expect(enqueued).toHaveLength(1);
+  });
+
+  it("treats an enqueue timeout as poll-only and does not post again", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, enqueued, order, say } = harness({ responses: [HIT] });
+    acquisition.enqueueDownload = async (user, files) => {
+      order.push("enqueue");
+      enqueued.push({ user, files });
+      throw new Error("timeout");
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    const waiting = await handleDownload(ctx, job);
+    expect(waiting).toEqual({ waiting: true, reason: "enqueue_attempted" });
+    expect(enqueued).toHaveLength(1);
+    expect(say).toEqual([]);
+    expect(getRequest(db, request.id)?.status).toBe("QUEUED");
+    const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as {
+      enqueue_attempted?: { username: string; filename: string; size: number };
+    };
+    expect(saved.enqueue_attempted).toMatchObject({
+      username: "peer-a",
+      filename: "\\\\music\\\\track.flac",
+      size: TRACK_SIZE,
+    });
+    const poll = listJobsForRequest(db, request.id).find((row) => row.type === "download" && row.id !== job.id);
+    expect(poll).toBeDefined();
+    expect(JSON.parse(poll?.payload_json ?? "{}").enqueue_attempted).toMatchObject({
+      username: "peer-a",
+      filename: "\\\\music\\\\track.flac",
+      size: TRACK_SIZE,
+    });
+    const again = await handleDownload(ctx, poll!);
+    expect(again).toEqual({ waiting: true, reason: "enqueue_attempted" });
+    expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
   });
 
   it("lets two concurrent download workers post exactly once", async () => {

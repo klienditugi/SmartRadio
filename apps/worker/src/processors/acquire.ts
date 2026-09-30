@@ -21,6 +21,7 @@ import {
   resolveDownloadedFile,
   type CorrelatedTransfer,
   type ResolveDownloadResult,
+  ProviderHttpError,
   selectSearch,
   type AcquisitionProvider,
   type SelectedSearchFile,
@@ -80,6 +81,13 @@ function fail(
 ): never {
   recordFailure(ctx, requestId, message, detail);
   throw new Error(message);
+}
+
+/** A definite slskd HTTP error. Timeouts and network failures have no status. */
+function httpFailureStatus(err: unknown): number | undefined {
+  if (!(err instanceof ProviderHttpError)) return undefined;
+  if (err.status >= 400 && err.status <= 599) return err.status;
+  return undefined;
 }
 
 /** Search `length` in seconds. Missing, null, and non-positive values are not a length. */
@@ -324,9 +332,22 @@ export const handleDownload: JobHandler = async (ctx, job) => {
           const settled = settleMarked(findCorrelatedTransfer(again, target), attempt);
           if (settled) return settled;
         } else {
-          const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(chosen.username, files);
-          transferId =
-            observedTransferId(enqueuedBody, { filename: chosen.filename, size: chosen.size }) ?? transferId;
+          try {
+            const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(chosen.username, files);
+            transferId =
+              observedTransferId(enqueuedBody, { filename: chosen.filename, size: chosen.size }) ?? transferId;
+          } catch (err) {
+            const status = httpFailureStatus(err);
+            if (status !== undefined) {
+              // Definite 4xx/5xx. Fail now. The marker stays, so nothing POSTs again.
+              recordFailure(ctx, request.id, "enqueue_failed", { status });
+              return { failed: true, reason: "enqueue_failed", status };
+            }
+            // No HTTP response: timeout, network error, or a lost reply. Poll only.
+            const again = await ctx.providers.acquisition.listDownloads();
+            const settled = settleMarked(findCorrelatedTransfer(again, target), attempt);
+            if (settled) return settled;
+          }
         }
       }
     }
