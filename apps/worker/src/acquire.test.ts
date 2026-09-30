@@ -12,6 +12,7 @@ import {
   listRequestEvents,
   openDatabase,
   transitionRequest,
+  updateJobPayload,
   type RequestRow,
 } from "@subwave-ai/db";
 import { UnverifiedAcquisitionProvider, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
@@ -587,6 +588,109 @@ describe("A5 acquisition worker", () => {
     expect(order).not.toContain("enqueue");
     expect(order).toContain("list");
     expect(say).toHaveLength(1);
+    expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
+  });
+
+  it("does not post again after a crash and fails transfer_not_found at the deadline", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, enqueued, order } = harness({ responses: [HIT] });
+    acquisition.enqueueDownload = async (user, files) => {
+      order.push("enqueue");
+      enqueued.push({ user, files });
+      throw new Error("crash before state save");
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    await expect(handleDownload(ctx, job)).rejects.toThrow(/crash before state save/);
+    expect(enqueued).toHaveLength(1);
+    const saved = getJob(db, job.id);
+    const body = JSON.parse(saved?.payload_json ?? "{}") as {
+      enqueue_attempted?: { username: string; filename: string; size: number; at: number };
+    };
+    expect(body.enqueue_attempted).toMatchObject({
+      username: "peer-a",
+      filename: "\\\\music\\\\track.flac",
+      size: TRACK_SIZE,
+    });
+    expect(typeof body.enqueue_attempted?.at).toBe("number");
+    updateJobPayload(db, job.id, {
+      ...body,
+      enqueue_attempted: { ...body.enqueue_attempted, at: Date.now() - 5_000 },
+    });
+    config.acquisition.download_timeout_ms = 1_000;
+    const retry = await handleDownload(ctx, getJob(db, job.id)!);
+    expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(retry).toEqual({ failed: true, reason: "transfer_not_found" });
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("transfer_not_found");
+  });
+
+  it("adopts a transfer that appears after a crash without posting again", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, enqueued, order, say, setTransfers } = harness({ responses: [HIT] });
+    acquisition.enqueueDownload = async (user, files) => {
+      order.push("enqueue");
+      enqueued.push({ user, files });
+      throw new Error("crash before state save");
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    await expect(handleDownload(ctx, job)).rejects.toThrow(/crash before state save/);
+    setTransfers([
+      {
+        username: "peer-a",
+        filename: "\\\\music\\\\track.flac",
+        size: TRACK_SIZE,
+        state: "Queued",
+        id: "tx-late",
+      },
+    ]);
+    const adopted = await handleDownload(ctx, getJob(db, job.id)!);
+    expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(adopted).toMatchObject({ enqueued: true });
+    expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
+    expect(say).toHaveLength(1);
+    const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as { transferId?: string; enqueued?: boolean };
+    expect(saved.enqueued).toBe(true);
+    expect(saved.transferId).toBe("tx-late");
+  });
+
+  it("lets two concurrent download workers post exactly once", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, enqueued, order } = harness({ responses: [HIT] });
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const jobA = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    const jobB = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    const results = await Promise.all([handleDownload(ctx, jobA), handleDownload(ctx, jobB)]);
+    expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(results.some((result) => (result as { enqueued?: boolean }).enqueued === true)).toBe(true);
     expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
   });
 

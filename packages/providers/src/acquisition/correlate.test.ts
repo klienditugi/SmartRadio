@@ -72,6 +72,32 @@ describe("findCorrelatedTransfer", () => {
     expect(findCorrelatedTransfer(snapshot, { ...target, id: "size-id" })).toBeNull();
   });
 
+  it("does not accept a transfer id whose filename differs", () => {
+    const snapshot = [
+      {
+        username: "peer-a",
+        filename: "\\\\music\\\\other-track.wav",
+        size: 20_000_000,
+        state: "Queued",
+        id: "same-id",
+      },
+    ];
+    expect(findCorrelatedTransfer(snapshot, { ...target, id: "same-id" })).toBeNull();
+  });
+
+  it("accepts a transfer id only when username, filename, and size match", () => {
+    const snapshot = [
+      {
+        username: "peer-a",
+        filename: "\\\\music\\\\a.flac",
+        size: 20_000_000,
+        state: "Queued",
+        id: "same-id",
+      },
+    ];
+    expect(findCorrelatedTransfer(snapshot, { ...target, id: "same-id" })?.id).toBe("same-id");
+  });
+
   it("returns null when two rows share filename and size", () => {
     const snapshot = [
       { username: "peer-a", filename: "\\\\music\\\\a.flac", size: 20_000_000, state: "Queued", id: "one" },

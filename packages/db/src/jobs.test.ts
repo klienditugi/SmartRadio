@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "./client.js";
-import { claimJob, completeJob, enqueueJob, getJob } from "./store.js";
+import { claimEnqueueAttempt, claimJob, completeJob, createRequest, enqueueJob, getJob } from "./store.js";
 
 describe("job lease", () => {
   it("lets one worker claim a job and holds the lease against a second worker", () => {
@@ -43,6 +43,25 @@ describe("job lease", () => {
     const failed = completeJob(db, { jobId: job.id, success: false, error: "boom again" });
     expect(failed.status).toBe("failed");
     expect(getJob(db, job.id)?.status).toBe("failed");
+  });
+
+  it("lets only one download job claim an enqueue attempt for the same file", () => {
+    const db = openDatabase(":memory:");
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    const first = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "s" } });
+    const second = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "s" } });
+    const target = { requestId: request.id, username: "peer", filename: "\\\\music\\\\a.flac", size: 10 };
+    const claimed = claimEnqueueAttempt(db, { jobId: first.id, ...target });
+    expect(claimed.claimed).toBe(true);
+    expect(claimed.marker).toMatchObject({ username: "peer", filename: "\\\\music\\\\a.flac", size: 10 });
+    const lost = claimEnqueueAttempt(db, { jobId: second.id, ...target });
+    expect(lost.claimed).toBe(false);
+    expect(lost.marker).toEqual(claimed.marker);
+    const again = claimEnqueueAttempt(db, { jobId: first.id, ...target });
+    expect(again.claimed).toBe(false);
+    const saved = JSON.parse(getJob(db, first.id)?.payload_json ?? "{}");
+    expect(saved.enqueue_attempted).toEqual(claimed.marker);
+    expect(JSON.parse(getJob(db, second.id)?.payload_json ?? "{}").enqueue_attempted).toBeUndefined();
   });
 
   it("does not claim jobs scheduled in the future", () => {

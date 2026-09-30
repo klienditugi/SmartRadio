@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import {
+  claimEnqueueAttempt,
   enqueueJob,
   getRequest,
   insertAcquisitionItem,
@@ -9,6 +10,7 @@ import {
   updateAcquisitionItem,
   updateJobPayload,
   type AcquisitionItemRow,
+  type EnqueueAttemptMarker,
 } from "@subwave-ai/db";
 import {
   findCorrelatedTransfer,
@@ -17,6 +19,7 @@ import {
   isTransferTerminalFailure,
   observedTransferId,
   resolveDownloadedFile,
+  type CorrelatedTransfer,
   type ResolveDownloadResult,
   selectSearch,
   type AcquisitionProvider,
@@ -43,6 +46,11 @@ type DownloadPayload = {
   selection_score?: { breakdown: Record<string, number>; total: number; signals: unknown };
   /** Selector version class of `selected`. Copied through to the radio handoff. */
   version_class?: string;
+  /**
+   * Written before POST /transfers/downloads. A later worker must not POST
+   * again for this username, filename, and size.
+   */
+  enqueue_attempted?: EnqueueAttemptMarker;
 };
 
 function acquisitionUnavailable(provider: AcquisitionProvider): boolean {
@@ -133,6 +141,27 @@ function scheduleDownload(
     payload,
     runAfter: Date.now() + ACQUIRE_POLL_MS,
   });
+}
+
+/** Poll payload for a marker that is set and whose transfer row is not visible yet. */
+function markedPollPayload(
+  payload: DownloadPayload,
+  selected: SelectedSearchFile,
+  files: Array<{ filename: string; size: number }>,
+  attempt: EnqueueAttemptMarker,
+  selectionScore: DownloadPayload["selection_score"],
+  versionClass: string | undefined,
+): DownloadPayload {
+  return {
+    searchId: payload.searchId,
+    selected,
+    user: selected.username,
+    files,
+    enqueue_attempted: attempt,
+    download_started_at: attempt.at,
+    ...(selectionScore ? { selection_score: selectionScore } : {}),
+    ...(versionClass ? { version_class: versionClass } : {}),
+  };
 }
 
 export const handleSearchAcquisition: JobHandler = async (ctx, job) => {
@@ -238,40 +267,82 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       }
     }
 
-    const files = [{ filename: selected.filename, size: selected.size }];
-    const alreadyEnqueued = payload.enqueued === true || itemSaysEnqueued(listAcquisitionItems(ctx.db, request.id), selected);
+    const chosen = selected;
+    const files = [{ filename: chosen.filename, size: chosen.size }];
+    const alreadyEnqueued = payload.enqueued === true || itemSaysEnqueued(listAcquisitionItems(ctx.db, request.id), chosen);
     let transferId = payload.transferId;
+    let attempt = payload.enqueue_attempted;
     if (!alreadyEnqueued) {
+      const target = {
+        username: chosen.username,
+        filename: chosen.filename,
+        size: chosen.size,
+      };
       const snapshot = await ctx.providers.acquisition.listDownloads();
-      const existingTransfer = findCorrelatedTransfer(snapshot, {
-        username: selected.username,
-        filename: selected.filename,
-        size: selected.size,
-      });
-      if (existingTransfer) {
+      const existingTransfer = findCorrelatedTransfer(snapshot, target);
+      // Marker already saved: never POST. Adopt the row, or fail at the deadline.
+      const settleMarked = (
+        found: CorrelatedTransfer | null,
+        marked: EnqueueAttemptMarker,
+      ): { waiting: true; reason: "enqueue_attempted" } | { failed: true; reason: "transfer_not_found" } | null => {
+        if (found) {
+          transferId = found.id ?? transferId;
+          return null;
+        }
+        if (Date.now() - marked.at >= ctx.config.acquisition.download_timeout_ms) {
+          recordFailure(ctx, request.id, "transfer_not_found");
+          return { failed: true, reason: "transfer_not_found" };
+        }
+        scheduleDownload(
+          ctx,
+          request.id,
+          markedPollPayload(payload, chosen, files, marked, selectionScore, versionClass),
+        );
+        return { waiting: true, reason: "enqueue_attempted" };
+      };
+      if (attempt) {
+        const settled = settleMarked(existingTransfer, attempt);
+        if (settled) return settled;
+      } else if (existingTransfer) {
         transferId = existingTransfer.id ?? transferId;
-      } else if (!hasPositiveLength(selected)) {
+      } else if (!hasPositiveLength(chosen)) {
         // The selector is frozen and is not asked for another file.
         recordFailure(ctx, request.id, "selected_missing_length");
         return { failed: true, reason: "selected_missing_length" };
       } else {
-        const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(selected.username, files);
-        transferId =
-          observedTransferId(enqueuedBody, { filename: selected.filename, size: selected.size }) ?? transferId;
+        const claim = claimEnqueueAttempt(ctx.db, {
+          jobId: job.id,
+          requestId: request.id,
+          username: chosen.username,
+          filename: chosen.filename,
+          size: chosen.size,
+        });
+        attempt = claim.marker;
+        payload = { ...payload, enqueue_attempted: attempt };
+        if (!claim.claimed) {
+          const again = await ctx.providers.acquisition.listDownloads();
+          const settled = settleMarked(findCorrelatedTransfer(again, target), attempt);
+          if (settled) return settled;
+        } else {
+          const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(chosen.username, files);
+          transferId =
+            observedTransferId(enqueuedBody, { filename: chosen.filename, size: chosen.size }) ?? transferId;
+        }
       }
     }
     const started =
       typeof payload.download_started_at === "number" && Number.isFinite(payload.download_started_at)
         ? payload.download_started_at
-        : Date.now();
+        : (attempt?.at ?? Date.now());
     const nextPayload: DownloadPayload = {
       searchId: payload.searchId,
-      selected,
-      user: selected.username,
+      selected: chosen,
+      user: chosen.username,
       files,
       enqueued: true,
       download_started_at: started,
       ...(transferId ? { transferId } : {}),
+      ...(attempt ? { enqueue_attempted: attempt } : {}),
       ...(selectionScore ? { selection_score: selectionScore } : {}),
       ...(versionClass ? { version_class: versionClass } : {}),
     };
@@ -282,13 +353,13 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         requestId: request.id,
         providerId: "acquisition-slskd",
         status: "enqueued",
-        remoteUser: selected.username,
-        filename: selected.filename,
+        remoteUser: chosen.username,
+        filename: chosen.filename,
       });
     updateAcquisitionItem(ctx.db, itemId, {
       status: "enqueued",
-      remote_user: selected.username,
-      filename: selected.filename,
+      remote_user: chosen.username,
+      filename: chosen.filename,
     });
     // Persist before the status move. A reclaimed lease must not POST again.
     updateJobPayload(ctx.db, job.id, nextPayload);
@@ -299,7 +370,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       actor: ctx.workerId,
       payload: {
         event: "REQUEST_ACCEPTED",
-        selected,
+        selected: chosen,
         ...(selectionScore ? { selection_score: selectionScore } : {}),
       },
     });
@@ -312,7 +383,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     } catch (err) {
       console.error("REQUEST_ACCEPTED say failed", err);
     }
-    return { enqueued: true, selected, ...(selectionScore ? { selection_score: selectionScore } : {}) };
+    return { enqueued: true, selected: chosen, ...(selectionScore ? { selection_score: selectionScore } : {}) };
   }
 
   // --- Phase 2: poll transfers until correlated Completed+Succeeded + file exists ---

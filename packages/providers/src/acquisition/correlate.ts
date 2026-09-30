@@ -2,8 +2,9 @@
  * Correlate a selected search hit with GET /api/v0/transfers/downloads rows.
  *
  * Match order:
- * 1. `target.id` when a row has that id, and only when that row's username and
- *    size also match. A transfer id with a different user or size is not a match.
+ * 1. `target.id` when a row has that id, and only when that row's username,
+ *    filename, and size also match. A transfer id with a different user,
+ *    filename, or size is not a match.
  *    This is a transfer id observed from the enqueue response or the transfers
  *    list, never a search response/file id.
  * 2. Exact username, then the exact original filename (backslashes included) and
@@ -190,7 +191,14 @@ export function findCorrelatedTransfer(
 
   if (target.id) {
     const byId = rows.find((row) => row.id === target.id);
-    if (byId && byId.user === target.username && byId.size === target.size) return byId;
+    if (
+      byId &&
+      byId.user === target.username &&
+      byId.filename === target.filename &&
+      byId.size === target.size
+    ) {
+      return byId;
+    }
   }
 
   const userRows = rows.filter((row) => row.user === target.username && row.filename);
