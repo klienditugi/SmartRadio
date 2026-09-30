@@ -84,6 +84,12 @@ export const DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS = 30 * 60 * 1000;
 /** How long a download may stay in progress before the request fails. 6 hours. */
 export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Downloads directory as slskd sees it. Default `/downloads` (container).
+ * Mapped onto `paths.downloads` when a transfer reports a path under this prefix.
+ */
+export const DEFAULT_SLSKD_DOWNLOADS_DIR = "/downloads";
+
 /** Soft short-track penalty reaches this (negative) value. Same scale as a long recording. */
 export const DEFAULT_SHORT_RECORDING_PENALTY = -1900;
 
@@ -348,10 +354,11 @@ export const appConfigSchema = z.object({
      */
     download_timeout_ms: z.number().int().positive().default(DEFAULT_DOWNLOAD_TIMEOUT_MS),
     /**
-     * Prefix slskd uses for a reported download path (for example `/downloads`).
-     * Empty means the transfer path is not rewritten. Env: SLSKD_DOWNLOADS_PATH_PREFIX.
+     * Downloads directory as slskd sees it (container path). Default `/downloads`.
+     * A reported transfer path under this prefix is joined onto `paths.downloads`.
+     * Env: SLSKD_DOWNLOADS_PATH_PREFIX.
      */
-    downloads_path_prefix: z.string().default(""),
+    downloads_path_prefix: z.string().min(1).default(DEFAULT_SLSKD_DOWNLOADS_DIR),
     /** Deterministic search-hit score. The selector does not call an LLM. */
     selection: acquisitionSelectionSchema,
   }),

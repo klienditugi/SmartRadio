@@ -19,6 +19,7 @@ import { loadConfig, type RequestStatus } from "@subwave-ai/shared";
 import type { WorkerContext } from "./context.js";
 import { handleDownload, handleSearchAcquisition } from "./processors/acquire.js";
 import { claimAndRun } from "./dispatch.js";
+import { DJ_SEARCH_SAMPLE, djSearchResponse } from "./dj-search.fixture.js";
 import { handleImportLibrary, handleQueueRadio } from "./processors/files.js";
 
 const VIA_ACQUISITION: RequestStatus[] = [
@@ -311,7 +312,7 @@ describe("A4 radio events", () => {
     cleanups.push(cleanup);
     const scanCalls: string[] = [];
     const { radio, library, acquisition, order, say, queued } = harness({
-      search: { results: [{ id: "song-1", title: "Track", artist: "Artist", album: "LP", path: "track.mp3" }] },
+      search: djSearchResponse([{ id: "song-1", title: "Track", artist: "Artist", album: "LP" }]),
       scanCalls,
     });
     const request = createRequest(db, { rawQuery: "Artist - Track" });
@@ -398,7 +399,7 @@ describe("A4 radio events", () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const { radio, library, acquisition, order } = harness({
-      search: { results: [{ id: "song-9", title: "Blocked", path: "blocked.mp3" }] },
+      search: djSearchResponse([{ id: "song-9", title: "Blocked" }]),
       queueError: new NeverPlayError("blocked"),
     });
     const request = createRequest(db, { rawQuery: "blocked" });
@@ -558,16 +559,15 @@ describe("A4 radio events", () => {
   it("queues the search hit that matches the imported file, not the first hit", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
+    const sample = DJ_SEARCH_SAMPLE.results[0]!;
     const { radio, library, acquisition, order, queued } = harness({
-      search: {
-        results: [
-          { id: "other", title: "Other", artist: "Artist", path: "other.mp3" },
-          { id: "ours", title: "Track", artist: "Artist", album: "LP", path: "Album/track.mp3" },
-        ],
-      },
+      search: djSearchResponse([
+        { id: "other", title: "Other", artist: sample.artist, album: "Something Else" },
+        sample,
+      ]),
     });
-    const request = createRequest(db, { rawQuery: "Artist - Track" });
-    advance(db, request.id, "IMPORTING", { artist: "Artist", title: "Track" });
+    const request = createRequest(db, { rawQuery: `${sample.artist} - ${sample.title}` });
+    advance(db, request.id, "IMPORTING", { artist: sample.artist, title: sample.title });
     const result = await handleQueueRadio(
       {
         db,
@@ -582,7 +582,7 @@ describe("A4 radio events", () => {
       }),
     );
     expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
-    expect(queued).toEqual([{ id: "ours", title: "Track", artist: "Artist", album: "LP" }]);
+    expect(queued).toEqual([sample]);
     expect(typeof (queued[0] as { id: unknown }).id).toBe("string");
     expect(order).toEqual(["search", "say", "queue"]);
   });
@@ -591,12 +591,10 @@ describe("A4 radio events", () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const { radio, library, acquisition, order, say, queued } = harness({
-      search: {
-        results: [
-          { id: "other", title: "Other", path: "other.mp3" },
-          { id: "also", title: "Track", artist: "Artist", path: "nope.mp3" },
-        ],
-      },
+      search: djSearchResponse([
+        { id: "other", title: "Other", artist: "Artist", album: "LP" },
+        { id: "also", title: "Track", artist: "Someone Else", album: "LP" },
+      ]),
     });
     const request = createRequest(db, { rawQuery: "Artist - Track" });
     advance(db, request.id, "IMPORTING", { artist: "Artist", title: "Track" });

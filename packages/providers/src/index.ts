@@ -57,4 +57,4 @@ export {
 } from "./acquisition/correlate.js";
 export type { TransferMatchTarget, CorrelatedTransfer } from "./acquisition/correlate.js";
 export { resolveDownloadedFile, remoteBasename } from "./acquisition/resolve-download.js";
-export type { ResolvedDownload } from "./acquisition/resolve-download.js";
+export type { ResolvedDownload, ResolveDownloadResult, ResolveDownloadOptions } from "./acquisition/resolve-download.js";

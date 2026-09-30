@@ -9,6 +9,7 @@ import {
   DEFAULT_BITRATE_FLOOR_KBPS,
   DEFAULT_SHORT_RECORDING_FLOOR_SECONDS,
   DEFAULT_DOWNLOAD_TIMEOUT_MS,
+  DEFAULT_SLSKD_DOWNLOADS_DIR,
   DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS,
   DEFAULT_SHORT_RECORDING_FRACTION,
   DEFAULT_SHORT_RECORDING_MIN_SAMPLES,
@@ -674,7 +675,8 @@ radio:
     const cfg = parseAppConfig(exampleYamlObject);
     expect(cfg.acquisition.download_timeout_ms).toBe(DEFAULT_DOWNLOAD_TIMEOUT_MS);
     expect(DEFAULT_DOWNLOAD_TIMEOUT_MS).toBe(6 * 60 * 60 * 1000);
-    expect(cfg.acquisition.downloads_path_prefix).toBe("");
+    expect(cfg.acquisition.downloads_path_prefix).toBe(DEFAULT_SLSKD_DOWNLOADS_DIR);
+    expect(DEFAULT_SLSKD_DOWNLOADS_DIR).toBe("/downloads");
     expect(cfg.files.ffprobe_path).toBe("ffprobe");
     const zero = structuredClone(exampleYamlObject);
     (zero.acquisition as { download_timeout_ms?: number }).download_timeout_ms = 0;
@@ -684,19 +686,19 @@ radio:
       files: Record<string, unknown>;
     };
     custom.acquisition.download_timeout_ms = 5_000;
-    custom.acquisition.downloads_path_prefix = "/downloads";
+    custom.acquisition.downloads_path_prefix = "/slskd/downloads";
     custom.files.ffprobe_path = "/usr/bin/ffprobe";
     const parsed = parseAppConfig(custom);
     expect(parsed.acquisition.download_timeout_ms).toBe(5_000);
-    expect(parsed.acquisition.downloads_path_prefix).toBe("/downloads");
+    expect(parsed.acquisition.downloads_path_prefix).toBe("/slskd/downloads");
     expect(parsed.files.ffprobe_path).toBe("/usr/bin/ffprobe");
     const pub = publicSettings({ ...parsed, secrets: { adminPassword: "x" } });
     expect(pub.acquisition.download_timeout_ms).toBe(5_000);
-    expect(pub.acquisition.downloads_path_prefix).toBe("/downloads");
+    expect(pub.acquisition.downloads_path_prefix).toBe("/slskd/downloads");
     expect(pub.files.ffprobe_path).toBe("/usr/bin/ffprobe");
     const yaml = serializeAppConfig(parsed);
     expect(yaml).toContain("download_timeout_ms: 5000");
-    expect(yaml).toContain("downloads_path_prefix: /downloads");
+    expect(yaml).toContain("downloads_path_prefix: /slskd/downloads");
     expect(yaml).toContain("ffprobe_path: /usr/bin/ffprobe");
     expect(parseAppConfig(parseYaml(yaml)).acquisition.download_timeout_ms).toBe(5_000);
     const overridden = applyEnvOverrides(structuredClone(exampleYamlObject) as Record<string, unknown>, {

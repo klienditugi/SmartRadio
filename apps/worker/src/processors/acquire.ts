@@ -17,6 +17,7 @@ import {
   isTransferTerminalFailure,
   observedTransferId,
   resolveDownloadedFile,
+  type ResolveDownloadResult,
   selectSearch,
   type AcquisitionProvider,
   type SelectedSearchFile,
@@ -75,16 +76,6 @@ function itemSaysEnqueued(items: AcquisitionItemRow[], selected: SelectedSearchF
   return items.some(
     (item) => item.status === "enqueued" && item.remote_user === selected.username && item.filename === selected.filename,
   );
-}
-
-/** A transfer `filename` that already lives under the configured container prefix. */
-function containerReportedPath(filename: string, prefix: string): string | undefined {
-  const trimmed = prefix.trim().replace(/[\\/]+$/, "");
-  if (!trimmed) return undefined;
-  const norm = filename.replaceAll("\\", "/");
-  const pref = trimmed.replaceAll("\\", "/");
-  if (norm === pref || norm.startsWith(`${pref}/`)) return filename;
-  return undefined;
 }
 
 function parsePayload(jobPayload: string | null): DownloadPayload {
@@ -376,19 +367,24 @@ export const handleDownload: JobHandler = async (ctx, job) => {
 
   const remoteName = transfer.filename ?? selected.filename;
   const expectedSize = transfer.size ?? selected.size;
-  const prefix = ctx.config.acquisition.downloads_path_prefix;
-  const resolved = resolveDownloadedFile(ctx.config.paths.downloads, remoteName, expectedSize, {
-    containerPrefix: prefix,
-    reportedPath: containerReportedPath(remoteName, prefix),
-  });
-  if (!resolved) {
-    recordFailure(ctx, request.id, "download_not_found");
-    return { failed: true, reason: "download_not_found" };
+  // slskd 0.26 Transfer has no local path. `filename` is the remote path, so
+  // resolution is paths.downloads/<last remote folder>/<basename>.
+  const located: ResolveDownloadResult = resolveDownloadedFile(
+    ctx.config.paths.downloads,
+    remoteName,
+    expectedSize,
+    { containerDownloadsDir: ctx.config.acquisition.downloads_path_prefix },
+  );
+  if (!located.ok) {
+    const listed = located.tried.length > 0 ? located.tried.join(", ") : "(none)";
+    recordFailure(ctx, request.id, `download_not_found: tried ${listed}`);
+    return { failed: true, reason: "download_not_found", tried: located.tried };
   }
+  const resolved = located.file;
   const relative = path.relative(ctx.config.paths.downloads, resolved.absolutePath);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    recordFailure(ctx, request.id, "download_not_found");
-    return { failed: true, reason: "download_not_found" };
+    recordFailure(ctx, request.id, `download_not_found: tried ${resolved.absolutePath}`);
+    return { failed: true, reason: "download_not_found", tried: [resolved.absolutePath] };
   }
 
   updateAcquisitionItem(ctx.db, itemId, {

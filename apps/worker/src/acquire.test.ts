@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -293,7 +293,8 @@ describe("A5 acquisition worker", () => {
   it("completes only on Completed+Succeeded with real file handoff", async () => {
     const { config, db, downloads, cleanup } = fixture();
     cleanups.push(cleanup);
-    writeFileSync(path.join(downloads, "track.flac"), Buffer.alloc(100));
+    mkdirSync(path.join(downloads, "music"));
+    writeFileSync(path.join(downloads, "music", "track.flac"), Buffer.alloc(100));
     const { acquisition, radio, library, order } = harness({
       transfers: [
         {
@@ -335,8 +336,8 @@ describe("A5 acquisition worker", () => {
     expect(order).toEqual(["list"]);
     const validate = listJobsForRequest(db, request.id).find((job) => job.type === "validate_file");
     expect(JSON.parse(validate?.payload_json ?? "{}")).toEqual({
-      filename: "track.flac",
-      path: path.join(downloads, "track.flac"),
+      filename: path.join("music", "track.flac"),
+      path: path.join(downloads, "music", "track.flac"),
       size: 100,
     });
     await handleValidateFile(
@@ -455,9 +456,11 @@ describe("A5 acquisition worker", () => {
         },
       }),
     );
-    expect(result).toEqual({ failed: true, reason: "download_not_found" });
+    expect(result).toMatchObject({ failed: true, reason: "download_not_found" });
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
-    expect(getRequest(db, request.id)?.error).toBe("download_not_found");
+    expect(getRequest(db, request.id)?.error).toBe(
+      `download_not_found: tried ${path.join(config.paths.downloads, "music", "track.flac")}`,
+    );
   });
 
   it("does not enqueue again when say throws after a successful enqueue", async () => {
@@ -640,13 +643,13 @@ describe("A5 acquisition worker", () => {
     expect(JSON.parse(validate?.payload_json ?? "{}").filename).toBe(path.join("Album", "track.flac"));
   });
 
-  it("maps a container download path onto paths.downloads", async () => {
+  it("does not use a basename sitting directly in downloads", async () => {
     const { config, db, downloads, cleanup } = fixture();
     cleanups.push(cleanup);
-    config.acquisition.downloads_path_prefix = "/downloads";
-    const remote = "/downloads/Album/track.flac";
-    mkdirSync(path.join(downloads, "Album"));
-    writeFileSync(path.join(downloads, "Album", "track.flac"), Buffer.alloc(80));
+    const folder = "Beatport Top 100 Techno (Peak Time, Driving) April 2025";
+    const filename = "Adam Beyer - Don't Go (Original Mix).mp3";
+    const remote = `\\\\share\\\\${folder}\\\\${filename}`;
+    writeFileSync(path.join(downloads, filename), Buffer.alloc(80));
     const { acquisition, radio, library } = harness({
       transfers: [{ username: "peer-a", filename: remote, size: 80, state: "Completed, Succeeded" }],
     });
@@ -669,7 +672,11 @@ describe("A5 acquisition worker", () => {
         },
       }),
     );
-    expect(result).toMatchObject({ completed: true, path: path.join(downloads, "Album", "track.flac") });
+    expect(result).toMatchObject({ failed: true, reason: "download_not_found" });
+    expect(getRequest(db, request.id)?.error).toBe(
+      `download_not_found: tried ${path.join(downloads, folder, filename)}`,
+    );
+    expect(existsSync(path.join(downloads, filename))).toBe(true);
   });
 
   it("enqueues the normal-length remix and records the score breakdown", async () => {

@@ -78,8 +78,10 @@ library:
 # REQUEST_ACCEPTED only after a transfer is enqueued. TRACK_READY after search shows a string id, then say, then queue.
 # search_visible_timeout_ms caps the post-import GET /dj/search wait. Default 1800000 (30 minutes).
 # SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS overrides it. The library file stays if the wait expires
-# (search_visible_timeout). Hits that are visible but are not the imported file
-# keep waiting, then fail as handoff_no_match. Nothing is queued until one matches.
+# (search_visible_timeout). The defined search hit is string id and title, optional artist and album.
+# It has no path, filename, or duration, and the id cannot be tied to the file just placed.
+# A hit matches request artist and title only. That is not a file identity match.
+# Other visible hits keep waiting, then fail as handoff_no_match. Nothing is queued until one matches.
 # /dj/search cannot be reached after retries: radio_unreachable. No TRACK_READY then.
 # Do not use public POST /request for announcements. URL and admin password come from this file and secrets/.
 # verify_status in yaml or env is deprecated and ignored. Test connection stores the result.
@@ -102,11 +104,12 @@ acquisition:
   # download_timeout_ms caps one transfer from enqueue until the file is in hand.
   # Default 21600000 (6 hours). SLSKD_DOWNLOAD_TIMEOUT_MS overrides it. Expiry fails
   # the request as download_timeout and does not cancel or delete the slskd transfer.
-  # downloads_path_prefix rewrites a reported path such as /downloads/... onto
-  # paths.downloads. Empty means no rewrite. The slskd transfer type has no local
-  # path; the usual save is paths.downloads/<remote parent folder>/<basename>.
+  # downloads_path_prefix is the downloads directory as slskd sees it.
+  # Default /downloads (the container path). It is mapped onto paths.downloads.
+  # slskd 0.26 Transfer has no local path. The save layout is
+  # paths.downloads/<last remote folder>/<basename>. There is no basename fallback.
   download_timeout_ms: 21600000
-  downloads_path_prefix: ""
+  downloads_path_prefix: /downloads
   # Search-hit pick (worker, deterministic, no LLM). See docs/SLSKD.md.
   # Sizes are MiB (1 MiB = 1,048,576 bytes). The _mb key names stay as they are.
   # max_file_size_mb is a hard reject. Default 30. There is no size curve.

@@ -47,12 +47,7 @@ type TrackReadyPayload = FilePayload & {
   handoff_unmatched?: boolean;
 };
 
-type SearchHit = VisibleTrack & {
-  path?: string;
-  filename?: string;
-  basename?: string;
-  duration?: number;
-};
+type SearchHit = VisibleTrack;
 
 function radioQuery(request: { artist: string | null; title: string | null; raw_query: string }): string {
   return [request.artist, request.title].filter(Boolean).join(" ") || request.raw_query;
@@ -71,7 +66,11 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** `/dj/search` hits with a string id. Numeric ids are not treated as visible. */
+/**
+ * `/dj/search` hits with a string id. Numeric ids are not treated as visible.
+ * Only `id`, `title`, `artist`, and `album` are read. Those are the fields the
+ * SUB/WAVE client and docs define. There is no path and no duration.
+ */
 function searchHits(search: unknown): SearchHit[] {
   if (!search || typeof search !== "object") return [];
   const results = (search as { results?: unknown }).results;
@@ -79,29 +78,14 @@ function searchHits(search: unknown): SearchHit[] {
   const hits: SearchHit[] = [];
   for (const row of results) {
     if (!row || typeof row !== "object") continue;
-    const item = row as {
-      id?: unknown;
-      title?: unknown;
-      artist?: unknown;
-      album?: unknown;
-      path?: unknown;
-      filename?: unknown;
-      basename?: unknown;
-      duration?: unknown;
-      length?: unknown;
-    };
+    const item = row as { id?: unknown; title?: unknown; artist?: unknown; album?: unknown };
     if (typeof item.id !== "string" || item.id.length === 0) continue;
     if (typeof item.title !== "string" || item.title.length === 0) continue;
-    const duration = finiteNumber(item.duration) ?? finiteNumber(item.length);
     hits.push({
       id: item.id,
       title: item.title,
       artist: optionalString(item.artist),
       album: optionalString(item.album),
-      path: optionalString(item.path),
-      filename: optionalString(item.filename),
-      basename: optionalString(item.basename),
-      ...(duration !== undefined ? { duration } : {}),
     });
   }
   return hits;
@@ -109,66 +93,23 @@ function searchHits(search: unknown): SearchHit[] {
 
 /** First `/dj/search` hit with a string id. Library-hit playback still uses this. */
 function visibleTrack(search: unknown): VisibleTrack | null {
-  const hit = searchHits(search)[0];
-  if (!hit) return null;
-  return { id: hit.id, title: hit.title, artist: hit.artist, album: hit.album };
-}
-
-function normalizedPath(value: string): string {
-  return value.replaceAll("\\", "/").replace(/^\/+/, "");
-}
-
-function pathBasename(value: string): string {
-  const parts = normalizedPath(value).split("/").filter(Boolean);
-  return parts[parts.length - 1] ?? value;
+  return searchHits(search)[0] ?? null;
 }
 
 /**
- * Match a search hit to the imported library file.
- * `path` / `filename` / `basename` are read only when the result object has them.
- * `djSearch` is `Promise<unknown>`. The fields this worker already required are
- * string `id` and `title`, plus optional `artist` and `album`.
+ * Strongest match the defined `/dj/search` body allows.
+ * Artist and title only. Not a file identity match: the response has no path,
+ * and its string `id` is assigned by Navidrome after the scan, not by this file.
  */
-function hitMatchesFile(hit: SearchHit, libraryRelative: string): boolean {
-  const file = normalizedPath(libraryRelative);
-  const candidates = [hit.path, hit.filename, hit.basename].filter((value): value is string => Boolean(value));
-  return candidates.some((candidate) => {
-    const hitPath = normalizedPath(candidate);
-    if (hitPath === file) return true;
-    if (file.length > 0 && hitPath.endsWith(`/${file}`)) return true;
-    if (!file.includes("/") && pathBasename(hitPath) === file) return true;
-    return false;
-  });
-}
-
-function hitMatchesDuration(
-  hit: SearchHit,
-  request: { artist: string | null; title: string | null },
-  expectedDuration: number | undefined,
-): boolean {
-  if (expectedDuration === undefined || !(expectedDuration > 0) || hit.duration === undefined) return false;
-  if (Math.abs(hit.duration - expectedDuration) > FFPROBE_DURATION_TOLERANCE_SECONDS) return false;
-  if (!request.title || hit.title !== request.title) return false;
-  if (request.artist && hit.artist !== request.artist) return false;
-  return true;
-}
-
 function matchImportedTrack(
   search: unknown,
   request: { artist: string | null; title: string | null },
-  payload: TrackReadyPayload,
 ): VisibleTrack | null {
+  if (!request.title) return null;
   for (const hit of searchHits(search)) {
-    const identity = [hit.path, hit.filename, hit.basename].some(Boolean);
-    if (identity) {
-      if (payload.filename && hitMatchesFile(hit, payload.filename)) {
-        return { id: hit.id, title: hit.title, artist: hit.artist, album: hit.album };
-      }
-      continue;
-    }
-    if (hitMatchesDuration(hit, request, finiteNumber(payload.duration_seconds))) {
-      return { id: hit.id, title: hit.title, artist: hit.artist, album: hit.album };
-    }
+    if (hit.title !== request.title) continue;
+    if (request.artist && hit.artist !== request.artist) continue;
+    return hit;
   }
   return null;
 }
@@ -425,7 +366,7 @@ async function queueRadio(
       return { failed: true, reason };
     }
     const search = await runIntegration(ctx, request.id, () => ctx.providers.radio.djSearch(radioQuery(request)));
-    const track = matchImportedTrack(search, request, payload);
+    const track = matchImportedTrack(search, request);
     if (!track) {
       const start = started ?? Date.now();
       const unmatched = searchHits(search).length > 0;

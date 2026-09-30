@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { safeJoin } from "@subwave-ai/shared";
+import { DEFAULT_SLSKD_DOWNLOADS_DIR, safeJoin } from "@subwave-ai/shared";
 
 export type ResolvedDownload = {
   basename: string;
@@ -8,7 +8,7 @@ export type ResolvedDownload = {
   size: number;
 };
 
-/** Soulseek remote paths use backslashes; local landing uses the leaf name. */
+/** Soulseek remote paths use backslashes; the leaf is the file name. */
 export function remoteBasename(remoteFilename: string): string {
   const parts = remoteFilename.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? remoteFilename;
@@ -23,29 +23,43 @@ function looksIncomplete(basename: string): boolean {
 
 export type ResolveDownloadOptions = {
   /**
-   * Absolute path from the transfer JSON, when that payload already includes one.
-   * slskd 0.26 `Transfer` has no local path; `filename` is the remote Soulseek path.
-   * When this is set, only the mapped file is considered.
+   * Local path from the completed transfer, only when that payload already has one.
+   * slskd 0.26 `Transfer` has no such field (`filename` is the remote path).
    */
   reportedPath?: string;
   /**
-   * Container prefix slskd uses (for example `/downloads`). A reported path under
-   * this prefix is joined onto `downloadsRoot`. Empty means no rewrite.
+   * Downloads directory as slskd sees it. Default `/downloads`.
+   * A reported path under this prefix is joined onto `downloadsRoot`.
    */
-  containerPrefix?: string;
+  containerDownloadsDir?: string;
 };
 
-function remoteParentName(remoteFilename: string): string | undefined {
-  const parts = remoteFilename.split(/[/\\]/).filter(Boolean);
-  if (parts.length < 2) return undefined;
-  const parent = parts[parts.length - 2];
-  if (!parent || parent === "." || parent === "..") return undefined;
-  return parent;
+export type ResolveDownloadResult =
+  | { ok: true; file: ResolvedDownload }
+  | { ok: false; error: "download_not_found"; tried: string[] };
+
+function remoteParts(remoteFilename: string): string[] {
+  return remoteFilename.split(/[/\\]/).filter(Boolean);
 }
 
-function mapReportedPath(downloadsRoot: string, reportedPath: string, containerPrefix: string | undefined): string | null {
+/** `paths.downloads/<last remote folder>/<basename>`. No bare-basename candidate. */
+function layoutCandidate(downloadsRoot: string, remoteFilename: string): string | null {
+  const parts = remoteParts(remoteFilename);
+  if (parts.length < 2) return null;
+  const basename = parts[parts.length - 1] ?? "";
+  const parent = parts[parts.length - 2] ?? "";
+  if (!basename || looksIncomplete(basename)) return null;
+  if (!parent || parent === "." || parent === "..") return null;
+  try {
+    return safeJoin(downloadsRoot, parent, basename);
+  } catch {
+    return null;
+  }
+}
+
+function mapContainerPath(downloadsRoot: string, reportedPath: string, containerDownloadsDir: string): string | null {
   const normalized = reportedPath.replaceAll("\\", "/");
-  const prefix = containerPrefix?.trim().replaceAll("\\", "/").replace(/\/+$/, "") ?? "";
+  const prefix = containerDownloadsDir.trim().replaceAll("\\", "/").replace(/\/+$/, "");
   if (prefix && (normalized === prefix || normalized.startsWith(`${prefix}/`))) {
     const relative = normalized.slice(prefix.length).replace(/^\/+/, "");
     if (!relative) return null;
@@ -55,73 +69,65 @@ function mapReportedPath(downloadsRoot: string, reportedPath: string, containerP
       return null;
     }
   }
-  try {
-    return assertInsideDownloads(downloadsRoot, reportedPath);
-  } catch {
-    return null;
-  }
-}
-
-function assertInsideDownloads(downloadsRoot: string, candidate: string): string {
   const resolvedRoot = path.resolve(downloadsRoot);
-  const resolved = path.resolve(candidate);
-  const prefix = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
-  if (resolved !== resolvedRoot && !resolved.startsWith(prefix)) {
-    throw new Error("outside downloads");
-  }
-  return resolved;
+  const resolved = path.resolve(reportedPath);
+  const rootPrefix = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
+  if (resolved === resolvedRoot || resolved.startsWith(rootPrefix)) return resolved;
+  return null;
 }
 
-function consider(absolutePath: string, expectedSize: number, into: ResolvedDownload[]): void {
-  if (looksIncomplete(path.basename(absolutePath))) return;
-  if (!fs.existsSync(absolutePath)) return;
+function exactFile(absolutePath: string, expectedSize: number): ResolvedDownload | null {
+  if (looksIncomplete(path.basename(absolutePath))) return null;
+  if (!fs.existsSync(absolutePath)) return null;
   const stat = fs.statSync(absolutePath);
-  if (!stat.isFile() || stat.size !== expectedSize) return;
-  into.push({ basename: path.basename(absolutePath), absolutePath, size: stat.size });
+  if (!stat.isFile() || stat.size !== expectedSize) return null;
+  return { basename: path.basename(absolutePath), absolutePath, size: stat.size };
 }
 
 /**
- * Resolve the completed file under configured `paths.downloads`.
- * Never invents `{requestId}.bin` and never globs.
+ * Resolve one completed download.
  *
- * When `reportedPath` is set, only that mapped file can match.
- * Otherwise the candidates are `downloads/<remote parent folder>/<basename>`
- * and then `downloads/<basename>`. Exactly one file with the transfer's byte
- * size matches. Zero or several matches return null (`download_not_found`).
+ * 1. Map a reported local path from the container downloads dir onto `downloadsRoot`,
+ *    when the caller has one. The current slskd transfer type does not.
+ * 2. Otherwise, and also when that mapped path is not the file,
+ *    `downloadsRoot/<last folder of the remote path>/<basename>`.
+ *
+ * Exact byte size only. No basename search and no glob. Zero or several matches
+ * is `download_not_found`, with every path that was considered.
  */
 export function resolveDownloadedFile(
   downloadsRoot: string,
   remoteFilename: string,
   expectedSize?: number,
   options?: ResolveDownloadOptions,
-): ResolvedDownload | null {
+): ResolveDownloadResult {
   const basename = remoteBasename(remoteFilename);
-  if (!basename || looksIncomplete(basename)) return null;
-  if (expectedSize === undefined || !(expectedSize > 0)) return null;
-
-  const matches: ResolvedDownload[] = [];
-  const reported = options?.reportedPath?.trim();
-  if (reported) {
-    const mapped = mapReportedPath(downloadsRoot, reported, options?.containerPrefix);
-    if (mapped) consider(mapped, expectedSize, matches);
-  } else {
-    const parent = remoteParentName(remoteFilename);
-    if (parent) {
-      try {
-        consider(safeJoin(downloadsRoot, parent, basename), expectedSize, matches);
-      } catch {
-        // A parent segment that escapes the downloads root is not a candidate.
-      }
-    }
-    try {
-      consider(safeJoin(downloadsRoot, basename), expectedSize, matches);
-    } catch {
-      return null;
-    }
+  if (!basename || looksIncomplete(basename)) {
+    return { ok: false, error: "download_not_found", tried: [] };
   }
 
-  const unique = new Map<string, ResolvedDownload>();
-  for (const match of matches) unique.set(path.resolve(match.absolutePath), match);
-  if (unique.size !== 1) return null;
-  return [...unique.values()][0] ?? null;
+  const containerDir = options?.containerDownloadsDir?.trim() || DEFAULT_SLSKD_DOWNLOADS_DIR;
+  const tried: string[] = [];
+  const reported = options?.reportedPath?.trim();
+  if (reported) {
+    const mapped = mapContainerPath(downloadsRoot, reported, containerDir);
+    if (mapped) tried.push(mapped);
+  }
+  const layout = layoutCandidate(downloadsRoot, remoteFilename);
+  if (layout) {
+    const resolvedLayout = path.resolve(layout);
+    if (!tried.some((candidate) => path.resolve(candidate) === resolvedLayout)) tried.push(layout);
+  }
+
+  if (expectedSize === undefined || !(expectedSize > 0)) {
+    return { ok: false, error: "download_not_found", tried };
+  }
+
+  const matches: ResolvedDownload[] = [];
+  for (const candidate of tried) {
+    const file = exactFile(candidate, expectedSize);
+    if (file) matches.push(file);
+  }
+  if (matches.length !== 1) return { ok: false, error: "download_not_found", tried };
+  return { ok: true, file: matches[0]! };
 }
