@@ -96,19 +96,58 @@ function visibleTrack(search: unknown): VisibleTrack | null {
   return searchHits(search)[0] ?? null;
 }
 
+const ACCEPTED_VERSION_LABELS = new Set([
+  "original mix",
+  "extended mix",
+  "radio edit",
+  "club mix",
+  "remix",
+  "album version",
+]);
+
+/** Lowercase, trim, collapse whitespace, and fold straight and curly apostrophes. */
+function normalizeMatchText(value: string): string {
+  return value.replaceAll("\u2018", "'").replaceAll("\u2019", "'").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+/**
+ * Exact normalized title, or that title plus one trailing ( ) or [ ] group
+ * whose label is an accepted version. Not a substring or prefix match.
+ */
+function titlesMatch(requestTitle: string, hitTitle: string): boolean {
+  const wanted = normalizeMatchText(requestTitle);
+  const hit = normalizeMatchText(hitTitle);
+  if (!wanted || !hit) return false;
+  if (hit === wanted) return true;
+  const opens = (hit.match(/\(/g) ?? []).length + (hit.match(/\[/g) ?? []).length;
+  if (opens !== 1) return false;
+  const round = hit.indexOf("(");
+  const square = hit.indexOf("[");
+  const useSquare = square !== -1 && (round === -1 || square < round);
+  const openAt = useSquare ? square : round;
+  const close = useSquare ? "]" : ")";
+  if (openAt <= 0 || !hit.endsWith(close) || hit.indexOf(close) !== hit.length - 1) return false;
+  const base = hit.slice(0, openAt).trim();
+  const label = hit.slice(openAt + 1, -1).trim();
+  if (base !== wanted) return false;
+  return ACCEPTED_VERSION_LABELS.has(label);
+}
+
 /**
  * Strongest match the defined `/dj/search` body allows.
- * Artist and title only. Not a file identity match: the response has no path,
- * and its string `id` is assigned by Navidrome after the scan, not by this file.
+ * Artist and title only, with the normalization above. Not a file identity
+ * match: the response has no path, and its string `id` is assigned by
+ * Navidrome after the scan, not by this file.
  */
 function matchImportedTrack(
   search: unknown,
   request: { artist: string | null; title: string | null },
 ): VisibleTrack | null {
   if (!request.title) return null;
+  const wantedArtist = request.artist ? normalizeMatchText(request.artist) : "";
   for (const hit of searchHits(search)) {
-    if (hit.title !== request.title) continue;
-    if (request.artist && hit.artist !== request.artist) continue;
+    if (!titlesMatch(request.title, hit.title)) continue;
+    if (wantedArtist && normalizeMatchText(hit.artist ?? "") !== wantedArtist) continue;
     return hit;
   }
   return null;

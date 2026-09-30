@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRequest,
   enqueueJob,
@@ -463,16 +463,13 @@ describe("A5 acquisition worker", () => {
     );
   });
 
-  it("does not enqueue again when say throws after a successful enqueue", async () => {
+  it("reaches DOWNLOADING and schedules a poll when say throws, with one enqueue", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const { acquisition, radio, library, order, enqueued } = harness({ responses: [HIT] });
-    let says = 0;
-    radio.say = async (input) => {
-      says += 1;
+    radio.say = async () => {
       order.push("say");
-      if (says === 1) throw new Error("say failed");
-      return { ok: true, mode: "styled", kind: input.kind ?? "dj-speak", spoken: input.text };
+      throw new Error("say failed");
     };
     const request = createRequest(db, { rawQuery: "Artist - Track" });
     advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
@@ -483,17 +480,73 @@ describe("A5 acquisition worker", () => {
       workerId: "worker-test",
     };
     const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
-    await expect(handleDownload(ctx, job)).rejects.toThrow(/say failed/);
-    expect(enqueued).toHaveLength(1);
-    expect(listAcquisitionItems(db, request.id)[0]?.status).toBe("enqueued");
-    expect(JSON.parse(getJob(db, job.id)?.payload_json ?? "{}").enqueued).toBe(true);
-    expect(getRequest(db, request.id)?.status).toBe("QUEUED");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const started = Date.now();
+      const result = await handleDownload(ctx, job);
+      expect(result).toMatchObject({ enqueued: true });
+      expect(enqueued).toHaveLength(1);
+      expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+      expect(order).toContain("say");
+      expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
+      expect(getRequest(db, request.id)?.error).toBeNull();
+      const moved = listRequestEvents(db, request.id).find((event) => event.to_status === "DOWNLOADING");
+      expect(JSON.parse(moved?.payload_json ?? "{}").event).toBe("REQUEST_ACCEPTED");
+      const polls = listJobsForRequest(db, request.id).filter((row) => row.type === "download" && row.id !== job.id);
+      expect(polls).toHaveLength(1);
+      expect(polls[0]?.status).toBe("queued");
+      expect(polls[0]?.run_after).toBeGreaterThanOrEqual(started);
+      expect(JSON.parse(polls[0]?.payload_json ?? "{}").enqueued).toBe(true);
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 
-    const retry = await handleDownload(ctx, getJob(db, job.id)!);
-    expect(retry).toMatchObject({ enqueued: true });
-    expect(enqueued).toHaveLength(1);
-    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
-    expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
+  it("moves a saved enqueue to DOWNLOADING when say fails and does not post again", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, order, enqueued } = harness();
+    radio.say = async () => {
+      order.push("say");
+      throw new Error("say failed");
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, {
+      type: "download",
+      requestId: request.id,
+      payload: {
+        enqueued: true,
+        download_started_at: Date.now(),
+        selected: { username: "peer-a", filename: "\\\\music\\\\track.flac", size: TRACK_SIZE },
+      },
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const started = Date.now();
+      const result = await handleDownload(ctx, job);
+      expect(result).toMatchObject({ enqueued: true });
+      expect(enqueued).toEqual([]);
+      expect(order).not.toContain("enqueue");
+      expect(order).toContain("say");
+      expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
+      expect(getRequest(db, request.id)?.error).toBeNull();
+      const polls = listJobsForRequest(db, request.id).filter((row) => row.type === "download" && row.id !== job.id);
+      expect(polls).toHaveLength(1);
+      expect(polls[0]?.status).toBe("queued");
+      expect(polls[0]?.run_after).toBeGreaterThanOrEqual(started);
+      expect(JSON.parse(polls[0]?.payload_json ?? "{}").enqueued).toBe(true);
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("does not post again when a reclaimed lease finds the transfer already listed", async () => {

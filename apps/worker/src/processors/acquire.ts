@@ -275,13 +275,9 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       remote_user: selected.username,
       filename: selected.filename,
     });
-    // Persist before say. A throw or a reclaimed lease must not POST again.
+    // Persist before the status move. A reclaimed lease must not POST again.
     updateJobPayload(ctx.db, job.id, nextPayload);
-    // REQUEST_ACCEPTED only after enqueue succeeds (A4).
-    await ctx.providers.radio.say({
-      text: requestAcceptedContext(ctx.db, request),
-      kind: "dj-speak",
-    });
+    // REQUEST_ACCEPTED is the status move. say must not block it.
     transitionRequest(ctx.db, {
       requestId: request.id,
       to: "DOWNLOADING",
@@ -293,6 +289,14 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       },
     });
     scheduleDownload(ctx, request.id, nextPayload);
+    try {
+      await ctx.providers.radio.say({
+        text: requestAcceptedContext(ctx.db, request),
+        kind: "dj-speak",
+      });
+    } catch (err) {
+      console.error("REQUEST_ACCEPTED say failed", err);
+    }
     return { enqueued: true, selected, ...(selectionScore ? { selection_score: selectionScore } : {}) };
   }
 

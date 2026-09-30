@@ -630,6 +630,53 @@ describe("A4 radio events", () => {
     expect(order).toEqual(["search"]);
     expect(readLibrary(libraryFile)).toBe("kept-in-library");
   });
+
+  it.each([
+    { name: "exact title", title: "Don't Go", hitTitle: "Don't Go", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "curly apostrophe in the hit", title: "Don't Go", hitTitle: "Don\u2019t Go", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "curly apostrophe in the request", title: "Don\u2019t Go", hitTitle: "Don't Go", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "left curly apostrophe", title: "Don't Go", hitTitle: "Don\u2018t Go", artist: "O\u2018Brien", hitArtist: "O'Brien", match: true },
+    { name: "case and extra spaces", title: "don't   go", hitTitle: "  Don't  Go ", artist: "adam  beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "original mix in parentheses", title: "Don't Go", hitTitle: "Don't Go (Original Mix)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "extended mix in brackets", title: "Don't Go", hitTitle: "Don't Go [Extended Mix]", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "radio edit", title: "Don't Go", hitTitle: "Don't Go (Radio Edit)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "club mix", title: "Don't Go", hitTitle: "Don't Go [Club Mix]", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "remix in parentheses", title: "Don't Go", hitTitle: "Don't Go (Remix)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "album version", title: "Don't Go", hitTitle: "Don't Go [Album Version]", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: true },
+    { name: "bootleg label", title: "Don't Go", hitTitle: "Don't Go (Bootleg)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: false },
+    { name: "two bracket groups", title: "Don't Go", hitTitle: "Don't Go (Original Mix) (Remix)", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: false },
+    { name: "longer title", title: "Don't Go", hitTitle: "Don't Go Now", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: false },
+    { name: "remix without brackets", title: "Don't Go", hitTitle: "Don't Go Remix", artist: "Adam Beyer", hitArtist: "Adam Beyer", match: false },
+    { name: "artist mismatch", title: "Don't Go", hitTitle: "Don't Go", artist: "Adam Beyer", hitArtist: "Someone Else", match: false },
+  ])("handoff $name", async ({ title, hitTitle, artist, hitArtist, match }) => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const hit = { id: "nd-song-1", title: hitTitle, artist: hitArtist, album: "Beatport Top 100 Techno (Peak Time, Driving) April 2025" };
+    const { radio, library, acquisition, queued } = harness({ search: djSearchResponse([hit]) });
+    const request = createRequest(db, { rawQuery: `${artist} - ${title}` });
+    advance(db, request.id, "IMPORTING", { artist, title });
+    const result = await handleQueueRadio(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "queue_radio",
+        requestId: request.id,
+        payload: { track_ready: true, filename: "track.mp3", search_wait_started_at: Date.now() },
+      }),
+    );
+    if (match) {
+      expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
+      expect(queued).toEqual([hit]);
+    } else {
+      expect(result).toEqual({ waiting: true, reason: "not_search_visible" });
+      expect(queued).toEqual([]);
+      expect(getRequest(db, request.id)?.status).toBe("IMPORTING");
+    }
+  });
 });
 
 function readLibrary(filePath: string): string {
