@@ -44,17 +44,23 @@ update_script_fingerprint() {
   done < <(update_loaded_scripts "${root}" | awk '!seen[$0]++')
 }
 
-# Hash before the pull and again after it. Re-exec at most once so a later
-# pull cannot loop. SUBWAVE_UPDATE_REEXEC skips fetch, pull, and this check.
+# Hash before the pull and again after a successful pull. A failed fetch or
+# pull dies inside update_git_checkout, before this comparison and before re-exec.
+# SUBWAVE_UPDATE_REEXEC is the full HEAD of that pull. The next process skips
+# another pull only when the variable still equals HEAD.
 reexec_if_update_scripts_changed() {
   local root="$1"
   shift
-  local before="" after=""
+  local before="" after="" pulled_head=""
   need_cmd sha256sum
   before="$(update_script_fingerprint "${root}")"
   update_git_checkout "${root}"
   after="$(update_script_fingerprint "${root}")"
   [[ "${before}" == "${after}" ]] && return 0
+  pulled_head="$(run_as_repo_owner "${root}" git -C "${root}" rev-parse HEAD)" || die "could not read HEAD after git pull. Nothing was restarted."
+  pulled_head="${pulled_head//$'\r'/}"
+  pulled_head="${pulled_head//[[:space:]]/}"
+  [[ -n "${pulled_head}" ]] || die "could not read HEAD after git pull. Nothing was restarted."
   if [[ "$#" -gt 0 ]]; then
     info "git pull changed update.sh or a script it sources; re-running ./update.sh $*"
   else
@@ -63,13 +69,30 @@ reexec_if_update_scripts_changed() {
   if [[ ! -f "${root}/update.sh" || ! -x "${root}/update.sh" ]]; then
     die "failed to re-exec ${root}/update.sh"
   fi
-  export SUBWAVE_UPDATE_REEXEC=1
+  export SUBWAVE_UPDATE_REEXEC="${pulled_head}"
   if [[ "$#" -gt 0 ]]; then
     exec "${root}/update.sh" "$@"
   else
     exec "${root}/update.sh"
   fi
   die "failed to re-exec ${root}/update.sh"
+}
+
+# 0 when SUBWAVE_UPDATE_REEXEC is the current HEAD and this process should not
+# fetch or pull. Any other non-empty value is stale: warn and return 1 so the
+# caller fetches and pulls normally.
+reexec_skip_pull() {
+  local root="$1" current=""
+  [[ -n "${SUBWAVE_UPDATE_REEXEC:-}" ]] || return 1
+  current="$(run_as_repo_owner "${root}" git -C "${root}" rev-parse HEAD)" || die "could not read HEAD to check SUBWAVE_UPDATE_REEXEC. Nothing was restarted."
+  current="${current//$'\r'/}"
+  current="${current//[[:space:]]/}"
+  if [[ -n "${current}" && "${SUBWAVE_UPDATE_REEXEC}" == "${current}" ]]; then
+    info "re-exec pass: skipping pull (${current})"
+    return 0
+  fi
+  warn "stale SUBWAVE_UPDATE_REEXEC value is being ignored (${SUBWAVE_UPDATE_REEXEC})"
+  return 1
 }
 
 ORIGINAL_ARGS=()
@@ -89,7 +112,8 @@ while [[ $# -gt 0 ]]; do
       echo "If the API port is held by anything other than the unit or container being restarted, this script stops and names that process. It does not kill it."
       echo "--force does not switch install mode, kill processes, or overwrite .env, secrets, config, or data."
       echo "When run as root, git (fetch, pull, and rev-parse), pnpm install, and the web build run as the owner of this directory."
-      echo "If git pull changes this script or a script it sources, the pulled ./update.sh is re-run once with the same arguments. That second run does not fetch or pull again."
+      echo "If git pull changes this script or a script it sources, the pulled ./update.sh is re-run once with the same arguments and SUBWAVE_UPDATE_REEXEC set to that HEAD. The second run skips fetch and pull only when that value is still HEAD."
+      echo "A failed git fetch or git pull stops the update. Nothing is restarted."
       echo "Does not install or update Ollama. Does not overwrite .env, secrets, config, or library files."
       exit 0
       ;;
@@ -99,9 +123,9 @@ done
 
 never_touch_ollama_msg
 cd "${ROOT}"
-# Set means the parent already fetched, pulled, and decided to re-exec.
-# Skip all three so this process cannot pull again and loop.
-if [[ -z "${SUBWAVE_UPDATE_REEXEC:-}" ]]; then
+# Skip fetch and pull only for the re-exec of the HEAD this run just pulled.
+# A stale SUBWAVE_UPDATE_REEXEC warns inside reexec_skip_pull, then we pull.
+if ! reexec_skip_pull "${ROOT}"; then
   if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
     reexec_if_update_scripts_changed "${ROOT}" "${ORIGINAL_ARGS[@]}"
   else
