@@ -675,14 +675,14 @@ describe("A5 acquisition worker", () => {
     expect(saved.transferId).toBe("tx-late");
   });
 
-  it.each([409, 500])("fails enqueue HTTP %s at once, posts once, and keeps the marker", async (status) => {
+  it("fails an enqueue 4xx at once, posts once, and keeps the marker", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const { acquisition, radio, library, enqueued, order, say } = harness({ responses: [HIT] });
     acquisition.enqueueDownload = async (user, files) => {
       order.push("enqueue");
       enqueued.push({ user, files });
-      throw new ProviderHttpError(`HTTP ${status}`, status);
+      throw new ProviderHttpError("HTTP 409", 409);
     };
     const request = createRequest(db, { rawQuery: "Artist - Track" });
     advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
@@ -694,9 +694,10 @@ describe("A5 acquisition worker", () => {
     };
     const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
     const result = await handleDownload(ctx, job);
-    expect(result).toEqual({ failed: true, reason: "enqueue_failed", status });
+    expect(result).toEqual({ failed: true, reason: "enqueue_failed", status: 409 });
     expect(enqueued).toHaveLength(1);
     expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(order.filter((step) => step === "list")).toHaveLength(1);
     expect(say).toEqual([]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     expect(getRequest(db, request.id)?.error).toBe("enqueue_failed");
@@ -704,7 +705,7 @@ describe("A5 acquisition worker", () => {
     expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({
       error: "enqueue_failed",
       reason: "enqueue_failed",
-      status,
+      status: 409,
     });
     const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as {
       enqueued?: boolean;
@@ -717,9 +718,128 @@ describe("A5 acquisition worker", () => {
       size: TRACK_SIZE,
     });
     expect(listJobsForRequest(db, request.id).filter((row) => row.type === "download")).toHaveLength(1);
-    const again = await handleDownload(ctx, getJob(db, job.id)!);
-    expect(again).toMatchObject({ skipped: true, status: "FAILED" });
+  });
+
+  it("adopts a transfer already listed after an enqueue 5xx and does not post again", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, enqueued, order, say, setTransfers } = harness({ responses: [HIT] });
+    acquisition.enqueueDownload = async (user, files) => {
+      order.push("enqueue");
+      enqueued.push({ user, files });
+      setTransfers([
+        {
+          username: "peer-a",
+          filename: "\\\\music\\\\track.flac",
+          size: TRACK_SIZE,
+          state: "Queued",
+          id: "tx-5xx",
+        },
+      ]);
+      throw new ProviderHttpError("HTTP 500", 500);
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    const result = await handleDownload(ctx, job);
+    expect(result).toMatchObject({ enqueued: true });
     expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(order.filter((step) => step === "list")).toHaveLength(2);
+    expect(say).toHaveLength(1);
+    expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
+    const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as {
+      enqueued?: boolean;
+      transferId?: string;
+      enqueue_attempted?: { username: string };
+    };
+    expect(saved.enqueued).toBe(true);
+    expect(saved.transferId).toBe("tx-5xx");
+    expect(saved.enqueue_attempted?.username).toBe("peer-a");
+    const polls = listJobsForRequest(db, request.id).filter((row) => row.type === "download" && row.id !== job.id);
+    expect(polls).toHaveLength(1);
+  });
+
+  it("fails an enqueue 5xx when the transfer is not listed, with one POST and the marker kept", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, enqueued, order, say } = harness({ responses: [HIT] });
+    acquisition.enqueueDownload = async (user, files) => {
+      order.push("enqueue");
+      enqueued.push({ user, files });
+      throw new ProviderHttpError("HTTP 503", 503);
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    const result = await handleDownload(ctx, job);
+    expect(result).toEqual({ failed: true, reason: "enqueue_failed", status: 503 });
+    expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(order.filter((step) => step === "list")).toHaveLength(2);
+    expect(say).toEqual([]);
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("enqueue_failed");
+    const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
+    expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({ reason: "enqueue_failed", status: 503 });
+    const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as {
+      enqueued?: boolean;
+      enqueue_attempted?: { filename: string; size: number };
+    };
+    expect(saved.enqueued).toBeUndefined();
+    expect(saved.enqueue_attempted).toMatchObject({ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE });
+    expect(listJobsForRequest(db, request.id).filter((row) => row.type === "download")).toHaveLength(1);
+  });
+
+  it("fails an enqueue 5xx when the downloads list fails, with one POST and the marker kept", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, enqueued, order, say } = harness({ responses: [HIT] });
+    const list = acquisition.listDownloads.bind(acquisition);
+    let lists = 0;
+    acquisition.listDownloads = async () => {
+      lists += 1;
+      if (lists > 1) {
+        order.push("list");
+        throw new Error("downloads list failed");
+      }
+      return list();
+    };
+    acquisition.enqueueDownload = async (user, files) => {
+      order.push("enqueue");
+      enqueued.push({ user, files });
+      throw new ProviderHttpError("HTTP 502", 502);
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    const result = await handleDownload(ctx, job);
+    expect(result).toEqual({ failed: true, reason: "enqueue_failed", status: 502 });
+    expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(order.filter((step) => step === "list")).toHaveLength(2);
+    expect(say).toEqual([]);
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as { enqueue_attempted?: { size: number } };
+    expect(saved.enqueue_attempted?.size).toBe(TRACK_SIZE);
   });
 
   it("treats an enqueue timeout as poll-only and does not post again", async () => {

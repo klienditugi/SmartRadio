@@ -90,6 +90,11 @@ function httpFailureStatus(err: unknown): number | undefined {
   return undefined;
 }
 
+function failEnqueue(ctx: Parameters<JobHandler>[0], requestId: string, status: number) {
+  recordFailure(ctx, requestId, "enqueue_failed", { status });
+  return { failed: true as const, reason: "enqueue_failed" as const, status };
+}
+
 /** Search `length` in seconds. Missing, null, and non-positive values are not a length. */
 function hasPositiveLength(selected: SelectedSearchFile): boolean {
   const length = (selected as { durationSeconds?: unknown }).durationSeconds;
@@ -338,15 +343,26 @@ export const handleDownload: JobHandler = async (ctx, job) => {
               observedTransferId(enqueuedBody, { filename: chosen.filename, size: chosen.size }) ?? transferId;
           } catch (err) {
             const status = httpFailureStatus(err);
-            if (status !== undefined) {
-              // Definite 4xx/5xx. Fail now. The marker stays, so nothing POSTs again.
-              recordFailure(ctx, request.id, "enqueue_failed", { status });
-              return { failed: true, reason: "enqueue_failed", status };
+            if (status !== undefined && status < 500) {
+              // 4xx: slskd refused the enqueue. Marker stays. No poll and no second POST.
+              return failEnqueue(ctx, request.id, status);
             }
-            // No HTTP response: timeout, network error, or a lost reply. Poll only.
-            const again = await ctx.providers.acquisition.listDownloads();
-            const settled = settleMarked(findCorrelatedTransfer(again, target), attempt);
-            if (settled) return settled;
+            if (status !== undefined) {
+              // 5xx does not prove the transfer is absent. Look once, then stop.
+              try {
+                const again = await ctx.providers.acquisition.listDownloads();
+                const found = findCorrelatedTransfer(again, target);
+                if (!found) return failEnqueue(ctx, request.id, status);
+                transferId = found.id ?? transferId;
+              } catch {
+                return failEnqueue(ctx, request.id, status);
+              }
+            } else {
+              // No HTTP response: timeout, network error, or a lost reply. Poll only.
+              const again = await ctx.providers.acquisition.listDownloads();
+              const settled = settleMarked(findCorrelatedTransfer(again, target), attempt);
+              if (settled) return settled;
+            }
           }
         }
       }
