@@ -284,6 +284,15 @@ export function getJob(db: Db, id: string): JobRow | undefined {
   return db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as JobRow | undefined;
 }
 
+/** Persist a job payload so a later claim sees the same values after a restart. */
+export function updateJobPayload(db: Db, jobId: string, payload: unknown): void {
+  db.prepare("UPDATE jobs SET payload_json = ?, updated_at = ? WHERE id = ?").run(
+    JSON.stringify(payload),
+    now(),
+    jobId,
+  );
+}
+
 export function listJobs(db: Db, limit = 100): JobRow[] {
   return db.prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?").all(limit) as JobRow[];
 }

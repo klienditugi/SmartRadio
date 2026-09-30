@@ -78,6 +78,9 @@ export const DEFAULT_SHORT_RECORDING_MIN_SAMPLES = 5;
 /** Known durations below this many seconds are short even without a median. */
 export const DEFAULT_SHORT_RECORDING_FLOOR_SECONDS = 90;
 
+/** How long queue_radio waits for GET /dj/search to show a string id. 30 minutes. */
+export const DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS = 30 * 60 * 1000;
+
 /** Soft short-track penalty reaches this (negative) value. Same scale as a long recording. */
 export const DEFAULT_SHORT_RECORDING_PENALTY = -1900;
 
@@ -317,6 +320,11 @@ export const appConfigSchema = z.object({
       /** Optional. Empty URL, admin user, or password is `not_configured`. */
       base_url: optionalSetting,
       admin_user: optionalSetting,
+      /**
+       * Cap on the post-import GET /dj/search wait. Default 30 minutes.
+       * Env: SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS.
+       */
+      search_visible_timeout_ms: z.number().int().positive().default(DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS),
       /** Parsed for old configs. Ignored as a source of verified. */
       verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
     })
@@ -621,6 +629,7 @@ export function publicSettings(config: RuntimeConfig) {
       provider: config.radio.provider,
       base_url: config.radio.base_url,
       admin_user: config.radio.admin_user,
+      search_visible_timeout_ms: config.radio.search_visible_timeout_ms,
       verify_status: config.radio.verify_status,
     },
     acquisition: {
@@ -661,7 +670,7 @@ export type AppConfigPatch = {
   policy?: Partial<AppConfig["policy"]>;
   llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms" | "verify_status">>;
   library?: Partial<Pick<AppConfig["library"], "base_url" | "username" | "verify_status">>;
-  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user" | "verify_status">>;
+  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user" | "search_visible_timeout_ms" | "verify_status">>;
   acquisition?: AcquisitionSettingsPatch;
 };
 
@@ -781,6 +790,7 @@ export function serializeAppConfig(config: AppConfig): string {
       provider: config.radio.provider,
       base_url: config.radio.base_url,
       admin_user: config.radio.admin_user,
+      search_visible_timeout_ms: config.radio.search_visible_timeout_ms,
     },
     acquisition: {
       enabled: config.acquisition.enabled,

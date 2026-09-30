@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_BITRATE_FLOOR_KBPS,
   DEFAULT_SHORT_RECORDING_FLOOR_SECONDS,
+  DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS,
   DEFAULT_SHORT_RECORDING_FRACTION,
   DEFAULT_SHORT_RECORDING_MIN_SAMPLES,
   DEFAULT_SHORT_RECORDING_PENALTY,
@@ -35,6 +36,7 @@ import {
   serializeAppConfig,
 } from "./config.js";
 import { parseClassification, parseClassificationJson, safeParseClassification } from "./classification.js";
+import { fieldSourcesFor } from "./field-source.js";
 
 const exampleYamlObject = {
   server: { host: "127.0.0.1", port: 8788 },
@@ -632,6 +634,39 @@ radio:
     expect(unset.library.base_url).toBe("");
     expect(unset.radio.admin_user).toBe("");
     expect(integrationStatus(unset).llm.state).toBe("not_configured");
+  });
+
+  it("defaults the search-visible wait to 30 minutes and rejects a non-positive limit", () => {
+    const cfg = parseAppConfig(exampleYamlObject);
+    expect(cfg.radio.search_visible_timeout_ms).toBe(DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS);
+    expect(DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS).toBe(30 * 60 * 1000);
+    const zero = structuredClone(exampleYamlObject);
+    (zero.radio as { search_visible_timeout_ms?: number }).search_visible_timeout_ms = 0;
+    expect(() => parseAppConfig(zero)).toThrow();
+    const fraction = structuredClone(exampleYamlObject);
+    (fraction.radio as { search_visible_timeout_ms?: number }).search_visible_timeout_ms = 1.5;
+    expect(() => parseAppConfig(fraction)).toThrow();
+    const custom = structuredClone(exampleYamlObject);
+    (custom.radio as { search_visible_timeout_ms?: number }).search_visible_timeout_ms = 5_000;
+    const parsed = parseAppConfig(custom);
+    expect(parsed.radio.search_visible_timeout_ms).toBe(5_000);
+    expect(publicSettings({ ...parsed, secrets: { adminPassword: "x" } }).radio.search_visible_timeout_ms).toBe(5_000);
+    const yaml = serializeAppConfig(parsed);
+    expect(yaml).toContain("search_visible_timeout_ms: 5000");
+    expect(parseAppConfig(parseYaml(yaml)).radio.search_visible_timeout_ms).toBe(5_000);
+    const overridden = applyEnvOverrides(structuredClone(exampleYamlObject) as Record<string, unknown>, {
+      SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS: "45000",
+    });
+    expect(parseAppConfig(overridden).radio.search_visible_timeout_ms).toBe(45_000);
+    const ignored = applyEnvOverrides(structuredClone(exampleYamlObject) as Record<string, unknown>, {
+      SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS: "0",
+    });
+    expect(parseAppConfig(ignored).radio.search_visible_timeout_ms).toBe(DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS);
+    expect(
+      fieldSourcesFor(exampleYamlObject, { SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS: "45000" })[
+        "radio.search_visible_timeout_ms"
+      ],
+    ).toEqual({ source: "env", env: "SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS" });
   });
 });
 

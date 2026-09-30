@@ -326,6 +326,7 @@ describe("A5 acquisition worker", () => {
     expect(JSON.parse(validate?.payload_json ?? "{}")).toEqual({
       filename: "track.flac",
       path: path.join(downloads, "track.flac"),
+      size: 100,
     });
     await handleValidateFile(
       {

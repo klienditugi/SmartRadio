@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createRequest,
   enqueueJob,
+  getJob,
   getRequest,
   insertUser,
   listJobsForRequest,
@@ -17,6 +18,7 @@ import { NeverPlayError, UnverifiedAcquisitionProvider, type ProviderBundle, typ
 import { loadConfig, type RequestStatus } from "@subwave-ai/shared";
 import type { WorkerContext } from "./context.js";
 import { handleDownload, handleSearchAcquisition } from "./processors/acquire.js";
+import { claimAndRun } from "./dispatch.js";
 import { handleImportLibrary, handleQueueRadio } from "./processors/files.js";
 
 const VIA_ACQUISITION: RequestStatus[] = [
@@ -329,9 +331,18 @@ describe("A4 radio events", () => {
     const jobs = listJobsForRequest(db, request.id);
     expect(jobs.map((job) => job.type).sort()).toEqual(["import_library", "queue_radio"]);
     const radioJob = jobs.find((job) => job.type === "queue_radio");
-    expect(JSON.parse(radioJob?.payload_json ?? "{}")).toEqual({ filename: "track.mp3", track_ready: true });
+    const radioPayload = JSON.parse(radioJob?.payload_json ?? "{}") as {
+      filename?: string;
+      track_ready?: boolean;
+      search_wait_started_at?: number;
+    };
+    expect(radioPayload).toMatchObject({ filename: "track.mp3", track_ready: true });
+    expect(typeof radioPayload.search_wait_started_at).toBe("number");
     expect(getRequest(db, request.id)?.status).toBe("IMPORTING");
+    expect(existsSync(path.join(config.paths.library, "track.mp3"))).toBe(true);
+    expect(existsSync(path.join(config.paths.staging, "track.mp3"))).toBe(false);
     expect(scanCalls).toEqual([]);
+    expect(order).toEqual([]);
 
     const result = await handleQueueRadio(ctx, radioJob!);
     expect(order).toEqual(["search", "say", "queue"]);
@@ -342,6 +353,7 @@ describe("A4 radio events", () => {
       },
     ]);
     expect(queued).toEqual([{ id: "song-1", title: "Track", artist: "Artist", album: "LP" }]);
+    expect(typeof (queued[0] as { id: unknown }).id).toBe("string");
     expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
     expect(getRequest(db, request.id)?.status).toBe("READY");
     const ready = listRequestEvents(db, request.id).find((event) => event.to_status === "READY");
@@ -428,4 +440,118 @@ describe("A4 radio events", () => {
     expect(queued).toEqual([{ id: "already", title: "Known", artist: "Act", album: undefined }]);
     expect(getRequest(db, request.id)?.status).toBe("READY");
   });
+
+  it("keeps the original search-wait start and fails the request when the limit is reached", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { radio, library, acquisition, order, say } = harness({ search: { results: [] } });
+    const request = createRequest(db, { rawQuery: "pending" });
+    advance(db, request.id, "IMPORTING", { artist: "Artist", title: "Track" });
+    const libraryFile = path.join(config.paths.library, "track.mp3");
+    mkdirSync(config.paths.library, { recursive: true });
+    writeFileSync(libraryFile, "kept-in-library");
+    const started = Date.now() - 5_000;
+    config.radio.search_visible_timeout_ms = 60_000;
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, {
+      type: "queue_radio",
+      requestId: request.id,
+      payload: { track_ready: true, filename: "track.mp3", search_wait_started_at: started },
+    });
+    const waiting = await handleQueueRadio(ctx, job);
+    expect(waiting).toEqual({ waiting: true, reason: "not_search_visible" });
+    expect(JSON.parse(getJob(db, job.id)?.payload_json ?? "{}").search_wait_started_at).toBe(started);
+    const follow = listJobsForRequest(db, request.id).find((row) => row.id !== job.id);
+    expect(JSON.parse(follow?.payload_json ?? "{}").search_wait_started_at).toBe(started);
+    expect(say).toEqual([]);
+
+    const again = await handleQueueRadio(ctx, follow!);
+    expect(again).toEqual({ waiting: true, reason: "not_search_visible" });
+    const third = listJobsForRequest(db, request.id).filter((row) => row.id !== job.id && row.id !== follow?.id);
+    expect(third).toHaveLength(1);
+    expect(JSON.parse(third[0]?.payload_json ?? "{}").search_wait_started_at).toBe(started);
+
+    config.radio.search_visible_timeout_ms = 1_000;
+    const expired = enqueueJob(db, {
+      type: "queue_radio",
+      requestId: request.id,
+      payload: { track_ready: true, filename: "track.mp3", search_wait_started_at: Date.now() - 60_000 },
+    });
+    const failed = await handleQueueRadio(ctx, expired);
+    expect(failed).toEqual({ failed: true, reason: "search_visible_timeout" });
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("search_visible_timeout");
+    const failure = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
+    expect(JSON.parse(failure?.payload_json ?? "{}")).toMatchObject({
+      error: "search_visible_timeout",
+      reason: "search_visible_timeout",
+    });
+    expect(failure?.payload_json ?? "").not.toContain("TRACK_READY");
+    expect(say).toEqual([]);
+    expect(order).toEqual(["search", "search"]);
+    expect(order).not.toContain("enqueue");
+    expect(order).not.toContain("acq-search");
+    expect(readLibrary(libraryFile)).toBe("kept-in-library");
+    const types = listJobsForRequest(db, request.id).map((row) => row.type);
+    expect(types.every((type) => type === "queue_radio")).toBe(true);
+  });
+
+  it("fails the request as radio_unreachable after queue_radio retries, and keeps the library file", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { radio, library, acquisition, order, say } = harness();
+    radio.djSearch = async () => {
+      order.push("search");
+      const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:9"), { code: "ECONNREFUSED" });
+      throw Object.assign(new TypeError("fetch failed"), { cause });
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "IMPORTING", { artist: "Artist", title: "Track" });
+    const libraryFile = path.join(config.paths.library, "track.mp3");
+    mkdirSync(config.paths.library, { recursive: true });
+    writeFileSync(libraryFile, "kept-in-library");
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, {
+      type: "queue_radio",
+      requestId: request.id,
+      payload: { track_ready: true, filename: "track.mp3", search_wait_started_at: Date.now() },
+      maxAttempts: 2,
+    });
+    expect(await claimAndRun(ctx)).toBe(true);
+    expect(getRequest(db, request.id)?.status).toBe("IMPORTING");
+    expect(getRequest(db, request.id)?.error).toBeNull();
+    expect(say).toEqual([]);
+    db.prepare("UPDATE jobs SET run_after = ? WHERE id = ?").run(0, job.id);
+    expect(await claimAndRun(ctx)).toBe(true);
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("radio_unreachable");
+    const failure = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
+    expect(JSON.parse(failure?.payload_json ?? "{}")).toMatchObject({
+      error: "radio_unreachable",
+      reason: "radio_unreachable",
+    });
+    expect(failure?.payload_json ?? "").not.toContain("TRACK_READY");
+    expect(say).toEqual([]);
+    expect(order).toEqual(["search", "search"]);
+    expect(getJob(db, job.id)?.status).toBe("failed");
+    expect(getJob(db, job.id)?.error).toBe("radio_unreachable");
+    expect(readLibrary(libraryFile)).toBe("kept-in-library");
+    const types = listJobsForRequest(db, request.id).map((row) => row.type);
+    expect(types).toEqual(["queue_radio"]);
+    expect(await claimAndRun(ctx)).toBe(false);
+  });
 });
+
+function readLibrary(filePath: string): string {
+  return existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+}

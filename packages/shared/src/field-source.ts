@@ -33,6 +33,7 @@ export const REPORTED_SETTING_PATHS = [
   "radio.provider",
   "radio.base_url",
   "radio.admin_user",
+  "radio.search_visible_timeout_ms",
   "acquisition.enabled",
   "acquisition.provider",
   "acquisition.base_url",
@@ -112,6 +113,11 @@ const ENV_ASSIGNMENTS: readonly EnvAssignment[] = [
   { path: "library.username", env: "NAVIDROME_USER", read: (env) => nonemptyEnv(env.NAVIDROME_USER) },
   { path: "radio.base_url", env: "SUBWAVE_RADIO_URL", read: (env) => nonemptyEnv(env.SUBWAVE_RADIO_URL) },
   { path: "radio.admin_user", env: "SUBWAVE_RADIO_ADMIN_USER", read: (env) => nonemptyEnv(env.SUBWAVE_RADIO_ADMIN_USER) },
+  {
+    path: "radio.search_visible_timeout_ms",
+    env: "SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS",
+    read: (env) => positiveEnvNumber(env.SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS),
+  },
   { path: "acquisition.base_url", env: "SLSKD_URL", read: (env) => truthyEnv(env.SLSKD_URL) },
   {
     path: "acquisition.selection.max_file_size_mb",

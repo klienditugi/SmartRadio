@@ -340,7 +340,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   enqueueJob(ctx.db, {
     type: "validate_file",
     requestId: request.id,
-    payload: { filename: resolved.basename, path: resolved.absolutePath },
+    payload: { filename: resolved.basename, path: resolved.absolutePath, size: resolved.size },
   });
   return {
     completed: true,

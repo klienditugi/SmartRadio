@@ -1,18 +1,57 @@
 import fs from "node:fs";
-import { enqueueJob, getRequest, transitionRequest } from "@subwave-ai/db";
-import { NeverPlayError, NotConfiguredError } from "@subwave-ai/providers";
-import { assertInsideRoot, isAllowedAudioExtension, safeJoin } from "@subwave-ai/shared";
+import { enqueueJob, getRequest, transitionRequest, updateJobPayload, type JobRow } from "@subwave-ai/db";
+import { NeverPlayError, NotConfiguredError, ProviderHttpError } from "@subwave-ai/providers";
+import { isAllowedAudioExtension, safeJoin } from "@subwave-ai/shared";
 import type { JobHandler } from "../context.js";
 import { runIntegration } from "./guard.js";
+import { moveFileSync, removeEmptyChildDirectory } from "./move-file.js";
 import { trackReadyContext } from "./notify.js";
 
 /** Wait for Navidrome’s passive scanner before the next /dj/search. Not a scan trigger. */
 const TRACK_READY_POLL_MS = 15_000;
 
+const RADIO_UNREACHABLE = "radio_unreachable";
+const SEARCH_VISIBLE_TIMEOUT = "search_visible_timeout";
+
+const NETWORK_CODES = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ECONNABORTED",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
 type VisibleTrack = { id: string; title: string; artist?: string; album?: string };
+
+type FilePayload = {
+  filename?: string;
+  path?: string;
+  size?: number;
+};
+
+type TrackReadyPayload = FilePayload & {
+  track_ready?: boolean;
+  search_wait_started_at?: number;
+};
 
 function radioQuery(request: { artist: string | null; title: string | null; raw_query: string }): string {
   return [request.artist, request.title].filter(Boolean).join(" ") || request.raw_query;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function expectedBytes(payload: { size?: unknown }): number | undefined {
+  const size = finiteNumber(payload.size);
+  return size !== undefined && size > 0 ? size : undefined;
 }
 
 /** First `/dj/search` hit with a string id. Numeric ids are not treated as visible. */
@@ -35,15 +74,57 @@ function visibleTrack(search: unknown): VisibleTrack | null {
   return null;
 }
 
-function fail(ctx: Parameters<JobHandler>[0], requestId: string, message: string): never {
+function recordFailure(ctx: Parameters<JobHandler>[0], requestId: string, message: string): void {
   transitionRequest(ctx.db, {
     requestId,
     to: "FAILED",
     actor: ctx.workerId,
-    payload: { error: message },
+    payload: { error: message, reason: message },
     patch: { error: message },
   });
+}
+
+function fail(ctx: Parameters<JobHandler>[0], requestId: string, message: string): never {
+  recordFailure(ctx, requestId, message);
   throw new Error(message);
+}
+
+function moveInto(
+  ctx: Parameters<JobHandler>[0],
+  requestId: string,
+  source: string,
+  destination: string,
+  expected: number | undefined,
+  occupiedMessage: string,
+): void {
+  if (fs.existsSync(destination)) {
+    fail(ctx, requestId, occupiedMessage);
+  }
+  try {
+    moveFileSync({ source, destination, expectedBytes: expected });
+  } catch (err) {
+    fail(ctx, requestId, (err as Error).message);
+  }
+}
+
+/** Connection failure from SUB/WAVE. An HTTP response means the host answered. */
+function isRadioUnreachable(err: unknown): boolean {
+  if (err instanceof NotConfiguredError || err instanceof NeverPlayError || err instanceof ProviderHttpError) {
+    return false;
+  }
+  let current: unknown = err;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && NETWORK_CODES.has(code)) return true;
+    const message = current instanceof Error ? current.message : "";
+    if (/fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|unreachable/i.test(message)) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 export const handleValidateFile: JobHandler = async (ctx, job) => {
@@ -56,7 +137,7 @@ export const handleValidateFile: JobHandler = async (ctx, job) => {
   const current = getRequest(ctx.db, request.id)!;
   if (current.status !== "VALIDATING") return { skipped: true, status: current.status };
 
-  const payload = job.payload_json ? (JSON.parse(job.payload_json) as { filename?: string; path?: string }) : {};
+  const payload: FilePayload = job.payload_json ? (JSON.parse(job.payload_json) as FilePayload) : {};
   // A5: never invent `{requestId}.bin` — require the real completed basename from acquisition.
   const filename = payload.filename;
   if (!filename || typeof filename !== "string") {
@@ -73,10 +154,16 @@ export const handleValidateFile: JobHandler = async (ctx, job) => {
   if (stat.size <= 0 || stat.size > ctx.config.files.max_bytes) {
     fail(ctx, request.id, `invalid size ${stat.size}`);
   }
-  fs.mkdirSync(ctx.config.paths.staging, { recursive: true });
+  const expected = expectedBytes(payload);
+  if (expected !== undefined && stat.size !== expected) {
+    fail(ctx, request.id, `size mismatch: source ${stat.size} bytes, expected ${expected}`);
+  }
   const dest = safeJoin(ctx.config.paths.staging, filename);
-  fs.copyFileSync(source, dest);
-  enqueueJob(ctx.db, { type: "import_library", requestId: request.id, payload: { filename } });
+  moveInto(ctx, request.id, source, dest, expected, `staging file already exists: ${filename}`);
+  removeEmptyChildDirectory(ctx.config.paths.downloads, source);
+  const importPayload: { filename: string; size?: number } = { filename };
+  if (expected !== undefined) importPayload.size = expected;
+  enqueueJob(ctx.db, { type: "import_library", requestId: request.id, payload: importPayload });
   return { staging: dest };
 };
 
@@ -90,23 +177,23 @@ export const handleImportLibrary: JobHandler = async (ctx, job) => {
   const current = getRequest(ctx.db, request.id)!;
   if (current.status !== "IMPORTING") return { skipped: true, status: current.status };
 
-  const payload = job.payload_json ? (JSON.parse(job.payload_json) as { filename?: string }) : {};
+  const payload: FilePayload = job.payload_json ? (JSON.parse(job.payload_json) as FilePayload) : {};
   const filename = payload.filename;
   if (!filename || typeof filename !== "string") {
     fail(ctx, request.id, "import_library missing real download basename");
   }
   const source = safeJoin(ctx.config.paths.staging, filename);
-  assertInsideRoot(ctx.config.paths.staging, source);
   if (!fs.existsSync(source)) fail(ctx, request.id, "staging file missing");
-  fs.mkdirSync(ctx.config.paths.library, { recursive: true });
+  const expected = expectedBytes(payload);
   const dest = safeJoin(ctx.config.paths.library, filename);
-  fs.copyFileSync(source, dest);
+  moveInto(ctx, request.id, source, dest, expected, `library file already exists: ${filename}`);
+  removeEmptyChildDirectory(ctx.config.paths.staging, source);
   // A4: Navidrome scans passively (~1 min). Do not enqueue index_library on this path.
   // queue_radio polls GET /dj/search, then say(TRACK_READY), then POST /dj/queue-track.
   enqueueJob(ctx.db, {
     type: "queue_radio",
     requestId: request.id,
-    payload: { filename, track_ready: true },
+    payload: { filename, track_ready: true, search_wait_started_at: Date.now() },
   });
   return { library: dest };
 };
@@ -178,32 +265,62 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
   if (!job.request_id) throw new Error("queue_radio job missing request_id");
   const request = getRequest(ctx.db, job.request_id);
   if (!request) throw new Error("request not found");
-  const payload = job.payload_json ? (JSON.parse(job.payload_json) as { track_ready?: boolean }) : {};
+  const payload: TrackReadyPayload = job.payload_json ? (JSON.parse(job.payload_json) as TrackReadyPayload) : {};
 
   try {
-    return await queueRadio(ctx, request, payload);
+    return await queueRadio(ctx, job, request, payload);
   } catch (err) {
     if (err instanceof NotConfiguredError) {
       fail(ctx, request.id, err.message);
+    }
+    if (payload.track_ready === true && job.attempts >= job.max_attempts && isRadioUnreachable(err)) {
+      const current = getRequest(ctx.db, request.id);
+      if (
+        current &&
+        current.status !== "FAILED" &&
+        current.status !== "CANCELLED" &&
+        current.status !== "READY" &&
+        current.status !== "REJECTED"
+      ) {
+        fail(ctx, request.id, RADIO_UNREACHABLE);
+      }
     }
     throw err;
   }
 };
 
+function searchWaitTimedOut(started: number | undefined, timeoutMs: number, now = Date.now()): boolean {
+  return started !== undefined && now - started >= timeoutMs;
+}
+
 async function queueRadio(
   ctx: Parameters<JobHandler>[0],
+  job: JobRow,
   request: NonNullable<ReturnType<typeof getRequest>>,
-  payload: { track_ready?: boolean },
+  payload: TrackReadyPayload,
 ) {
   if (payload.track_ready === true) {
     if (request.status !== "IMPORTING") return { skipped: true, status: request.status };
+    const timeoutMs = ctx.config.radio.search_visible_timeout_ms;
+    const started = finiteNumber(payload.search_wait_started_at);
+    if (searchWaitTimedOut(started, timeoutMs)) {
+      recordFailure(ctx, request.id, SEARCH_VISIBLE_TIMEOUT);
+      return { failed: true, reason: SEARCH_VISIBLE_TIMEOUT };
+    }
     const search = await runIntegration(ctx, request.id, () => ctx.providers.radio.djSearch(radioQuery(request)));
     const track = visibleTrack(search);
     if (!track) {
+      const start = started ?? Date.now();
+      if (searchWaitTimedOut(start, timeoutMs)) {
+        recordFailure(ctx, request.id, SEARCH_VISIBLE_TIMEOUT);
+        return { failed: true, reason: SEARCH_VISIBLE_TIMEOUT };
+      }
+      const nextPayload: TrackReadyPayload = { ...payload, track_ready: true, search_wait_started_at: start };
+      updateJobPayload(ctx.db, job.id, nextPayload);
       enqueueJob(ctx.db, {
         type: "queue_radio",
         requestId: request.id,
-        payload,
+        payload: nextPayload,
         runAfter: Date.now() + TRACK_READY_POLL_MS,
       });
       return { waiting: true, reason: "not_search_visible" };

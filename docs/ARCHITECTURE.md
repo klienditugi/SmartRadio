@@ -25,7 +25,7 @@ Amendment **A3** is locked below. Amendment **A4** binds notify to `POST /dj/say
 ```
 REQUESTED → CLASSIFYING → APPROVED | REJECTED
   → acquisition/download → /music/downloads
-  → validation → /music/library
+  → validation → move into /music/library
   → announce / queue through SUB/WAVE
 ```
 
@@ -67,7 +67,8 @@ Playback handoff continues to use the verified admin APIs under the opaque `/api
 
 - `RadioProvider.say` → `POST {base_url}/dj/say`, admin Basic, `mode` forced to `"styled"`, `kind` `"dj-speak"` or `"link"`, `text` truncated to 500 characters. Credentials and base URL stay in config/secrets.
 - `REQUEST_ACCEPTED` fires from the download processor after `enqueueDownload` returns. Unavailable acquisition (`acquire_unavailable`) does not announce and does not enter `DOWNLOADING`.
-- `TRACK_READY` fires from `queue_radio` only for a post-import job (`track_ready`), and only after `GET /dj/search?q=` yields a string `id`. Then `say`, then `POST /dj/queue-track`. A miss reschedules the same job; it does not call Navidrome `startScan`.
+- `TRACK_READY` fires from `queue_radio` only for a post-import job (`track_ready`), and only after `GET /dj/search?q=` yields a string `id`. Then `say`, then `POST /dj/queue-track`. A miss reschedules the same job until `radio.search_visible_timeout_ms` (default 30 minutes, `1800000`). The wait start is stored on that job (`search_wait_started_at`) so a restart does not extend it. The reschedule interval stays 15 seconds. It does not call Navidrome `startScan`.
+- When that limit is reached, the request becomes `FAILED` with error `search_visible_timeout`. When `GET /dj/search` cannot connect and the `queue_radio` job uses up its attempts, the request becomes `FAILED` with error `radio_unreachable`. Neither failure sends `TRACK_READY`, deletes the library file, or enqueues another acquisition, search, or download.
 - Library-hit playback stays `GET /dj/search` → `POST /dj/queue-track` and does not send `TRACK_READY`.
 - HTTP 409 from `queue-track` is never-play (`FAILED`).
 - No acquisition daemon is added in this amendment.
@@ -105,7 +106,8 @@ A3 / A4 mapping:
 
 - `RECEIVED` = semantic `REQUESTED`
 - After `APPROVED`, library check may skip download (`ALREADY_AVAILABLE`) or enter acquisition (`SEARCHING` …)
-- File flow: `/music/downloads` (landing) → validation → `/music/library` (final) → poll `GET /dj/search` → `say` (`TRACK_READY`) → `POST /dj/queue-track`
+- File flow: `/music/downloads` (landing) → validation → move into `/music/library` (final) → poll `GET /dj/search` until a string `id` or `search_visible_timeout` → `say` (`TRACK_READY`) → `POST /dj/queue-track`
+- Downloads → staging and staging → library move that one validated file. Same filesystem uses `rename`. A cross-filesystem move copies to a temporary name in the destination directory, fsyncs when the platform allows, checks the byte size against the source and against the transfer size when that size is known, renames the temporary file into place, then removes the source. If the check fails, the temporary file is removed and the source stays. An existing library file is left in place and the request fails. Nothing else under downloads is deleted. An empty directory that contained only that file, and is not the downloads or staging root, may be removed. That removal is not recursive. The worker must be allowed to delete that one file in the downloads directory (the completed-downloads directory shared with slskd). Unlink needs write permission on the directory.
 - `IMPORTING → READY` is the happy-path edge (`queue_radio`). `IMPORTING → INDEXING` remains only when an operator enqueues `index_library` for that request. Standalone admin scan has no request id.
 
 Rules:
@@ -137,6 +139,8 @@ Unverified adapters set `verifyStatus` and **do not** call live endpoints with i
 ## Config and secrets
 
 YAML (`config/subwave.yaml`) + env interpolation/overrides + `secrets/` files. No hard-coded production IPs, passwords, API keys, ports, model names, or library paths in source. Oracle paths `/music/downloads` and `/music/library`, Tailscale Ollama, and SUB/WAVE `:7700/api` belong in **operator config**, not required defaults.
+
+`radio.search_visible_timeout_ms` caps the post-import `GET /dj/search` wait. Default `1800000` (30 minutes). `SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS` overrides it when the value is a positive integer. The worker reads the setting. It is not a hard-coded wait.
 
 Navidrome (`NAVIDROME_URL`, `NAVIDROME_USER`, `secrets/navidrome_password`), SUB/WAVE (`SUBWAVE_RADIO_URL`, `SUBWAVE_RADIO_ADMIN_USER`, `secrets/subwave_admin_password`), and Ollama (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`) are optional at boot. An empty string is the same as unset. The API and worker still start. Doctor and provider health report that integration as `not_configured` and do not call it. A later health probe that cannot connect reports `unreachable`. Library search and SUB/WAVE `say` / `/dj/search` / `/dj/queue-track` fail the job with a not-configured error instead of a false success. Required to boot: database path, data directories, and (to sign in) admin password and session secret. Ollama is never installed or given a default model.
 

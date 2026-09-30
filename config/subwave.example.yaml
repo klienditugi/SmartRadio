@@ -72,12 +72,16 @@ library:
 # Playback: GET /dj/search, then POST /dj/queue-track {id,title} (artist/album optional; HTTP 409 = never-play).
 # Notify: POST /dj/say {text, mode:styled, kind:dj-speak|link} with the same admin Basic auth.
 # REQUEST_ACCEPTED only after a transfer is enqueued. TRACK_READY after search shows a string id, then say, then queue.
+# search_visible_timeout_ms caps the post-import GET /dj/search wait. Default 1800000 (30 minutes).
+# SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS overrides it. The library file stays if the wait expires
+# (search_visible_timeout) or /dj/search cannot be reached (radio_unreachable). No TRACK_READY then.
 # Do not use public POST /request for announcements. URL and admin password come from this file and secrets/.
 # verify_status in yaml or env is deprecated and ignored. Test connection stores the result.
 radio:
   provider: subwave
   base_url: "${SUBWAVE_RADIO_URL}"
   admin_user: "${SUBWAVE_RADIO_ADMIN_USER}"
+  search_visible_timeout_ms: 1800000
 
 # Optional. enabled: false, a non-slskd provider, or a missing URL/key → doctor.acquire_unavailable.
 # A stored test-connection is the only way to verify. Yaml verify_status is ignored.
