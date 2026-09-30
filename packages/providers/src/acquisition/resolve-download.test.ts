@@ -30,6 +30,53 @@ describe("resolveDownloadedFile", () => {
     expect(resolveDownloadedFile(dir, "\\\\music\\\\missing.flac", 100)).toBeNull();
   });
 
+  it("resolves a file under the remote parent folder", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "slskd-parent-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(path.join(dir, "Album"));
+    writeFileSync(path.join(dir, "Album", "track.flac"), Buffer.alloc(100));
+    expect(resolveDownloadedFile(dir, "\\\\music\\\\Album\\\\track.flac", 100)).toEqual({
+      basename: "track.flac",
+      absolutePath: path.join(dir, "Album", "track.flac"),
+      size: 100,
+    });
+  });
+
+  it("returns null when the parent folder and the basename both match the size", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "slskd-both-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(path.join(dir, "Album"));
+    writeFileSync(path.join(dir, "Album", "track.flac"), Buffer.alloc(100));
+    writeFileSync(path.join(dir, "track.flac"), Buffer.alloc(100));
+    expect(resolveDownloadedFile(dir, "\\\\music\\\\Album\\\\track.flac", 100)).toBeNull();
+  });
+
+  it("returns null when the only candidate has the wrong size", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "slskd-size-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(path.join(dir, "a.flac"), Buffer.alloc(50));
+    expect(resolveDownloadedFile(dir, "\\\\music\\\\a.flac", 100)).toBeNull();
+  });
+
+  it("maps a container path prefix onto the downloads root", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "slskd-prefix-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(path.join(dir, "Album"));
+    writeFileSync(path.join(dir, "Album", "track.flac"), Buffer.alloc(80));
+    const resolved = resolveDownloadedFile(dir, "/downloads/Album/track.flac", 80, {
+      reportedPath: "/downloads/Album/track.flac",
+      containerPrefix: "/downloads",
+    });
+    expect(resolved?.absolutePath).toBe(path.join(dir, "Album", "track.flac"));
+    writeFileSync(path.join(dir, "track.flac"), Buffer.alloc(80));
+    expect(
+      resolveDownloadedFile(dir, "/downloads/Album/missing.flac", 80, {
+        reportedPath: "/downloads/Album/missing.flac",
+        containerPrefix: "/downloads",
+      }),
+    ).toBeNull();
+  });
+
   it("rejects incomplete suffixes", () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "slskd-inc-"));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));

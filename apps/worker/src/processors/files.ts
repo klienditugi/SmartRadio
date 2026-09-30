@@ -3,6 +3,7 @@ import { enqueueJob, getRequest, transitionRequest, updateJobPayload, type JobRo
 import { NeverPlayError, NotConfiguredError, ProviderHttpError } from "@subwave-ai/providers";
 import { isAllowedAudioExtension, safeJoin } from "@subwave-ai/shared";
 import type { JobHandler } from "../context.js";
+import { FFPROBE_DURATION_TOLERANCE_SECONDS, probeMatchesExtension, runFfprobe } from "./ffprobe.js";
 import { runIntegration } from "./guard.js";
 import { moveFileSync, removeEmptyChildDirectory } from "./move-file.js";
 import { trackReadyContext } from "./notify.js";
@@ -12,6 +13,7 @@ const TRACK_READY_POLL_MS = 15_000;
 
 const RADIO_UNREACHABLE = "radio_unreachable";
 const SEARCH_VISIBLE_TIMEOUT = "search_visible_timeout";
+const HANDOFF_NO_MATCH = "handoff_no_match";
 
 const NETWORK_CODES = new Set([
   "ECONNREFUSED",
@@ -34,11 +36,22 @@ type FilePayload = {
   filename?: string;
   path?: string;
   size?: number;
+  /** Selected search `length`, when the candidate had one. */
+  duration_seconds?: number;
 };
 
 type TrackReadyPayload = FilePayload & {
   track_ready?: boolean;
   search_wait_started_at?: number;
+  /** Set once /dj/search returned string ids that were not the imported file. */
+  handoff_unmatched?: boolean;
+};
+
+type SearchHit = VisibleTrack & {
+  path?: string;
+  filename?: string;
+  basename?: string;
+  duration?: number;
 };
 
 function radioQuery(request: { artist: string | null; title: string | null; raw_query: string }): string {
@@ -54,22 +67,108 @@ function expectedBytes(payload: { size?: unknown }): number | undefined {
   return size !== undefined && size > 0 ? size : undefined;
 }
 
-/** First `/dj/search` hit with a string id. Numeric ids are not treated as visible. */
-function visibleTrack(search: unknown): VisibleTrack | null {
-  if (!search || typeof search !== "object") return null;
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** `/dj/search` hits with a string id. Numeric ids are not treated as visible. */
+function searchHits(search: unknown): SearchHit[] {
+  if (!search || typeof search !== "object") return [];
   const results = (search as { results?: unknown }).results;
-  if (!Array.isArray(results)) return null;
+  if (!Array.isArray(results)) return [];
+  const hits: SearchHit[] = [];
   for (const row of results) {
     if (!row || typeof row !== "object") continue;
-    const item = row as { id?: unknown; title?: unknown; artist?: unknown; album?: unknown };
+    const item = row as {
+      id?: unknown;
+      title?: unknown;
+      artist?: unknown;
+      album?: unknown;
+      path?: unknown;
+      filename?: unknown;
+      basename?: unknown;
+      duration?: unknown;
+      length?: unknown;
+    };
     if (typeof item.id !== "string" || item.id.length === 0) continue;
     if (typeof item.title !== "string" || item.title.length === 0) continue;
-    return {
+    const duration = finiteNumber(item.duration) ?? finiteNumber(item.length);
+    hits.push({
       id: item.id,
       title: item.title,
-      artist: typeof item.artist === "string" ? item.artist : undefined,
-      album: typeof item.album === "string" ? item.album : undefined,
-    };
+      artist: optionalString(item.artist),
+      album: optionalString(item.album),
+      path: optionalString(item.path),
+      filename: optionalString(item.filename),
+      basename: optionalString(item.basename),
+      ...(duration !== undefined ? { duration } : {}),
+    });
+  }
+  return hits;
+}
+
+/** First `/dj/search` hit with a string id. Library-hit playback still uses this. */
+function visibleTrack(search: unknown): VisibleTrack | null {
+  const hit = searchHits(search)[0];
+  if (!hit) return null;
+  return { id: hit.id, title: hit.title, artist: hit.artist, album: hit.album };
+}
+
+function normalizedPath(value: string): string {
+  return value.replaceAll("\\", "/").replace(/^\/+/, "");
+}
+
+function pathBasename(value: string): string {
+  const parts = normalizedPath(value).split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? value;
+}
+
+/**
+ * Match a search hit to the imported library file.
+ * `path` / `filename` / `basename` are read only when the result object has them.
+ * `djSearch` is `Promise<unknown>`. The fields this worker already required are
+ * string `id` and `title`, plus optional `artist` and `album`.
+ */
+function hitMatchesFile(hit: SearchHit, libraryRelative: string): boolean {
+  const file = normalizedPath(libraryRelative);
+  const candidates = [hit.path, hit.filename, hit.basename].filter((value): value is string => Boolean(value));
+  return candidates.some((candidate) => {
+    const hitPath = normalizedPath(candidate);
+    if (hitPath === file) return true;
+    if (file.length > 0 && hitPath.endsWith(`/${file}`)) return true;
+    if (!file.includes("/") && pathBasename(hitPath) === file) return true;
+    return false;
+  });
+}
+
+function hitMatchesDuration(
+  hit: SearchHit,
+  request: { artist: string | null; title: string | null },
+  expectedDuration: number | undefined,
+): boolean {
+  if (expectedDuration === undefined || !(expectedDuration > 0) || hit.duration === undefined) return false;
+  if (Math.abs(hit.duration - expectedDuration) > FFPROBE_DURATION_TOLERANCE_SECONDS) return false;
+  if (!request.title || hit.title !== request.title) return false;
+  if (request.artist && hit.artist !== request.artist) return false;
+  return true;
+}
+
+function matchImportedTrack(
+  search: unknown,
+  request: { artist: string | null; title: string | null },
+  payload: TrackReadyPayload,
+): VisibleTrack | null {
+  for (const hit of searchHits(search)) {
+    const identity = [hit.path, hit.filename, hit.basename].some(Boolean);
+    if (identity) {
+      if (payload.filename && hitMatchesFile(hit, payload.filename)) {
+        return { id: hit.id, title: hit.title, artist: hit.artist, album: hit.album };
+      }
+      continue;
+    }
+    if (hitMatchesDuration(hit, request, finiteNumber(payload.duration_seconds))) {
+      return { id: hit.id, title: hit.title, artist: hit.artist, album: hit.album };
+    }
   }
   return null;
 }
@@ -158,11 +257,25 @@ export const handleValidateFile: JobHandler = async (ctx, job) => {
   if (expected !== undefined && stat.size !== expected) {
     fail(ctx, request.id, `size mismatch: source ${stat.size} bytes, expected ${expected}`);
   }
+  const probe = await runFfprobe(ctx.config.files.ffprobe_path, source);
+  if (probe === "unavailable") fail(ctx, request.id, "ffprobe_unavailable");
+  if (probe === "failed") fail(ctx, request.id, "ffprobe_failed");
+  if (!probeMatchesExtension(filename, probe)) fail(ctx, request.id, "ffprobe_format_mismatch");
+  const expectedDuration = finiteNumber(payload.duration_seconds);
+  if (expectedDuration !== undefined && expectedDuration > 0) {
+    if (
+      probe.durationSeconds === undefined ||
+      Math.abs(probe.durationSeconds - expectedDuration) > FFPROBE_DURATION_TOLERANCE_SECONDS
+    ) {
+      fail(ctx, request.id, "ffprobe_duration_mismatch");
+    }
+  }
   const dest = safeJoin(ctx.config.paths.staging, filename);
   moveInto(ctx, request.id, source, dest, expected, `staging file already exists: ${filename}`);
   removeEmptyChildDirectory(ctx.config.paths.downloads, source);
-  const importPayload: { filename: string; size?: number } = { filename };
+  const importPayload: FilePayload = { filename };
   if (expected !== undefined) importPayload.size = expected;
+  if (expectedDuration !== undefined && expectedDuration > 0) importPayload.duration_seconds = expectedDuration;
   enqueueJob(ctx.db, { type: "import_library", requestId: request.id, payload: importPayload });
   return { staging: dest };
 };
@@ -190,10 +303,13 @@ export const handleImportLibrary: JobHandler = async (ctx, job) => {
   removeEmptyChildDirectory(ctx.config.paths.staging, source);
   // A4: Navidrome scans passively (~1 min). Do not enqueue index_library on this path.
   // queue_radio polls GET /dj/search, then say(TRACK_READY), then POST /dj/queue-track.
+  const queuePayload: TrackReadyPayload = { filename, track_ready: true, search_wait_started_at: Date.now() };
+  const duration = finiteNumber(payload.duration_seconds);
+  if (duration !== undefined && duration > 0) queuePayload.duration_seconds = duration;
   enqueueJob(ctx.db, {
     type: "queue_radio",
     requestId: request.id,
-    payload: { filename, track_ready: true, search_wait_started_at: Date.now() },
+    payload: queuePayload,
   });
   return { library: dest };
 };
@@ -304,18 +420,27 @@ async function queueRadio(
     const timeoutMs = ctx.config.radio.search_visible_timeout_ms;
     const started = finiteNumber(payload.search_wait_started_at);
     if (searchWaitTimedOut(started, timeoutMs)) {
-      recordFailure(ctx, request.id, SEARCH_VISIBLE_TIMEOUT);
-      return { failed: true, reason: SEARCH_VISIBLE_TIMEOUT };
+      const reason = payload.handoff_unmatched ? HANDOFF_NO_MATCH : SEARCH_VISIBLE_TIMEOUT;
+      recordFailure(ctx, request.id, reason);
+      return { failed: true, reason };
     }
     const search = await runIntegration(ctx, request.id, () => ctx.providers.radio.djSearch(radioQuery(request)));
-    const track = visibleTrack(search);
+    const track = matchImportedTrack(search, request, payload);
     if (!track) {
       const start = started ?? Date.now();
+      const unmatched = searchHits(search).length > 0;
       if (searchWaitTimedOut(start, timeoutMs)) {
-        recordFailure(ctx, request.id, SEARCH_VISIBLE_TIMEOUT);
-        return { failed: true, reason: SEARCH_VISIBLE_TIMEOUT };
+        const reason = unmatched ? HANDOFF_NO_MATCH : SEARCH_VISIBLE_TIMEOUT;
+        recordFailure(ctx, request.id, reason);
+        return { failed: true, reason };
       }
-      const nextPayload: TrackReadyPayload = { ...payload, track_ready: true, search_wait_started_at: start };
+      const nextPayload: TrackReadyPayload = {
+        ...payload,
+        track_ready: true,
+        search_wait_started_at: start,
+        ...(unmatched ? { handoff_unmatched: true } : {}),
+      };
+      if (!unmatched) delete nextPayload.handoff_unmatched;
       updateJobPayload(ctx.db, job.id, nextPayload);
       enqueueJob(ctx.db, {
         type: "queue_radio",

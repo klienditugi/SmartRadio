@@ -1,11 +1,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createRequest,
   enqueueJob,
+  getJob,
   getRequest,
+  listAcquisitionItems,
   listJobsForRequest,
   listRequestEvents,
   openDatabase,
@@ -16,6 +18,7 @@ import { UnverifiedAcquisitionProvider, type ProviderBundle, type SayRequest } f
 import { loadConfig, type RequestStatus } from "@subwave-ai/shared";
 import type { WorkerContext } from "./context.js";
 import { handleDownload, handleSearchAcquisition } from "./processors/acquire.js";
+import { setFfprobeRunner } from "./processors/ffprobe.js";
 import { handleValidateFile } from "./processors/files.js";
 
 const VIA_ACQUISITION: RequestStatus[] = [
@@ -190,7 +193,16 @@ const HIT = {
 
 describe("A5 acquisition worker", () => {
   const cleanups: Array<() => void> = [];
+  beforeEach(() => {
+    setFfprobeRunner(async (_bin, filePath) => {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === ".flac") return { codecName: "flac", formatName: "flac" };
+      if (ext === ".mp3") return { codecName: "mp3", formatName: "mp3" };
+      return "failed";
+    });
+  });
   afterEach(() => {
+    setFfprobeRunner(undefined);
     while (cleanups.length) cleanups.pop()?.();
   });
 
@@ -224,16 +236,6 @@ describe("A5 acquisition worker", () => {
       order.push("get-search");
       return { id: "search-1", isComplete: true, state: "Completed", responses: [HIT] };
     };
-    setTransfers([
-      {
-        username: "peer-a",
-        filename: "\\\\music\\\\track.flac",
-        size: TRACK_SIZE,
-        state: "InProgress",
-        percentComplete: 10,
-      },
-    ]);
-
     const enq = await handleDownload(
       ctx,
       enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
@@ -247,6 +249,15 @@ describe("A5 acquisition worker", () => {
     const accepted = listRequestEvents(db, request.id).find((event) => event.to_status === "DOWNLOADING");
     expect(JSON.parse(accepted?.payload_json ?? "{}").event).toBe("REQUEST_ACCEPTED");
 
+    setTransfers([
+      {
+        username: "peer-a",
+        filename: "\\\\music\\\\track.flac",
+        size: TRACK_SIZE,
+        state: "InProgress",
+        percentComplete: 10,
+      },
+    ]);
     const poll = listJobsForRequest(db, request.id).filter((job) => job.type === "download").at(-1)!;
     const inProgress = await handleDownload(ctx, poll);
     expect(inProgress).toMatchObject({ waiting: true, reason: "transfer_in_progress" });
@@ -355,25 +366,27 @@ describe("A5 acquisition worker", () => {
     });
     const request = createRequest(db, { rawQuery: "x" });
     advance(db, request.id, "DOWNLOADING");
-    await expect(
-      handleDownload(
-        {
-          db,
-          config,
-          providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
-          workerId: "worker-test",
-        },
-        enqueueJob(db, {
-          type: "download",
-          requestId: request.id,
-          payload: {
-            enqueued: true,
-            selected: { username: "peer-a", filename: "\\\\music\\\\track.flac", size: 100 },
-          },
-        }),
-      ),
-    ).rejects.toThrow(/errored/i);
+    const job = enqueueJob(db, {
+      type: "download",
+      requestId: request.id,
+      payload: {
+        enqueued: true,
+        selected: { username: "peer-a", filename: "\\\\music\\\\track.flac", size: 100 },
+      },
+    });
+    const result = await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      job,
+    );
+    expect(result).toEqual({ failed: true, reason: "Completed, Errored" });
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("Completed, Errored");
+    expect(listJobsForRequest(db, request.id).filter((item) => item.type === "download")).toHaveLength(1);
   });
 
   it("rejects unrelated completed transfers (no false-complete)", async () => {
@@ -426,8 +439,112 @@ describe("A5 acquisition worker", () => {
     });
     const request = createRequest(db, { rawQuery: "x" });
     advance(db, request.id, "DOWNLOADING");
-    await expect(
-      handleDownload(
+    const result = await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "download",
+        requestId: request.id,
+        payload: {
+          enqueued: true,
+          selected: { username: "peer-a", filename: "\\\\music\\\\track.flac", size: 100 },
+        },
+      }),
+    );
+    expect(result).toEqual({ failed: true, reason: "download_not_found" });
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("download_not_found");
+  });
+
+  it("does not enqueue again when say throws after a successful enqueue", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, order, enqueued } = harness({ responses: [HIT] });
+    let says = 0;
+    radio.say = async (input) => {
+      says += 1;
+      order.push("say");
+      if (says === 1) throw new Error("say failed");
+      return { ok: true, mode: "styled", kind: input.kind ?? "dj-speak", spoken: input.text };
+    };
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const job = enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } });
+    await expect(handleDownload(ctx, job)).rejects.toThrow(/say failed/);
+    expect(enqueued).toHaveLength(1);
+    expect(listAcquisitionItems(db, request.id)[0]?.status).toBe("enqueued");
+    expect(JSON.parse(getJob(db, job.id)?.payload_json ?? "{}").enqueued).toBe(true);
+    expect(getRequest(db, request.id)?.status).toBe("QUEUED");
+
+    const retry = await handleDownload(ctx, getJob(db, job.id)!);
+    expect(retry).toMatchObject({ enqueued: true });
+    expect(enqueued).toHaveLength(1);
+    expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
+    expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
+  });
+
+  it("does not post again when a reclaimed lease finds the transfer already listed", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { acquisition, radio, library, order, enqueued, say } = harness({
+      responses: [HIT],
+      transfers: [
+        {
+          username: "peer-a",
+          filename: "\\\\music\\\\track.flac",
+          size: TRACK_SIZE,
+          state: "Queued",
+          id: "tx-existing",
+        },
+      ],
+    });
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "QUEUED", { artist: "Artist", title: "Track" });
+    const result = await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
+    );
+    expect(result).toMatchObject({ enqueued: true });
+    expect(enqueued).toEqual([]);
+    expect(order).not.toContain("enqueue");
+    expect(order).toContain("list");
+    expect(say).toHaveLength(1);
+    expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
+  });
+
+  it.each(["Completed, TimedOut", "Completed, Rejected", "Failed", "Completed, Errored", "Completed, Cancelled"])(
+    "fails a %s transfer without scheduling another download",
+    async (state) => {
+      const { config, db, cleanup } = fixture();
+      cleanups.push(cleanup);
+      const { acquisition, radio, library } = harness({
+        transfers: [
+          {
+            username: "peer-a",
+            filename: "\\\\music\\\\track.flac",
+            size: 100,
+            state,
+          },
+        ],
+      });
+      const request = createRequest(db, { rawQuery: "x" });
+      advance(db, request.id, "DOWNLOADING");
+      const result = await handleDownload(
         {
           db,
           config,
@@ -439,12 +556,120 @@ describe("A5 acquisition worker", () => {
           requestId: request.id,
           payload: {
             enqueued: true,
+            download_started_at: Date.now(),
             selected: { username: "peer-a", filename: "\\\\music\\\\track.flac", size: 100 },
           },
         }),
-      ),
-    ).rejects.toThrow(/download missing/);
-    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+      );
+      expect(result).toEqual({ failed: true, reason: state });
+      expect(getRequest(db, request.id)?.status).toBe("FAILED");
+      expect(getRequest(db, request.id)?.error).toBe(state);
+      expect(listJobsForRequest(db, request.id).filter((job) => job.type === "download")).toHaveLength(1);
+    },
+  );
+
+  it("fails download_timeout without calling slskd again", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    config.acquisition.download_timeout_ms = 1_000;
+    const { acquisition, radio, library, order } = harness({
+      transfers: [
+        {
+          username: "peer-a",
+          filename: "\\\\music\\\\track.flac",
+          size: 100,
+          state: "InProgress",
+        },
+      ],
+    });
+    const request = createRequest(db, { rawQuery: "x" });
+    advance(db, request.id, "DOWNLOADING");
+    const result = await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "download",
+        requestId: request.id,
+        payload: {
+          enqueued: true,
+          download_started_at: Date.now() - 60_000,
+          selected: { username: "peer-a", filename: "\\\\music\\\\track.flac", size: 100 },
+        },
+      }),
+    );
+    expect(result).toEqual({ failed: true, reason: "download_timeout" });
+    expect(getRequest(db, request.id)?.error).toBe("download_timeout");
+    expect(order).toEqual([]);
+    expect(listJobsForRequest(db, request.id).filter((job) => job.type === "download")).toHaveLength(1);
+  });
+
+  it("resolves a file saved under the remote parent folder", async () => {
+    const { config, db, downloads, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const remote = "\\\\music\\\\Album\\\\track.flac";
+    mkdirSync(path.join(downloads, "Album"));
+    writeFileSync(path.join(downloads, "Album", "track.flac"), Buffer.alloc(100));
+    const { acquisition, radio, library } = harness({
+      transfers: [{ username: "peer-a", filename: remote, size: 100, state: "Completed, Succeeded" }],
+    });
+    const request = createRequest(db, { rawQuery: "x" });
+    advance(db, request.id, "DOWNLOADING");
+    const result = await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "download",
+        requestId: request.id,
+        payload: {
+          enqueued: true,
+          download_started_at: Date.now(),
+          selected: { username: "peer-a", filename: remote, size: 100 },
+        },
+      }),
+    );
+    expect(result).toMatchObject({ completed: true, basename: "track.flac" });
+    const validate = listJobsForRequest(db, request.id).find((job) => job.type === "validate_file");
+    expect(JSON.parse(validate?.payload_json ?? "{}").filename).toBe(path.join("Album", "track.flac"));
+  });
+
+  it("maps a container download path onto paths.downloads", async () => {
+    const { config, db, downloads, cleanup } = fixture();
+    cleanups.push(cleanup);
+    config.acquisition.downloads_path_prefix = "/downloads";
+    const remote = "/downloads/Album/track.flac";
+    mkdirSync(path.join(downloads, "Album"));
+    writeFileSync(path.join(downloads, "Album", "track.flac"), Buffer.alloc(80));
+    const { acquisition, radio, library } = harness({
+      transfers: [{ username: "peer-a", filename: remote, size: 80, state: "Completed, Succeeded" }],
+    });
+    const request = createRequest(db, { rawQuery: "x" });
+    advance(db, request.id, "DOWNLOADING");
+    const result = await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "download",
+        requestId: request.id,
+        payload: {
+          enqueued: true,
+          download_started_at: Date.now(),
+          selected: { username: "peer-a", filename: remote, size: 80 },
+        },
+      }),
+    );
+    expect(result).toMatchObject({ completed: true, path: path.join(downloads, "Album", "track.flac") });
   });
 
   it("enqueues the normal-length remix and records the score breakdown", async () => {

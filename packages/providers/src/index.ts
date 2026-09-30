@@ -52,6 +52,7 @@ export {
   observedTransferId,
   isTransferSucceeded,
   isTransferErrored,
+  isTransferTerminalFailure,
   isTransferInProgress,
 } from "./acquisition/correlate.js";
 export type { TransferMatchTarget, CorrelatedTransfer } from "./acquisition/correlate.js";

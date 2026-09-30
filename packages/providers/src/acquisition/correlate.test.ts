@@ -4,6 +4,7 @@ import {
   isTransferErrored,
   isTransferInProgress,
   isTransferSucceeded,
+  isTransferTerminalFailure,
   observedTransferId,
 } from "./correlate.js";
 
@@ -15,6 +16,11 @@ describe("transfer state helpers", () => {
     expect(isTransferErrored("Completed, Errored")).toBe(true);
     expect(isTransferInProgress("InProgress")).toBe(true);
     expect(isTransferInProgress("Completed, Succeeded")).toBe(false);
+    for (const state of ["Completed, TimedOut", "Completed, Rejected", "Failed", "Completed, Errored", "Cancelled"]) {
+      expect(isTransferTerminalFailure(state)).toBe(true);
+      expect(isTransferInProgress(state)).toBe(false);
+      expect(isTransferSucceeded(state)).toBe(false);
+    }
   });
 });
 
@@ -55,6 +61,23 @@ describe("findCorrelatedTransfer", () => {
       { username: "peer-a", filename: "\\\\music\\\\a.flac", size: 20_000_000, state: "Completed, Succeeded", id: "right" },
     ];
     expect(findCorrelatedTransfer(snapshot, { ...target, id: "right" })?.id).toBe("right");
+  });
+
+  it("does not accept a transfer id whose username or size differs", () => {
+    const snapshot = [
+      { username: "other", filename: "\\\\music\\\\a.flac", size: 20_000_000, state: "Queued", id: "same-id" },
+      { username: "peer-a", filename: "\\\\music\\\\a.flac", size: 1, state: "Queued", id: "size-id" },
+    ];
+    expect(findCorrelatedTransfer(snapshot, { ...target, id: "same-id" })).toBeNull();
+    expect(findCorrelatedTransfer(snapshot, { ...target, id: "size-id" })).toBeNull();
+  });
+
+  it("returns null when two rows share filename and size", () => {
+    const snapshot = [
+      { username: "peer-a", filename: "\\\\music\\\\a.flac", size: 20_000_000, state: "Queued", id: "one" },
+      { username: "peer-a", filename: "\\\\music\\\\a.flac", size: 20_000_000, state: "InProgress", id: "two" },
+    ];
+    expect(findCorrelatedTransfer(snapshot, target)).toBeNull();
   });
 
   it("returns null when only unrelated transfers exist", () => {

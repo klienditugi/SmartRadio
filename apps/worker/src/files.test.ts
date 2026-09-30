@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRequest,
   enqueueJob,
@@ -15,6 +15,7 @@ import {
 import type { ProviderBundle } from "@subwave-ai/providers";
 import { loadConfig, type RequestStatus } from "@subwave-ai/shared";
 import type { WorkerContext } from "./context.js";
+import { setFfprobeRunner, type ProbeInfo } from "./processors/ffprobe.js";
 import { handleImportLibrary, handleValidateFile } from "./processors/files.js";
 
 const TO_DOWNLOAD_COMPLETE: RequestStatus[] = [
@@ -184,9 +185,20 @@ function safeDownload(ctx: WorkerContext, filename: string): string {
   return path.join(ctx.config.paths.downloads, filename);
 }
 
+function matchingProbe(filePath: string): ProbeInfo {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".mp3") return { codecName: "mp3", formatName: "mp3", durationSeconds: 180 };
+  if (ext === ".flac") return { codecName: "flac", formatName: "flac", durationSeconds: 180 };
+  return { codecName: "unknown", formatName: "unknown" };
+}
+
 describe("file moves", () => {
   const cleanups: Array<() => void> = [];
+  beforeEach(() => {
+    setFfprobeRunner(async (_bin, filePath) => matchingProbe(filePath));
+  });
   afterEach(() => {
+    setFfprobeRunner(undefined);
     vi.restoreAllMocks();
     while (cleanups.length) cleanups.pop()?.();
   });
@@ -320,5 +332,82 @@ describe("file moves", () => {
     expect(getRequest(db, request.id)?.error).toBe("library file already exists: track.mp3");
     expect(readFileSync(path.join(library, "track.mp3"), "utf8")).toBe("already-there");
     expect(readFileSync(path.join(staging, "track.mp3"), "utf8")).toBe("incoming");
+  });
+
+  it("fails validation when ffprobe is missing and leaves the download in place", async () => {
+    const { ctx, db, downloads, cleanup } = fixture();
+    cleanups.push(cleanup);
+    setFfprobeRunner(async () => "unavailable");
+    mkdirSync(downloads, { recursive: true });
+    writeFileSync(path.join(downloads, "track.mp3"), "audio");
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "DOWNLOAD_COMPLETE");
+    await expect(
+      handleValidateFile(
+        ctx,
+        enqueueJob(db, { type: "validate_file", requestId: request.id, payload: { filename: "track.mp3", size: 5 } }),
+      ),
+    ).rejects.toThrow(/ffprobe_unavailable/);
+    expect(getRequest(db, request.id)?.error).toBe("ffprobe_unavailable");
+    expect(readFileSync(path.join(downloads, "track.mp3"), "utf8")).toBe("audio");
+    expect(listJobsForRequest(db, request.id).some((job) => job.type === "import_library")).toBe(false);
+  });
+
+  it("fails validation when the codec does not match the extension", async () => {
+    const { ctx, db, downloads, cleanup } = fixture();
+    cleanups.push(cleanup);
+    setFfprobeRunner(async () => ({ codecName: "aac", formatName: "mov,mp4,m4a" }));
+    mkdirSync(downloads, { recursive: true });
+    writeFileSync(path.join(downloads, "track.mp3"), "audio");
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "DOWNLOAD_COMPLETE");
+    await expect(
+      handleValidateFile(
+        ctx,
+        enqueueJob(db, { type: "validate_file", requestId: request.id, payload: { filename: "track.mp3", size: 5 } }),
+      ),
+    ).rejects.toThrow(/ffprobe_format_mismatch/);
+    expect(readFileSync(path.join(downloads, "track.mp3"), "utf8")).toBe("audio");
+  });
+
+  it("fails validation when the probed duration is outside the selected length", async () => {
+    const { ctx, db, downloads, cleanup } = fixture();
+    cleanups.push(cleanup);
+    setFfprobeRunner(async () => ({ codecName: "mp3", formatName: "mp3", durationSeconds: 400 }));
+    mkdirSync(downloads, { recursive: true });
+    writeFileSync(path.join(downloads, "track.mp3"), "audio");
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "DOWNLOAD_COMPLETE");
+    await expect(
+      handleValidateFile(
+        ctx,
+        enqueueJob(db, {
+          type: "validate_file",
+          requestId: request.id,
+          payload: { filename: "track.mp3", size: 5, duration_seconds: 180 },
+        }),
+      ),
+    ).rejects.toThrow(/ffprobe_duration_mismatch/);
+    expect(readFileSync(path.join(downloads, "track.mp3"), "utf8")).toBe("audio");
+  });
+
+  it("accepts a probed duration within two seconds of the selected length", async () => {
+    const { ctx, db, downloads, staging, cleanup } = fixture();
+    cleanups.push(cleanup);
+    setFfprobeRunner(async () => ({ codecName: "mp3", formatName: "mp3", durationSeconds: 181.5 }));
+    mkdirSync(downloads, { recursive: true });
+    writeFileSync(path.join(downloads, "track.mp3"), "audio");
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "DOWNLOAD_COMPLETE");
+    await handleValidateFile(
+      ctx,
+      enqueueJob(db, {
+        type: "validate_file",
+        requestId: request.id,
+        payload: { filename: "track.mp3", size: 5, duration_seconds: 180 },
+      }),
+    );
+    expect(readFileSync(path.join(staging, "track.mp3"), "utf8")).toBe("audio");
+    expect(existsSync(path.join(downloads, "track.mp3"))).toBe(false);
   });
 });

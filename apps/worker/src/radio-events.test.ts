@@ -208,7 +208,7 @@ describe("A4 radio events", () => {
       workerId: "worker-test",
     };
     await handleDownload(ctx, job);
-    expect(order).toEqual(["enqueue", "say"]);
+    expect(order).toEqual(["list", "enqueue", "say"]);
     expect(say).toEqual([
       {
         text: "REQUEST_ACCEPTED. Requester: Alice. Track: Artist — Track. Acquisition has started.",
@@ -311,7 +311,7 @@ describe("A4 radio events", () => {
     cleanups.push(cleanup);
     const scanCalls: string[] = [];
     const { radio, library, acquisition, order, say, queued } = harness({
-      search: { results: [{ id: "song-1", title: "Track", artist: "Artist", album: "LP" }] },
+      search: { results: [{ id: "song-1", title: "Track", artist: "Artist", album: "LP", path: "track.mp3" }] },
       scanCalls,
     });
     const request = createRequest(db, { rawQuery: "Artist - Track" });
@@ -398,7 +398,7 @@ describe("A4 radio events", () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const { radio, library, acquisition, order } = harness({
-      search: { results: [{ id: "song-9", title: "Blocked" }] },
+      search: { results: [{ id: "song-9", title: "Blocked", path: "blocked.mp3" }] },
       queueError: new NeverPlayError("blocked"),
     });
     const request = createRequest(db, { rawQuery: "blocked" });
@@ -410,7 +410,11 @@ describe("A4 radio events", () => {
         providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
         workerId: "worker-test",
       },
-      enqueueJob(db, { type: "queue_radio", requestId: request.id, payload: { track_ready: true } }),
+      enqueueJob(db, {
+        type: "queue_radio",
+        requestId: request.id,
+        payload: { track_ready: true, filename: "blocked.mp3" },
+      }),
     );
     expect(order).toEqual(["search", "say", "queue"]);
     expect(result).toEqual({ queued: false, never_play: true });
@@ -549,6 +553,84 @@ describe("A4 radio events", () => {
     const types = listJobsForRequest(db, request.id).map((row) => row.type);
     expect(types).toEqual(["queue_radio"]);
     expect(await claimAndRun(ctx)).toBe(false);
+  });
+
+  it("queues the search hit that matches the imported file, not the first hit", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { radio, library, acquisition, order, queued } = harness({
+      search: {
+        results: [
+          { id: "other", title: "Other", artist: "Artist", path: "other.mp3" },
+          { id: "ours", title: "Track", artist: "Artist", album: "LP", path: "Album/track.mp3" },
+        ],
+      },
+    });
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "IMPORTING", { artist: "Artist", title: "Track" });
+    const result = await handleQueueRadio(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "queue_radio",
+        requestId: request.id,
+        payload: { track_ready: true, filename: "track.mp3", search_wait_started_at: Date.now() },
+      }),
+    );
+    expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
+    expect(queued).toEqual([{ id: "ours", title: "Track", artist: "Artist", album: "LP" }]);
+    expect(typeof (queued[0] as { id: unknown }).id).toBe("string");
+    expect(order).toEqual(["search", "say", "queue"]);
+  });
+
+  it("fails handoff_no_match when no search hit is the imported file and does not queue", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { radio, library, acquisition, order, say, queued } = harness({
+      search: {
+        results: [
+          { id: "other", title: "Other", path: "other.mp3" },
+          { id: "also", title: "Track", artist: "Artist", path: "nope.mp3" },
+        ],
+      },
+    });
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    advance(db, request.id, "IMPORTING", { artist: "Artist", title: "Track" });
+    const libraryFile = path.join(config.paths.library, "track.mp3");
+    mkdirSync(config.paths.library, { recursive: true });
+    writeFileSync(libraryFile, "kept-in-library");
+    config.radio.search_visible_timeout_ms = 60_000;
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    const waiting = await handleQueueRadio(
+      ctx,
+      enqueueJob(db, {
+        type: "queue_radio",
+        requestId: request.id,
+        payload: { track_ready: true, filename: "track.mp3", search_wait_started_at: Date.now() - 5_000 },
+      }),
+    );
+    expect(waiting).toEqual({ waiting: true, reason: "not_search_visible" });
+    expect(queued).toEqual([]);
+    expect(say).toEqual([]);
+
+    config.radio.search_visible_timeout_ms = 1_000;
+    const follow = listJobsForRequest(db, request.id).at(-1)!;
+    const failed = await handleQueueRadio(ctx, follow);
+    expect(failed).toEqual({ failed: true, reason: "handoff_no_match" });
+    expect(getRequest(db, request.id)?.error).toBe("handoff_no_match");
+    expect(queued).toEqual([]);
+    expect(say).toEqual([]);
+    expect(order).toEqual(["search"]);
+    expect(readLibrary(libraryFile)).toBe("kept-in-library");
   });
 });
 

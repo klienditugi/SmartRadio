@@ -2,10 +2,13 @@
  * Correlate a selected search hit with GET /api/v0/transfers/downloads rows.
  *
  * Match order:
- * 1. `target.id` when a row has that id. This is a transfer id observed from the
- *    enqueue response or the transfers list, never a search response/file id.
+ * 1. `target.id` when a row has that id, and only when that row's username and
+ *    size also match. A transfer id with a different user or size is not a match.
+ *    This is a transfer id observed from the enqueue response or the transfers
+ *    list, never a search response/file id.
  * 2. Exact username, then the exact original filename (backslashes included) and
- *    equal size. If that filename is present but the size is missing or different,
+ *    equal size. Two rows with that same filename and size are ambiguous (no
+ *    match). If that filename is present but the size is missing or different,
  *    there is no match.
  * 3. Otherwise a case-insensitive basename match, and only when exactly one of
  *    that user's rows matches the basename AND the size. Rows without a size
@@ -94,9 +97,26 @@ export function isTransferErrored(state: string | undefined): boolean {
   return tokens.includes("errored") || (tokens.includes("completed") && tokens.includes("cancelled"));
 }
 
+/**
+ * Terminal slskd outcomes. Tokens are the flag names slskd prints
+ * (`Completed, TimedOut`), lowercased. `Failed` is included when that token
+ * is present. These stop polling and are not re-enqueued.
+ */
+export function isTransferTerminalFailure(state: string | undefined): boolean {
+  if (!state) return false;
+  const tokens = stateTokens(state);
+  return (
+    tokens.includes("errored") ||
+    tokens.includes("cancelled") ||
+    tokens.includes("timedout") ||
+    tokens.includes("rejected") ||
+    tokens.includes("failed")
+  );
+}
+
 export function isTransferInProgress(state: string | undefined): boolean {
   if (!state) return true;
-  if (isTransferSucceeded(state) || isTransferErrored(state)) return false;
+  if (isTransferSucceeded(state) || isTransferTerminalFailure(state)) return false;
   return true;
 }
 
@@ -170,13 +190,14 @@ export function findCorrelatedTransfer(
 
   if (target.id) {
     const byId = rows.find((row) => row.id === target.id);
-    if (byId) return byId;
+    if (byId && byId.user === target.username && byId.size === target.size) return byId;
   }
 
   const userRows = rows.filter((row) => row.user === target.username && row.filename);
   const exactName = userRows.filter((row) => row.filename === target.filename);
   const exactSized = exactName.filter((row) => row.size === target.size);
-  if (exactSized.length > 0) return exactSized[0] ?? null;
+  if (exactSized.length === 1) return exactSized[0] ?? null;
+  if (exactSized.length > 1) return null;
   // The original path was seen, but no row confirms the size. Do not fall through
   // to a different file that only shares a basename.
   if (exactName.length > 0) return null;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import {
   enqueueJob,
   getRequest,
@@ -6,12 +7,14 @@ import {
   listAcquisitionItems,
   transitionRequest,
   updateAcquisitionItem,
+  updateJobPayload,
+  type AcquisitionItemRow,
 } from "@subwave-ai/db";
 import {
   findCorrelatedTransfer,
   isSearchComplete,
-  isTransferErrored,
   isTransferSucceeded,
+  isTransferTerminalFailure,
   observedTransferId,
   resolveDownloadedFile,
   selectSearch,
@@ -34,10 +37,28 @@ type DownloadPayload = {
   enqueued?: boolean;
   /** Transfer id from the enqueue response, when that body included exactly one. */
   transferId?: string;
+  /** Set once enqueue has succeeded. Retries must not extend it. */
+  download_started_at?: number;
+  selection_score?: { breakdown: Record<string, number>; total: number; signals: unknown };
 };
 
 function acquisitionUnavailable(provider: AcquisitionProvider): boolean {
   return provider.kind === "unverified" || provider.verifyStatus !== "verified";
+}
+
+function recordFailure(
+  ctx: Parameters<JobHandler>[0],
+  requestId: string,
+  message: string,
+  detail?: Record<string, unknown>,
+): void {
+  transitionRequest(ctx.db, {
+    requestId,
+    to: "FAILED",
+    actor: ctx.workerId,
+    payload: { error: message, reason: message, ...detail },
+    patch: { error: message },
+  });
 }
 
 function fail(
@@ -46,14 +67,24 @@ function fail(
   message: string,
   detail?: Record<string, unknown>,
 ): never {
-  transitionRequest(ctx.db, {
-    requestId,
-    to: "FAILED",
-    actor: ctx.workerId,
-    payload: { error: message, ...detail },
-    patch: { error: message },
-  });
+  recordFailure(ctx, requestId, message, detail);
   throw new Error(message);
+}
+
+function itemSaysEnqueued(items: AcquisitionItemRow[], selected: SelectedSearchFile): boolean {
+  return items.some(
+    (item) => item.status === "enqueued" && item.remote_user === selected.username && item.filename === selected.filename,
+  );
+}
+
+/** A transfer `filename` that already lives under the configured container prefix. */
+function containerReportedPath(filename: string, prefix: string): string | undefined {
+  const trimmed = prefix.trim().replace(/[\\/]+$/, "");
+  if (!trimmed) return undefined;
+  const norm = filename.replaceAll("\\", "/");
+  const pref = trimmed.replaceAll("\\", "/");
+  if (norm === pref || norm.startsWith(`${pref}/`)) return filename;
+  return undefined;
 }
 
 function parsePayload(jobPayload: string | null): DownloadPayload {
@@ -147,12 +178,12 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     throw new Error("acquire_unavailable");
   }
 
-  const payload = parsePayload(job.payload_json);
+  let payload = parsePayload(job.payload_json);
   let selected = selectedFromPayload(payload);
-  let selectionScore: { breakdown: Record<string, number>; total: number; signals: unknown } | undefined;
+  let selectionScore = payload.selection_score;
 
   // --- Phase 1: poll search + select + enqueue (QUEUED) ---
-  if (request.status === "QUEUED" && !payload.enqueued) {
+  if (request.status === "QUEUED") {
     if (!selected) {
       if (!payload.searchId) {
         fail(ctx, request.id, "download job missing searchId or selected file");
@@ -207,8 +238,54 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     }
 
     const files = [{ filename: selected.filename, size: selected.size }];
-    const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(selected.username, files);
-    const transferId = observedTransferId(enqueuedBody, { filename: selected.filename, size: selected.size });
+    const alreadyEnqueued = payload.enqueued === true || itemSaysEnqueued(listAcquisitionItems(ctx.db, request.id), selected);
+    let transferId = payload.transferId;
+    if (!alreadyEnqueued) {
+      const snapshot = await ctx.providers.acquisition.listDownloads();
+      const existingTransfer = findCorrelatedTransfer(snapshot, {
+        username: selected.username,
+        filename: selected.filename,
+        size: selected.size,
+      });
+      if (existingTransfer) {
+        transferId = existingTransfer.id ?? transferId;
+      } else {
+        const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(selected.username, files);
+        transferId =
+          observedTransferId(enqueuedBody, { filename: selected.filename, size: selected.size }) ?? transferId;
+      }
+    }
+    const started =
+      typeof payload.download_started_at === "number" && Number.isFinite(payload.download_started_at)
+        ? payload.download_started_at
+        : Date.now();
+    const nextPayload: DownloadPayload = {
+      searchId: payload.searchId,
+      selected,
+      user: selected.username,
+      files,
+      enqueued: true,
+      download_started_at: started,
+      ...(transferId ? { transferId } : {}),
+      ...(selectionScore ? { selection_score: selectionScore } : {}),
+    };
+    const existing = listAcquisitionItems(ctx.db, request.id);
+    const itemId =
+      existing[0]?.id ??
+      insertAcquisitionItem(ctx.db, {
+        requestId: request.id,
+        providerId: "acquisition-slskd",
+        status: "enqueued",
+        remoteUser: selected.username,
+        filename: selected.filename,
+      });
+    updateAcquisitionItem(ctx.db, itemId, {
+      status: "enqueued",
+      remote_user: selected.username,
+      filename: selected.filename,
+    });
+    // Persist before say. A throw or a reclaimed lease must not POST again.
+    updateJobPayload(ctx.db, job.id, nextPayload);
     // REQUEST_ACCEPTED only after enqueue succeeds (A4).
     await ctx.providers.radio.say({
       text: requestAcceptedContext(ctx.db, request),
@@ -224,29 +301,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         ...(selectionScore ? { selection_score: selectionScore } : {}),
       },
     });
-    const existing = listAcquisitionItems(ctx.db, request.id);
-    const itemId =
-      existing[0]?.id ??
-      insertAcquisitionItem(ctx.db, {
-        requestId: request.id,
-        providerId: "acquisition-slskd",
-        status: "downloading",
-        remoteUser: selected.username,
-        filename: selected.filename,
-      });
-    updateAcquisitionItem(ctx.db, itemId, {
-      status: "enqueued",
-      remote_user: selected.username,
-      filename: selected.filename,
-    });
-    scheduleDownload(ctx, request.id, {
-      searchId: payload.searchId,
-      selected,
-      user: selected.username,
-      files,
-      enqueued: true,
-      ...(transferId ? { transferId } : {}),
-    });
+    scheduleDownload(ctx, request.id, nextPayload);
     return { enqueued: true, selected, ...(selectionScore ? { selection_score: selectionScore } : {}) };
   }
 
@@ -256,18 +311,18 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     fail(ctx, request.id, "download poll missing selected file correlation");
   }
 
-  const current = getRequest(ctx.db, request.id)!;
-  if (current.status === "QUEUED" && payload.enqueued) {
-    // Should already be DOWNLOADING; recover if needed.
-    transitionRequest(ctx.db, {
-      requestId: request.id,
-      to: "DOWNLOADING",
-      actor: ctx.workerId,
-      payload: { selected },
-    });
-  }
   if (getRequest(ctx.db, request.id)?.status !== "DOWNLOADING") {
     return { skipped: true, status: getRequest(ctx.db, request.id)?.status };
+  }
+
+  const timeoutMs = ctx.config.acquisition.download_timeout_ms;
+  const started = payload.download_started_at;
+  if (typeof started !== "number" || !Number.isFinite(started)) {
+    payload = { ...payload, selected, enqueued: true, download_started_at: Date.now() };
+    updateJobPayload(ctx.db, job.id, payload);
+  } else if (Date.now() - started >= timeoutMs) {
+    recordFailure(ctx, request.id, "download_timeout");
+    return { failed: true, reason: "download_timeout" };
   }
 
   const snapshot = await ctx.providers.acquisition.listDownloads();
@@ -309,8 +364,9 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     filename: transfer.filename ?? selected.filename,
   });
 
-  if (isTransferErrored(transfer.state)) {
-    fail(ctx, request.id, `transfer errored: ${transfer.state}`);
+  if (isTransferTerminalFailure(transfer.state)) {
+    recordFailure(ctx, request.id, transfer.state);
+    return { failed: true, reason: transfer.state };
   }
 
   if (!isTransferSucceeded(transfer.state)) {
@@ -318,9 +374,21 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     return { waiting: true, reason: "transfer_in_progress", state: transfer.state, progress: transfer.progress ?? null };
   }
 
-  const resolved = resolveDownloadedFile(ctx.config.paths.downloads, selected.filename, selected.size);
+  const remoteName = transfer.filename ?? selected.filename;
+  const expectedSize = transfer.size ?? selected.size;
+  const prefix = ctx.config.acquisition.downloads_path_prefix;
+  const resolved = resolveDownloadedFile(ctx.config.paths.downloads, remoteName, expectedSize, {
+    containerPrefix: prefix,
+    reportedPath: containerReportedPath(remoteName, prefix),
+  });
   if (!resolved) {
-    fail(ctx, request.id, `download missing under paths.downloads: ${selected.filename}`);
+    recordFailure(ctx, request.id, "download_not_found");
+    return { failed: true, reason: "download_not_found" };
+  }
+  const relative = path.relative(ctx.config.paths.downloads, resolved.absolutePath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    recordFailure(ctx, request.id, "download_not_found");
+    return { failed: true, reason: "download_not_found" };
   }
 
   updateAcquisitionItem(ctx.db, itemId, {
@@ -340,7 +408,14 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   enqueueJob(ctx.db, {
     type: "validate_file",
     requestId: request.id,
-    payload: { filename: resolved.basename, path: resolved.absolutePath, size: resolved.size },
+    payload: {
+      filename: relative,
+      path: resolved.absolutePath,
+      size: resolved.size,
+      ...(selected.durationSeconds !== undefined && selected.durationSeconds > 0
+        ? { duration_seconds: selected.durationSeconds }
+        : {}),
+    },
   });
   return {
     completed: true,
