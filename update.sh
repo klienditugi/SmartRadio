@@ -11,9 +11,14 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --force) FORCE=1; shift ;;
     -h|--help)
-      echo "Usage: ./update.sh [--force]"
-      echo "Pulls git, reinstalls deps, rebuilds the web UI, restarts units/compose."
-      echo "Does not install or update Ollama. Does not overwrite .env, secrets, or library files."
+      echo "Usage: sudo ./update.sh [--force]"
+      echo "Pulls git, reinstalls deps, rebuilds the web UI, and restarts the install mode already in use."
+      echo "systemd and Docker Compose are exclusive. A systemd install never starts the subwave-ai compose project."
+      echo "Docker used by another project (slskd's smartradio-slskd) does not select Compose."
+      echo "If the API port is held by anything other than the unit or container being restarted, this script stops and names that process. It does not kill it."
+      echo "--force does not switch install mode, kill processes, or overwrite .env, secrets, config, or data."
+      echo "When run as root, git (fetch, pull, and rev-parse), pnpm install, and the web build run as the owner of this directory."
+      echo "Does not install or update Ollama. Does not overwrite .env, secrets, config, or library files."
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -21,17 +26,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 never_touch_ollama_msg
-need_cmd git
 cd "${ROOT}"
-info "fetching origin"
-git fetch origin
-info "pulling current branch (rebase)"
-git pull --rebase --autostash origin "$(git rev-parse --abbrev-ref HEAD)" || warn "git pull failed — resolve locally and retry"
+update_git_checkout "${ROOT}"
 
-need_cmd node
-need_cmd pnpm
-pnpm install --frozen-lockfile
-pnpm --filter @subwave-ai/web build
+run_project_js_build "${ROOT}"
 
 if [[ -f "${ROOT}/.env" ]]; then
   load_env_file "${ROOT}/.env"
@@ -51,20 +49,15 @@ if [[ ! -f "${SECRETS_DIR}/verification_hmac_key" ]]; then
   info "created secrets/verification_hmac_key (stored test-connection HMAC; not the session secret)"
 fi
 
-if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^subwave-api.service'; then
-  if is_root; then
-    systemctl restart subwave-api.service subwave-worker.service
-    info "restarted systemd units"
-  else
-    warn "systemd units present; re-run as root to restart"
-  fi
-elif command -v docker >/dev/null 2>&1 && [[ -f "${ROOT}/deploy/docker-compose.yml" ]]; then
-  if docker compose ls >/dev/null 2>&1; then
-    docker compose -f "${ROOT}/deploy/docker-compose.yml" --env-file "${ROOT}/.env" up -d --build
-  fi
-else
-  info "no managed services detected; start with pnpm dev:api / pnpm dev:worker"
+if [[ "${FORCE}" -eq 1 ]]; then
+  info "--force does not switch install mode, kill processes, or overwrite .env, secrets, config, or data"
 fi
+
+# Mode comes from .subwave-install-mode, otherwise from installed unit files,
+# otherwise from an existing subwave-ai compose project. Docker merely being
+# installed is not a compose install. Never pipe systemctl into grep -q:
+# under pipefail that test can exit 141 (SIGPIPE) and fall through to Compose.
+restart_managed_services "${ROOT}"
 
 print_web_url
 info "update complete (Ollama untouched)"

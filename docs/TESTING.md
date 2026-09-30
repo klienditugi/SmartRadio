@@ -31,9 +31,12 @@ Happy-path ingest does **not** require SmartRadio to trigger a Navidrome scan (N
 
 ```bash
 bash -n install.sh update.sh uninstall.sh backup.sh restore.sh doctor.sh scripts/ops-common.sh deploy/slskd/install-slskd.sh
+bash scripts/test-update-mode.sh   # stubbed systemctl/docker; also run by pnpm test
 pnpm test   # includes scripts/ops-scripts.test.ts
 ./doctor.sh # when the API is not running, health is expected to FAIL
 ```
+
+`scripts/test-update-mode.sh` covers update mode selection. The old `systemctl list-unit-files | grep -q` test is false under `set -o pipefail` when the unit is present (SIGPIPE, exit 141). The harness reproduces that with a stub `systemctl` and a stub `docker`. The replacement is `systemctl list-unit-files --no-legend --no-pager subwave-api.service` with no pipe: exit status 0 and the unit name in the output. A systemd install then restarts units and does not run Compose. The same harness checks that a root update runs `pnpm install` and the web build as the owner of the clone, and chowns `node_modules` and `apps/web/dist` back to that owner without touching secrets, `.env`, config, or data. It also checks that a root update chowns `.git` only and runs every `git` command through `runuser` or `sudo -u`, including read-only `rev-parse` on the post-restart health-success and health-failure paths. A direct `git` invocation under that root run fails the test. A non-root update runs git directly and does not chown. A failed `systemctl restart` of either unit stops with that unit's name and `journalctl -u` / `systemctl status`, and does not start Compose.
 
 `install.sh --help` must mention that Ollama is never installed.
 

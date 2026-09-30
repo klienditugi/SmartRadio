@@ -5,6 +5,8 @@ coverage/
 .DS_Store
 .env
 .env.local
+# Written by install.sh / update.sh. systemd or compose. Not a secret.
+.subwave-install-mode
 data/
 *.sqlite
 *.sqlite-journal

@@ -25,7 +25,7 @@ done
 if command -v systemctl >/dev/null 2>&1; then
   if is_root; then
     for unit in subwave-api subwave-worker; do
-      if systemctl list-unit-files | grep -q "^${unit}.service"; then
+      if systemd_unit_loaded "${unit}.service"; then
         systemctl disable --now "${unit}.service" || true
         if [[ "${FORCE}" -eq 1 && -f "/etc/systemd/system/${unit}.service" ]]; then
           rm -f "/etc/systemd/system/${unit}.service"
@@ -35,7 +35,7 @@ if command -v systemctl >/dev/null 2>&1; then
     done
     systemctl daemon-reload || true
   else
-    warn "not root; cannot disable systemd units"
+    warn "not root; cannot disable systemd units. Re-run with sudo."
   fi
 fi
 
@@ -51,7 +51,7 @@ if [[ "${PURGE}" -eq 1 ]]; then
   fi
   warn "removing ${ROOT}/data ${ROOT}/secrets ${ROOT}/.env ${ROOT}/config/subwave.yaml"
   rm -rf "${ROOT}/data"
-  rm -f "${ROOT}/.env" "${ROOT}/config/subwave.yaml"
+  rm -f "${ROOT}/.env" "${ROOT}/config/subwave.yaml" "$(install_mode_file "${ROOT}")"
   find "${ROOT}/secrets" -type f ! -name README.md ! -name .gitkeep -delete 2>/dev/null || true
 fi
 
