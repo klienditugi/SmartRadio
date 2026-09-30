@@ -32,6 +32,10 @@ dump_case() {
   cat "${SYSTEMCTL_LOG}" >&2 || true
   echo "----- docker -----" >&2
   cat "${DOCKER_LOG}" >&2 || true
+  if [[ -f "${CASE}/git.log" ]]; then
+    echo "----- git -----" >&2
+    cat "${CASE}/git.log" >&2 || true
+  fi
 }
 
 prepare_case() {
@@ -217,7 +221,7 @@ EOF
   export SYSTEMCTL_LOAD_STATE=not-found
   export SYSTEMCTL_MAIN_PID=0
   export SYSTEMCTL_IS_ACTIVE=active
-  unset SUBWAVE_API_HOST SUBWAVE_CONFIG SS_OUTPUT SS_FAIL DOCKER_COMPOSE_LS DOCKER_PS_OUT DOCKER_INSPECT_PID PS_COMM_FOR_PID PS_COMM_PID SYSTEMCTL_SHOW_FAIL SYSTEMCTL_RESTART_FAIL CURL_CODE || true
+  unset SUBWAVE_API_HOST SUBWAVE_CONFIG SS_OUTPUT SS_FAIL DOCKER_COMPOSE_LS DOCKER_PS_OUT DOCKER_INSPECT_PID PS_COMM_FOR_PID PS_COMM_PID SYSTEMCTL_SHOW_FAIL SYSTEMCTL_RESTART_FAIL CURL_CODE SUBWAVE_UPDATE_REEXEC GIT_PULL_REWRITE_OPS GIT_PULL_FAIL GIT_FETCH_FAIL || true
 }
 
 run_scenario() {
@@ -536,6 +540,174 @@ EOF
   chmod +x "${CASE}/bin/stat" "${CASE}/bin/chown" "${CASE}/bin/runuser" "${CASE}/bin/sudo" "${CASE}/bin/pnpm" "${CASE}/bin/node" "${CASE}/bin/getent"
 }
 
+assert_out_count() {
+  local name="$1" needle="$2" expect="$3" got=""
+  got="$(grep -F -c -- "${needle}" <<< "${LAST_OUT}" || true)"
+  if [[ "${got}" -eq "${expect}" ]]; then
+    ok "${name}"
+  else
+    bad "${name} (found ${got}, expected ${expect})"
+    dump_case
+  fi
+}
+
+assert_log_count() {
+  local name="$1" file="$2" needle="$3" expect="$4" got="0"
+  if [[ -f "${file}" ]]; then
+    got="$(grep -F -c -- "${needle}" "${file}" || true)"
+  fi
+  if [[ "${got}" -eq "${expect}" ]]; then
+    ok "${name}"
+  else
+    bad "${name} (found ${got}, expected ${expect})"
+    dump_case
+  fi
+}
+
+stage_update_copy() {
+  mkdir -p "${CASE}/repo/scripts"
+  cp "${ROOT}/update.sh" "${CASE}/repo/update.sh"
+  cp "${ROOT}/scripts/ops-common.sh" "${CASE}/repo/scripts/ops-common.sh"
+  chmod +x "${CASE}/repo/update.sh"
+  export PNPM_LOG="${CASE}/pnpm.log"
+  : > "${PNPM_LOG}"
+  cat > "${CASE}/bin/node" << 'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  cat > "${CASE}/bin/pnpm" << 'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${PNPM_LOG}"
+exit 0
+EOF
+  chmod +x "${CASE}/bin/node" "${CASE}/bin/pnpm"
+}
+
+write_reexec_git_stub() {
+  export GIT_LOG="${CASE}/git.log"
+  : > "${GIT_LOG}"
+  cat > "${CASE}/bin/git" << 'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${GIT_LOG}"
+if [[ "$*" == *fetch* && -n "${GIT_FETCH_FAIL:-}" ]]; then
+  exit 1
+fi
+if [[ "$*" == *pull* ]]; then
+  if [[ -n "${GIT_PULL_REWRITE_OPS:-}" && -f "${GIT_PULL_REWRITE_OPS}" ]]; then
+    if ! grep -q 'PULLED_OPS_COMMON' "${GIT_PULL_REWRITE_OPS}"; then
+      printf '\n' >> "${GIT_PULL_REWRITE_OPS}"
+      cat >> "${GIT_PULL_REWRITE_OPS}" << 'END'
+# Appended by the update-mode harness to stand in for a pulled ops-common.sh.
+restart_managed_services() {
+  printf '%s\n' "PULLED_OPS_COMMON"
+  return 0
+}
+END
+    fi
+  fi
+  if [[ -n "${GIT_PULL_FAIL:-}" ]]; then
+    exit 1
+  fi
+fi
+if [[ "$*" == *rev-parse* ]]; then
+  if [[ "$*" == *--abbrev-ref* ]]; then
+    printf '%s\n' main
+  elif [[ "$*" == *--short* ]]; then
+    printf '%s\n' 0123456
+  else
+    printf '%s\n' 0123456789abcdef0123456789abcdef01234567
+  fi
+fi
+exit 0
+EOF
+  chmod +x "${CASE}/bin/git"
+}
+
+scenario_reexec_when_ops_common_changes() {
+  export DOCKER_COMPOSE_LS=subwave-ai
+  export STUB_UID=0
+  stage_update_copy
+  write_reexec_git_stub
+  export GIT_PULL_REWRITE_OPS="${CASE}/repo/scripts/ops-common.sh"
+  unset SUBWAVE_UPDATE_REEXEC || true
+  timeout 20 "${CASE}/repo/update.sh" --force
+}
+
+scenario_unchanged_pull_does_not_reexec() {
+  install_unit_files
+  export SYSTEMCTL_LOAD_STATE=loaded
+  export DOCKER_COMPOSE_LS=subwave-ai
+  export STUB_UID=0
+  stage_update_copy
+  write_reexec_git_stub
+  unset GIT_PULL_REWRITE_OPS || true
+  unset SUBWAVE_UPDATE_REEXEC || true
+  timeout 20 "${CASE}/repo/update.sh" --force
+}
+
+# Full HEAD printed by the re-exec git stub and by write_owner_stubs' runuser.
+REEXEC_HEAD_SHA=0123456789abcdef0123456789abcdef01234567
+STALE_HEAD_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+scenario_pull_fails_files_unchanged() {
+  export DOCKER_COMPOSE_LS=subwave-ai
+  export STUB_UID=0
+  stage_update_copy
+  write_reexec_git_stub
+  unset GIT_PULL_REWRITE_OPS || true
+  unset SUBWAVE_UPDATE_REEXEC || true
+  export GIT_PULL_FAIL=1
+  timeout 20 "${CASE}/repo/update.sh" --force
+}
+
+scenario_pull_fails_files_changed() {
+  export DOCKER_COMPOSE_LS=subwave-ai
+  export STUB_UID=0
+  stage_update_copy
+  write_reexec_git_stub
+  export GIT_PULL_REWRITE_OPS="${CASE}/repo/scripts/ops-common.sh"
+  unset SUBWAVE_UPDATE_REEXEC || true
+  export GIT_PULL_FAIL=1
+  timeout 20 "${CASE}/repo/update.sh" --force
+}
+
+scenario_fetch_fails() {
+  export DOCKER_COMPOSE_LS=subwave-ai
+  export STUB_UID=0
+  stage_update_copy
+  write_reexec_git_stub
+  unset GIT_PULL_REWRITE_OPS || true
+  unset SUBWAVE_UPDATE_REEXEC || true
+  export GIT_FETCH_FAIL=1
+  timeout 20 "${CASE}/repo/update.sh" --force
+}
+
+scenario_stale_reexec_still_pulls() {
+  local preset="$1"
+  install_unit_files
+  export SYSTEMCTL_LOAD_STATE=loaded
+  export DOCKER_COMPOSE_LS=subwave-ai
+  export STUB_UID=0
+  stage_update_copy
+  write_reexec_git_stub
+  unset GIT_PULL_REWRITE_OPS GIT_PULL_FAIL GIT_FETCH_FAIL || true
+  export SUBWAVE_UPDATE_REEXEC="${preset}"
+  timeout 20 "${CASE}/repo/update.sh" --force
+}
+
+scenario_matching_sha_skips_pull() {
+  install_unit_files
+  export SYSTEMCTL_LOAD_STATE=loaded
+  export DOCKER_COMPOSE_LS=subwave-ai
+  export STUB_UID=0
+  stage_update_copy
+  write_reexec_git_stub
+  write_owner_stubs grokbot
+  unset GIT_PULL_REWRITE_OPS GIT_PULL_FAIL GIT_FETCH_FAIL || true
+  export SUBWAVE_UPDATE_REEXEC="${REEXEC_HEAD_SHA}"
+  timeout 20 "${CASE}/repo/update.sh" --force
+}
+
 write_git_stub() {
   export GIT_LOG="${CASE}/git.log"
   : > "${GIT_LOG}"
@@ -646,6 +818,8 @@ grep -q 'write_install_mode' "${ROOT}/install.sh"
 ok "install.sh records the install mode"
 grep -q 'update_git_checkout' "${ROOT}/update.sh"
 ok "update.sh pulls through update_git_checkout"
+grep -q 'SUBWAVE_UPDATE_REEXEC' "${ROOT}/update.sh"
+ok "update.sh re-execs at most once after a pull"
 if grep -nE '^[[:space:]]*git (fetch|pull|checkout|reset|submodule)' "${ROOT}/update.sh"; then
   bad "update.sh still runs a git write directly"
 else
@@ -836,6 +1010,112 @@ assert_log_has "non-root runs pnpm install" "${CASE}/pnpm.log" "install --frozen
 assert_log_has "non-root runs the web build" "${CASE}/pnpm.log" "--filter @subwave-ai/web build"
 [[ ! -s "${CASE}/runuser.log" ]] && ok "non-root does not call runuser" || bad "non-root does not call runuser"
 [[ ! -s "${CASE}/chown.log" ]] && ok "non-root does not chown" || bad "non-root does not chown"
+
+prepare_case
+run_scenario "pull that changes ops-common re-execs the new code" ok scenario_reexec_when_ops_common_changes
+assert_out_count "re-exec prints one re-run line" "re-running ./update.sh" 1
+assert_out_has "re-exec line keeps --force" "re-running ./update.sh --force"
+assert_out_count "second pass sees --force" "--force does not switch install mode" 1
+assert_out_count "second pass starts from the top" "Ollama is an EXTERNAL service" 2
+assert_out_has "second pass runs the pulled ops-common" "PULLED_OPS_COMMON"
+assert_out_count "second pass skips pull for the pulled HEAD" "re-exec pass: skipping pull (${REEXEC_HEAD_SHA})" 1
+assert_log_count "re-exec fetches once" "${CASE}/git.log" "fetch origin" 1
+assert_log_count "re-exec pulls once" "${CASE}/git.log" "pull --rebase --autostash" 1
+assert_log_lacks "re-exec does not compose up" "${DOCKER_LOG}" " up "
+assert_log_lacks "re-exec does not restart systemd" "${SYSTEMCTL_LOG}" "restart "
+
+prepare_case
+run_scenario "unchanged pull does not re-exec" ok scenario_unchanged_pull_does_not_reexec
+assert_out_count "unchanged pull does not print a re-run line" "re-running ./update.sh" 0
+assert_out_count "unchanged pull runs the script once" "Ollama is an EXTERNAL service" 1
+assert_out_count "unchanged pull does not run a pulled override" "PULLED_OPS_COMMON" 0
+assert_out_has "unchanged pull still honors --force" "--force does not switch install mode"
+assert_log_count "unchanged pull fetches once" "${CASE}/git.log" "fetch origin" 1
+assert_log_count "unchanged pull pulls once" "${CASE}/git.log" "pull --rebase --autostash" 1
+assert_both_units_restarted "unchanged pull restarts systemd in this process"
+assert_log_lacks "unchanged pull does not compose up" "${DOCKER_LOG}" " up "
+
+assert_update_stopped_before_restart() {
+  local name="$1"
+  assert_err_has "${name} restarted nothing" "Nothing was restarted."
+  assert_out_count "${name} does not re-exec" "re-running ./update.sh" 0
+  assert_out_count "${name} does not print the re-exec skip line" "re-exec pass:" 0
+  assert_out_count "${name} does not start a second pass" "Ollama is an EXTERNAL service" 1
+  assert_out_count "${name} does not run pulled ops-common" "PULLED_OPS_COMMON" 0
+  assert_out_count "${name} does not build" "installing dependencies" 0
+  assert_out_count "${name} does not report success" "update complete" 0
+  if [[ ! -s "${CASE}/pnpm.log" ]]; then
+    ok "${name} does not run pnpm"
+  else
+    bad "${name} does not run pnpm"
+  fi
+  assert_log_lacks "${name} does not restart" "${SYSTEMCTL_LOG}" "restart "
+  assert_log_lacks "${name} does not compose up" "${DOCKER_LOG}" " up "
+}
+
+prepare_case
+run_scenario "failed pull with unchanged files stops" fail scenario_pull_fails_files_unchanged
+assert_err_has "unchanged failed pull names git pull" "git pull failed"
+assert_update_stopped_before_restart "unchanged failed pull"
+assert_log_count "unchanged failed pull fetches once" "${CASE}/git.log" "fetch origin" 1
+assert_log_count "unchanged failed pull does not pull again" "${CASE}/git.log" "pull --rebase --autostash" 1
+
+prepare_case
+run_scenario "failed pull with changed files does not re-exec" fail scenario_pull_fails_files_changed
+assert_err_has "changed failed pull names git pull" "git pull failed"
+assert_update_stopped_before_restart "changed failed pull"
+assert_log_count "changed failed pull fetches once" "${CASE}/git.log" "fetch origin" 1
+assert_log_count "changed failed pull does not pull again" "${CASE}/git.log" "pull --rebase --autostash" 1
+if grep -q 'PULLED_OPS_COMMON' "${CASE}/repo/scripts/ops-common.sh"; then
+  ok "changed failed pull left the half-pulled ops-common on disk"
+else
+  bad "changed failed pull left the half-pulled ops-common on disk"
+fi
+
+prepare_case
+run_scenario "failed fetch stops before pull" fail scenario_fetch_fails
+assert_err_has "failed fetch names git fetch" "git fetch failed"
+assert_update_stopped_before_restart "failed fetch"
+assert_log_count "failed fetch fetches once" "${CASE}/git.log" "fetch origin" 1
+assert_log_count "failed fetch does not pull" "${CASE}/git.log" "pull --rebase --autostash" 0
+
+prepare_case
+run_scenario "SUBWAVE_UPDATE_REEXEC=0 still fetches and pulls" ok scenario_stale_reexec_still_pulls 0
+assert_err_has "reexec 0 is ignored as stale" "stale SUBWAVE_UPDATE_REEXEC value is being ignored (0)"
+assert_out_count "reexec 0 does not skip" "re-exec pass:" 0
+assert_log_count "reexec 0 fetches" "${CASE}/git.log" "fetch origin" 1
+assert_log_count "reexec 0 pulls" "${CASE}/git.log" "pull --rebase --autostash" 1
+assert_both_units_restarted "reexec 0 still restarts systemd"
+assert_log_lacks "reexec 0 does not compose up" "${DOCKER_LOG}" " up "
+
+prepare_case
+run_scenario "old SUBWAVE_UPDATE_REEXEC sha still fetches and pulls" ok scenario_stale_reexec_still_pulls "${STALE_HEAD_SHA}"
+assert_err_has "old sha is ignored as stale" "stale SUBWAVE_UPDATE_REEXEC value is being ignored (${STALE_HEAD_SHA})"
+assert_out_count "old sha does not skip" "re-exec pass:" 0
+assert_log_count "old sha fetches" "${CASE}/git.log" "fetch origin" 1
+assert_log_count "old sha pulls" "${CASE}/git.log" "pull --rebase --autostash" 1
+assert_both_units_restarted "old sha still restarts systemd"
+assert_log_lacks "old sha does not compose up" "${DOCKER_LOG}" " up "
+
+prepare_case
+run_scenario "matching HEAD sha skips the pull" ok scenario_matching_sha_skips_pull
+assert_out_has "matching sha prints the skip line" "re-exec pass: skipping pull (${REEXEC_HEAD_SHA})"
+assert_out_count "matching sha runs once" "Ollama is an EXTERNAL service" 1
+if [[ "${LAST_ERR}" == *stale\ SUBWAVE_UPDATE_REEXEC* ]]; then
+  bad "matching sha warns about a stale value"
+else
+  ok "matching sha does not warn about a stale value"
+fi
+assert_log_count "matching sha does not fetch" "${CASE}/git.log" "fetch origin" 0
+assert_log_count "matching sha does not pull" "${CASE}/git.log" "pull --rebase --autostash" 0
+assert_log_has "matching sha reads HEAD through runuser" "${CASE}/runuser.log" "rev-parse HEAD"
+if [[ ! -s "${CASE}/git.log" ]]; then
+  ok "matching sha does not invoke git directly"
+else
+  bad "matching sha does not invoke git directly"
+fi
+assert_both_units_restarted "matching sha still restarts systemd"
+assert_log_lacks "matching sha does not compose up" "${DOCKER_LOG}" " up "
 
 prepare_case
 run_scenario "proc net tcp is quiet when ss is absent" ok scenario_proc_fallback_quiet

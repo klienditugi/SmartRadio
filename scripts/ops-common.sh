@@ -720,15 +720,20 @@ chown_git_dir_to_repo_owner() {
 
 # fetch/pull (and the rev-parse they need) write or refresh .git. Run them as
 # the clone owner so a later non-root pull is not blocked by root-owned files.
+# A failed fetch or pull stops here. Callers must not build, re-exec, or restart.
 update_git_checkout() {
   local root="$1" branch=""
   need_cmd git
   chown_git_dir_to_repo_owner "${root}"
   info "fetching origin"
-  run_as_repo_owner "${root}" git -C "${root}" fetch origin
+  if ! run_as_repo_owner "${root}" git -C "${root}" fetch origin; then
+    die "git fetch failed. Nothing was restarted."
+  fi
   branch="$(run_as_repo_owner "${root}" git -C "${root}" rev-parse --abbrev-ref HEAD)"
   info "pulling current branch (rebase)"
-  run_as_repo_owner "${root}" git -C "${root}" pull --rebase --autostash origin "${branch}" || warn "git pull failed — resolve locally and retry"
+  if ! run_as_repo_owner "${root}" git -C "${root}" pull --rebase --autostash origin "${branch}"; then
+    die "git pull failed. Nothing was restarted."
+  fi
 }
 
 run_project_js_build() {
