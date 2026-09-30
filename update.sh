@@ -6,6 +6,77 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/ops-common.sh"
 
+# Paths this process has already read. git pull can replace them on disk
+# while this shell keeps the old script body and the old sourced functions.
+# The next update after a fix would otherwise finish on the pre-pull code.
+update_loaded_scripts() {
+  local root="$1" script="" line="" path=""
+  script="${root}/update.sh"
+  printf '%s\n' "${script}"
+  printf '%s\n' "${root}/scripts/ops-common.sh"
+  [[ -f "${script}" ]] || return 0
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+    [[ "${line}" =~ ^[[:space:]]*(source|\.)[[:space:]]+([^[:space:];#]+) ]] || continue
+    path="${BASH_REMATCH[2]}"
+    path="${path#\"}"
+    path="${path%\"}"
+    path="${path#\'}"
+    path="${path%\'}"
+    path="${path//\$\{ROOT\}/${root}}"
+    path="${path//\$ROOT/${root}}"
+    [[ -n "${path}" ]] || continue
+    printf '%s\n' "${path}"
+  done < "${script}"
+}
+
+update_script_fingerprint() {
+  local root="$1" file="" hash=""
+  while IFS= read -r file; do
+    [[ -n "${file}" ]] || continue
+    if [[ -f "${file}" ]]; then
+      hash="$(sha256sum -- "${file}")"
+      hash="${hash%% *}"
+    else
+      hash="absent"
+    fi
+    printf '%s %s\n' "${hash}" "${file}"
+  done < <(update_loaded_scripts "${root}" | awk '!seen[$0]++')
+}
+
+# Hash before the pull and again after it. Re-exec at most once so a later
+# pull cannot loop. SUBWAVE_UPDATE_REEXEC skips fetch, pull, and this check.
+reexec_if_update_scripts_changed() {
+  local root="$1"
+  shift
+  local before="" after=""
+  need_cmd sha256sum
+  before="$(update_script_fingerprint "${root}")"
+  update_git_checkout "${root}"
+  after="$(update_script_fingerprint "${root}")"
+  [[ "${before}" == "${after}" ]] && return 0
+  if [[ "$#" -gt 0 ]]; then
+    info "git pull changed update.sh or a script it sources; re-running ./update.sh $*"
+  else
+    info "git pull changed update.sh or a script it sources; re-running ./update.sh"
+  fi
+  if [[ ! -f "${root}/update.sh" || ! -x "${root}/update.sh" ]]; then
+    die "failed to re-exec ${root}/update.sh"
+  fi
+  export SUBWAVE_UPDATE_REEXEC=1
+  if [[ "$#" -gt 0 ]]; then
+    exec "${root}/update.sh" "$@"
+  else
+    exec "${root}/update.sh"
+  fi
+  die "failed to re-exec ${root}/update.sh"
+}
+
+ORIGINAL_ARGS=()
+if [[ "$#" -gt 0 ]]; then
+  ORIGINAL_ARGS=("$@")
+fi
+
 FORCE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,6 +89,7 @@ while [[ $# -gt 0 ]]; do
       echo "If the API port is held by anything other than the unit or container being restarted, this script stops and names that process. It does not kill it."
       echo "--force does not switch install mode, kill processes, or overwrite .env, secrets, config, or data."
       echo "When run as root, git (fetch, pull, and rev-parse), pnpm install, and the web build run as the owner of this directory."
+      echo "If git pull changes this script or a script it sources, the pulled ./update.sh is re-run once with the same arguments. That second run does not fetch or pull again."
       echo "Does not install or update Ollama. Does not overwrite .env, secrets, config, or library files."
       exit 0
       ;;
@@ -27,7 +99,15 @@ done
 
 never_touch_ollama_msg
 cd "${ROOT}"
-update_git_checkout "${ROOT}"
+# Set means the parent already fetched, pulled, and decided to re-exec.
+# Skip all three so this process cannot pull again and loop.
+if [[ -z "${SUBWAVE_UPDATE_REEXEC:-}" ]]; then
+  if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
+    reexec_if_update_scripts_changed "${ROOT}" "${ORIGINAL_ARGS[@]}"
+  else
+    reexec_if_update_scripts_changed "${ROOT}"
+  fi
+fi
 
 run_project_js_build "${ROOT}"
 
