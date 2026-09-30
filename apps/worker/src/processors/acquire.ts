@@ -74,6 +74,12 @@ function fail(
   throw new Error(message);
 }
 
+/** Search `length` in seconds. Missing, null, and non-positive values are not a length. */
+function hasPositiveLength(selected: SelectedSearchFile): boolean {
+  const length = (selected as { durationSeconds?: unknown }).durationSeconds;
+  return typeof length === "number" && Number.isFinite(length) && length > 0;
+}
+
 function itemSaysEnqueued(items: AcquisitionItemRow[], selected: SelectedSearchFile): boolean {
   return items.some(
     (item) => item.status === "enqueued" && item.remote_user === selected.username && item.filename === selected.filename,
@@ -244,6 +250,10 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       });
       if (existingTransfer) {
         transferId = existingTransfer.id ?? transferId;
+      } else if (!hasPositiveLength(selected)) {
+        // The selector is frozen and is not asked for another file.
+        recordFailure(ctx, request.id, "selected_missing_length");
+        return { failed: true, reason: "selected_missing_length" };
       } else {
         const enqueuedBody = await ctx.providers.acquisition.enqueueDownload(selected.username, files);
         transferId =

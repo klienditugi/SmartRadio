@@ -200,7 +200,11 @@ describe("A4 radio events", () => {
     const job = enqueueJob(db, {
       type: "download",
       requestId: request.id,
-      payload: { user: "peer", files: [{ filename: "track.flac", size: 12 }] },
+      payload: {
+        user: "peer",
+        files: [{ filename: "track.flac", size: 12 }],
+        selected: { username: "peer", filename: "track.flac", size: 12, durationSeconds: 180 },
+      },
     });
     const ctx: WorkerContext = {
       db,

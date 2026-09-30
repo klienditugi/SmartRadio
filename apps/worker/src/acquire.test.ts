@@ -188,7 +188,7 @@ const TRACK_SIZE = 8 * 1024 * 1024;
 const HIT = {
   username: "peer-a",
   id: "resp-a",
-  files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE, extension: "flac", id: 7 }],
+  files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE, extension: "flac", id: 7, length: 180 }],
 };
 
 describe("A5 acquisition worker", () => {
@@ -737,6 +737,72 @@ describe("A5 acquisition worker", () => {
       `download_not_found: tried ${path.join(downloads, folder, filename)}`,
     );
     expect(existsSync(path.join(downloads, filename))).toBe(true);
+  });
+
+  it("fails selected_missing_length before the enqueue POST and does not try another file", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const missing = "\\\\music\\\\Remix\\\\Get Lucky (Remix).flac";
+    const other = "\\\\music\\\\Album\\\\Get Lucky.flac";
+    const { acquisition, radio, library, order, say, enqueued } = harness({
+      responses: [
+        {
+          username: "remix-peer",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 9_000_000,
+          files: [
+            {
+              filename: missing,
+              size: 30_000_000,
+              extension: "flac",
+              bitDepth: 24,
+              sampleRate: 48000,
+            },
+          ],
+        },
+        {
+          username: "album-peer",
+          hasFreeUploadSlot: true,
+          queueLength: 2,
+          uploadSpeed: 100_000,
+          files: [
+            {
+              filename: other,
+              size: 40_000_000,
+              extension: "flac",
+              bitDepth: 16,
+              sampleRate: 44100,
+              length: 248,
+            },
+          ],
+        },
+      ],
+    });
+    const request = createRequest(db, { rawQuery: "Daft Punk - Get Lucky" });
+    advance(db, request.id, "QUEUED", { artist: "Daft Punk", title: "Get Lucky" });
+    const result = await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
+    );
+    expect(result).toEqual({ failed: true, reason: "selected_missing_length" });
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(getRequest(db, request.id)?.error).toBe("selected_missing_length");
+    expect(enqueued).toEqual([]);
+    expect(order.filter((step) => step === "enqueue")).toEqual([]);
+    expect(order.filter((step) => step === "get-search")).toEqual(["get-search"]);
+    expect(say).toEqual([]);
+    expect(listJobsForRequest(db, request.id).filter((job) => job.type === "download")).toHaveLength(1);
+    const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
+    expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({
+      error: "selected_missing_length",
+      reason: "selected_missing_length",
+    });
   });
 
   it("enqueues the normal-length remix and records the score breakdown", async () => {
