@@ -250,6 +250,12 @@ const REMOVAL_ORDER = [
 export type SelectionQuery = {
   artist?: string;
   title?: string;
+  /**
+   * The listener's original request. When this string is set, including "",
+   * stem and penalty waivers and the requested version class use only this
+   * text. Artist and title stay the identity match. Omit it to keep reading
+   * those asks from artist and title.
+   */
   text?: string;
 };
 
@@ -486,6 +492,17 @@ function requestedBlob(query: SelectionQuery): string {
       .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
       .join(" "),
   );
+}
+
+/**
+ * Stem waivers, penalty words, and the requested version class.
+ * A set `query.text` is the listener's original request and is the only
+ * source, even when it is empty. Empty text asks for nothing extra.
+ * Callers that omit `text` still use artist and title.
+ */
+function listenerAskText(query: SelectionQuery): string {
+  if (typeof query.text === "string") return normalizeMatchText(query.text);
+  return requestedBlob(query);
 }
 
 function requiredTitleTokens(query: SelectionQuery, terms: readonly string[]): string[] | null {
@@ -1031,7 +1048,7 @@ function firstRejection(
   if (policy.minFileSizeMb !== null && track.sizeBytes < policy.minFileSizeMb * MIB) return "min_file_size";
   const identity = identityRejection(track, policy, titleTokens);
   if (identity) return identity;
-  const asked = matchedTerms(requestedBlob(policy.query), policy.versionPenaltyTerms);
+  const asked = matchedTerms(listenerAskText(policy.query), policy.versionPenaltyTerms);
   if (incidentalStem(track, policy, titleTokens, asked)) return "stem";
   if (unacceptedVersion(track)) return "unaccepted_version";
   if (matchesLongRecording(track, policy.longRecordingPhrases)) return "long_recording";
@@ -1049,7 +1066,7 @@ function firstRejection(
 
 /** The request names a version kind, so the saved preference stays off. */
 function requestNamesVersion(policy: ResolvedPolicy): boolean {
-  const askedText = requestedBlob(policy.query);
+  const askedText = listenerAskText(policy.query);
   if (!askedText) return false;
   const asked = classifyVersionText(askedText);
   if (asked.radio_edit || asked.extended || asked.remix || asked.original || asked.other) return true;
@@ -1058,7 +1075,7 @@ function requestNamesVersion(policy: ResolvedPolicy): boolean {
 
 function requestedVersionClass(policy: ResolvedPolicy): VersionClass | null {
   if (!requestNamesVersion(policy)) return null;
-  const asked = classifyVersionText(requestedBlob(policy.query));
+  const asked = classifyVersionText(listenerAskText(policy.query));
   if (asked.remix) return "remix";
   if (asked.extended) return "extended";
   if (asked.radio_edit) return "radio_edit";

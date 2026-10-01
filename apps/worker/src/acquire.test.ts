@@ -1207,6 +1207,43 @@ describe("A5 acquisition worker", () => {
     expect(asked.score?.breakdown.requestedVersion).toBeGreaterThan(0);
   });
 
+  it("does not let an acapella word that exists only on the classified title waive the stem reject", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const acapella = "\\\\music\\\\Acapella\\\\Daft Punk - Get Lucky.flac";
+    const album = "\\\\music\\\\Album\\\\Daft Punk - Get Lucky.flac";
+    const { acquisition, radio, library, enqueued } = harness({
+      responses: [
+        {
+          username: "acapella-peer",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 9_000_000,
+          files: [{ filename: acapella, size: 20_000_000, extension: "flac", bitDepth: 16, sampleRate: 44100, length: 248 }],
+        },
+        {
+          username: "album-peer",
+          hasFreeUploadSlot: false,
+          queueLength: 4,
+          uploadSpeed: 1,
+          files: [{ filename: album, size: 30_000_000, extension: "flac", bitDepth: 16, sampleRate: 44100, length: 248 }],
+        },
+      ],
+    });
+    const request = createRequest(db, { rawQuery: "play Get Lucky by Daft Punk" });
+    advance(db, request.id, "QUEUED", { artist: "Daft Punk", title: "Get Lucky (Acapella)" });
+    await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
+    );
+    expect(enqueued).toEqual([{ user: "album-peer", files: [{ filename: album, size: 30_000_000 }] }]);
+  });
+
   it("fails QUEUED with no_suitable_result when filters remove every candidate and does not enqueue", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);

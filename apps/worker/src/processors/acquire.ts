@@ -263,6 +263,10 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         query: {
           artist: request.artist ?? undefined,
           title: request.title ?? undefined,
+          // Original listener text, the same string sent to classify.
+          // Version and stem asks are read only from this. A blank value
+          // asks for nothing extra, so an LLM title cannot waive them.
+          text: request.raw_query ?? "",
         },
       });
       if (decision.outcome === "selected") {

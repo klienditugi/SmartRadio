@@ -46,11 +46,15 @@ export type SelectedSearchFile = {
   durationSeconds?: number;
 };
 
-/** Artist/title text. Version terms in the title change the score, not eligibility. */
+/** Artist and title are the identity match. `text` is the listener's original request. */
 export type SelectSearchQuery = {
   artist?: string;
   title?: string;
-  /** Extra request text, treated like artist/title for a requested version. */
+  /**
+   * When set, including "", stem and penalty waivers and the requested version
+   * class are read only from this string. Omit it to keep reading those asks
+   * from artist and title.
+   */
   text?: string;
 };
 
