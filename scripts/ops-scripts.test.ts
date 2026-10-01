@@ -40,7 +40,7 @@ describe("ops scripts", () => {
   });
 
   // Slow on a small VM.
-  it("stays on systemd when units and docker are both present", () => {
+  it("stays on systemd when units and docker are both present", { timeout: 30_000 }, () => {
     const update = read("update.sh");
     const uninstall = read("uninstall.sh");
     expect(update).not.toMatch(/list-unit-files\s*\|/);
@@ -61,5 +61,5 @@ describe("ops scripts", () => {
     }
     expect(output).toMatch(/pipefail fall-through is fixed/);
     expect(output).toMatch(/does not compose up/);
-  }, { timeout: 30_000 });
+  });
 });
