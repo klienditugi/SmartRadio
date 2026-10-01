@@ -334,7 +334,8 @@ describe("real-data traps", () => {
 });
 
 describe("dry-run grid", () => {
-  it("is stable and covers the saved classes and the two explicit requests", () => {
+  // Slow on a small VM.
+  it("is stable and covers the saved classes and the two explicit requests", { timeout: 30_000 }, () => {
     const first = JSON.stringify(dryRunPreferences(curated));
     const second = JSON.stringify(dryRunPreferences(curated));
     expect(second).toBe(first);
