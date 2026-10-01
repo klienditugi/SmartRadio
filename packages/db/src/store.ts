@@ -284,6 +284,97 @@ export function getJob(db: Db, id: string): JobRow | undefined {
   return db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as JobRow | undefined;
 }
 
+/** Persist a job payload so a later claim sees the same values after a restart. */
+export function updateJobPayload(db: Db, jobId: string, payload: unknown): void {
+  db.prepare("UPDATE jobs SET payload_json = ?, updated_at = ? WHERE id = ?").run(
+    JSON.stringify(payload),
+    now(),
+    jobId,
+  );
+}
+
+/** Saved on the download job before POST /transfers/downloads. */
+export type EnqueueAttemptMarker = {
+  username: string;
+  filename: string;
+  size: number;
+  at: number;
+};
+
+export type ClaimEnqueueAttemptResult = {
+  claimed: boolean;
+  marker: EnqueueAttemptMarker;
+};
+
+function readEnqueueAttempt(payloadJson: string | null): EnqueueAttemptMarker | null {
+  if (!payloadJson) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payloadJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const raw = (parsed as { enqueue_attempted?: unknown }).enqueue_attempted;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.username !== "string" || typeof rec.filename !== "string") return null;
+  if (typeof rec.size !== "number" || !Number.isFinite(rec.size)) return null;
+  if (typeof rec.at !== "number" || !Number.isFinite(rec.at)) return null;
+  return { username: rec.username, filename: rec.filename, size: rec.size, at: rec.at };
+}
+
+/**
+ * Compare-and-set an enqueue attempt onto this download job.
+ * Scans every download job for the request. The first writer wins; a later
+ * caller gets the existing marker and must not POST.
+ * Lives in jobs.payload_json: acquisition_items has no size or JSON column.
+ */
+export function claimEnqueueAttempt(
+  db: Db,
+  input: { jobId: string; requestId: string; username: string; filename: string; size: number; at?: number },
+): ClaimEnqueueAttemptResult {
+  const claim = db.transaction((): ClaimEnqueueAttemptResult => {
+    const rows = db
+      .prepare(`SELECT id, payload_json FROM jobs WHERE request_id = ? AND type = 'download'`)
+      .all(input.requestId) as Array<{ id: string; payload_json: string | null }>;
+    for (const row of rows) {
+      const existing = readEnqueueAttempt(row.payload_json);
+      if (
+        existing &&
+        existing.username === input.username &&
+        existing.filename === input.filename &&
+        existing.size === input.size
+      ) {
+        return { claimed: false, marker: existing };
+      }
+    }
+    const mine = rows.find((row) => row.id === input.jobId);
+    if (!mine) throw new Error(`download job not found: ${input.jobId}`);
+    let payload: Record<string, unknown> = {};
+    if (mine.payload_json) {
+      const parsed = JSON.parse(mine.payload_json) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        payload = parsed as Record<string, unknown>;
+      }
+    }
+    const marker: EnqueueAttemptMarker = {
+      username: input.username,
+      filename: input.filename,
+      size: input.size,
+      at: input.at ?? now(),
+    };
+    payload.enqueue_attempted = marker;
+    db.prepare(`UPDATE jobs SET payload_json = ?, updated_at = ? WHERE id = ?`).run(
+      JSON.stringify(payload),
+      now(),
+      input.jobId,
+    );
+    return { claimed: true, marker };
+  });
+  return claim.immediate();
+}
+
 export function listJobs(db: Db, limit = 100): JobRow[] {
   return db.prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?").all(limit) as JobRow[];
 }

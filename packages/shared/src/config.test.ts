@@ -8,6 +8,9 @@ import {
   DEFAULT_MAX_BIT_DEPTH,
   DEFAULT_BITRATE_FLOOR_KBPS,
   DEFAULT_SHORT_RECORDING_FLOOR_SECONDS,
+  DEFAULT_DOWNLOAD_TIMEOUT_MS,
+  DEFAULT_SLSKD_DOWNLOADS_DIR,
+  DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS,
   DEFAULT_SHORT_RECORDING_FRACTION,
   DEFAULT_SHORT_RECORDING_MIN_SAMPLES,
   DEFAULT_SHORT_RECORDING_PENALTY,
@@ -35,6 +38,7 @@ import {
   serializeAppConfig,
 } from "./config.js";
 import { parseClassification, parseClassificationJson, safeParseClassification } from "./classification.js";
+import { fieldSourcesFor } from "./field-source.js";
 
 const exampleYamlObject = {
   server: { host: "127.0.0.1", port: 8788 },
@@ -632,6 +636,84 @@ radio:
     expect(unset.library.base_url).toBe("");
     expect(unset.radio.admin_user).toBe("");
     expect(integrationStatus(unset).llm.state).toBe("not_configured");
+  });
+
+  it("defaults the search-visible wait to 30 minutes and rejects a non-positive limit", () => {
+    const cfg = parseAppConfig(exampleYamlObject);
+    expect(cfg.radio.search_visible_timeout_ms).toBe(DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS);
+    expect(DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS).toBe(30 * 60 * 1000);
+    const zero = structuredClone(exampleYamlObject);
+    (zero.radio as { search_visible_timeout_ms?: number }).search_visible_timeout_ms = 0;
+    expect(() => parseAppConfig(zero)).toThrow();
+    const fraction = structuredClone(exampleYamlObject);
+    (fraction.radio as { search_visible_timeout_ms?: number }).search_visible_timeout_ms = 1.5;
+    expect(() => parseAppConfig(fraction)).toThrow();
+    const custom = structuredClone(exampleYamlObject);
+    (custom.radio as { search_visible_timeout_ms?: number }).search_visible_timeout_ms = 5_000;
+    const parsed = parseAppConfig(custom);
+    expect(parsed.radio.search_visible_timeout_ms).toBe(5_000);
+    expect(publicSettings({ ...parsed, secrets: { adminPassword: "x" } }).radio.search_visible_timeout_ms).toBe(5_000);
+    const yaml = serializeAppConfig(parsed);
+    expect(yaml).toContain("search_visible_timeout_ms: 5000");
+    expect(parseAppConfig(parseYaml(yaml)).radio.search_visible_timeout_ms).toBe(5_000);
+    const overridden = applyEnvOverrides(structuredClone(exampleYamlObject) as Record<string, unknown>, {
+      SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS: "45000",
+    });
+    expect(parseAppConfig(overridden).radio.search_visible_timeout_ms).toBe(45_000);
+    const ignored = applyEnvOverrides(structuredClone(exampleYamlObject) as Record<string, unknown>, {
+      SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS: "0",
+    });
+    expect(parseAppConfig(ignored).radio.search_visible_timeout_ms).toBe(DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS);
+    expect(
+      fieldSourcesFor(exampleYamlObject, { SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS: "45000" })[
+        "radio.search_visible_timeout_ms"
+      ],
+    ).toEqual({ source: "env", env: "SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS" });
+  });
+
+  it("defaults the download deadline, path prefix, and ffprobe path", () => {
+    const cfg = parseAppConfig(exampleYamlObject);
+    expect(cfg.acquisition.download_timeout_ms).toBe(DEFAULT_DOWNLOAD_TIMEOUT_MS);
+    expect(DEFAULT_DOWNLOAD_TIMEOUT_MS).toBe(6 * 60 * 60 * 1000);
+    expect(cfg.acquisition.downloads_path_prefix).toBe(DEFAULT_SLSKD_DOWNLOADS_DIR);
+    expect(DEFAULT_SLSKD_DOWNLOADS_DIR).toBe("/downloads");
+    expect(cfg.files.ffprobe_path).toBe("ffprobe");
+    const zero = structuredClone(exampleYamlObject);
+    (zero.acquisition as { download_timeout_ms?: number }).download_timeout_ms = 0;
+    expect(() => parseAppConfig(zero)).toThrow();
+    const custom = structuredClone(exampleYamlObject) as {
+      acquisition: Record<string, unknown>;
+      files: Record<string, unknown>;
+    };
+    custom.acquisition.download_timeout_ms = 5_000;
+    custom.acquisition.downloads_path_prefix = "/slskd/downloads";
+    custom.files.ffprobe_path = "/usr/bin/ffprobe";
+    const parsed = parseAppConfig(custom);
+    expect(parsed.acquisition.download_timeout_ms).toBe(5_000);
+    expect(parsed.acquisition.downloads_path_prefix).toBe("/slskd/downloads");
+    expect(parsed.files.ffprobe_path).toBe("/usr/bin/ffprobe");
+    const pub = publicSettings({ ...parsed, secrets: { adminPassword: "x" } });
+    expect(pub.acquisition.download_timeout_ms).toBe(5_000);
+    expect(pub.acquisition.downloads_path_prefix).toBe("/slskd/downloads");
+    expect(pub.files.ffprobe_path).toBe("/usr/bin/ffprobe");
+    const yaml = serializeAppConfig(parsed);
+    expect(yaml).toContain("download_timeout_ms: 5000");
+    expect(yaml).toContain("downloads_path_prefix: /slskd/downloads");
+    expect(yaml).toContain("ffprobe_path: /usr/bin/ffprobe");
+    expect(parseAppConfig(parseYaml(yaml)).acquisition.download_timeout_ms).toBe(5_000);
+    const overridden = applyEnvOverrides(structuredClone(exampleYamlObject) as Record<string, unknown>, {
+      SLSKD_DOWNLOAD_TIMEOUT_MS: "45000",
+      SLSKD_DOWNLOADS_PATH_PREFIX: "/data/downloads",
+      SUBWAVE_FFPROBE_PATH: "ffprobe",
+    });
+    const fromEnv = parseAppConfig(overridden);
+    expect(fromEnv.acquisition.download_timeout_ms).toBe(45_000);
+    expect(fromEnv.acquisition.downloads_path_prefix).toBe("/data/downloads");
+    expect(fromEnv.files.ffprobe_path).toBe("ffprobe");
+    const ignored = applyEnvOverrides(structuredClone(exampleYamlObject) as Record<string, unknown>, {
+      SLSKD_DOWNLOAD_TIMEOUT_MS: "0",
+    });
+    expect(parseAppConfig(ignored).acquisition.download_timeout_ms).toBe(DEFAULT_DOWNLOAD_TIMEOUT_MS);
   });
 });
 

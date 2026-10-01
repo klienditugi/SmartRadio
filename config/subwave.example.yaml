@@ -24,6 +24,10 @@ paths:
 files:
   allowed_extensions: [".mp3", ".flac", ".m4a", ".ogg", ".wav"]
   max_bytes: 209715200
+  # ffprobe checks that the codec matches the extension and, when the selected
+  # search length is known, that the duration is within 2 seconds. Missing binary
+  # fails the request as ffprobe_unavailable. SUBWAVE_FFPROBE_PATH overrides this.
+  ffprobe_path: ffprobe
 
 auth:
   admin_username: "admin"
@@ -72,12 +76,21 @@ library:
 # Playback: GET /dj/search, then POST /dj/queue-track {id,title} (artist/album optional; HTTP 409 = never-play).
 # Notify: POST /dj/say {text, mode:styled, kind:dj-speak|link} with the same admin Basic auth.
 # REQUEST_ACCEPTED only after a transfer is enqueued. TRACK_READY after search shows a string id, then say, then queue.
+# search_visible_timeout_ms caps the post-import GET /dj/search wait. Default 1800000 (30 minutes).
+# SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS overrides it. The library file stays if the wait expires
+# (search_visible_timeout). The defined search hit is string id and title, optional artist and album.
+# It has no path, filename, or duration, and the id cannot be tied to the file just placed.
+# A hit matches request artist and title, then the selected file's version class.
+# That is not a file identity match. Several hits in that class fail as handoff_ambiguous.
+# Hits that do not match artist and title keep waiting, then fail as handoff_no_match.
+# /dj/search cannot be reached after retries: radio_unreachable. No TRACK_READY then.
 # Do not use public POST /request for announcements. URL and admin password come from this file and secrets/.
 # verify_status in yaml or env is deprecated and ignored. Test connection stores the result.
 radio:
   provider: subwave
   base_url: "${SUBWAVE_RADIO_URL}"
   admin_user: "${SUBWAVE_RADIO_ADMIN_USER}"
+  search_visible_timeout_ms: 1800000
 
 # Optional. enabled: false, a non-slskd provider, or a missing URL/key → doctor.acquire_unavailable.
 # A stored test-connection is the only way to verify. Yaml verify_status is ignored.
@@ -89,6 +102,15 @@ acquisition:
   enabled: false
   provider: slskd
   base_url: "${SLSKD_URL}"
+  # download_timeout_ms caps one transfer from enqueue until the file is in hand.
+  # Default 21600000 (6 hours). SLSKD_DOWNLOAD_TIMEOUT_MS overrides it. Expiry fails
+  # the request as download_timeout and does not cancel or delete the slskd transfer.
+  # downloads_path_prefix is the downloads directory as slskd sees it.
+  # Default /downloads (the container path). It is mapped onto paths.downloads.
+  # slskd 0.26 Transfer has no local path. The save layout is
+  # paths.downloads/<last remote folder>/<basename>. There is no basename fallback.
+  download_timeout_ms: 21600000
+  downloads_path_prefix: /downloads
   # Search-hit pick (worker, deterministic, no LLM). See docs/SLSKD.md.
   # Sizes are MiB (1 MiB = 1,048,576 bytes). The _mb key names stay as they are.
   # max_file_size_mb is a hard reject. Default 30. There is no size curve.

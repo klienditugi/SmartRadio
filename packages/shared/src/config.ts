@@ -78,6 +78,18 @@ export const DEFAULT_SHORT_RECORDING_MIN_SAMPLES = 5;
 /** Known durations below this many seconds are short even without a median. */
 export const DEFAULT_SHORT_RECORDING_FLOOR_SECONDS = 90;
 
+/** How long queue_radio waits for GET /dj/search to show a string id. 30 minutes. */
+export const DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** How long a download may stay in progress before the request fails. 6 hours. */
+export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Downloads directory as slskd sees it. Default `/downloads` (container).
+ * Mapped onto `paths.downloads` when a transfer reports a path under this prefix.
+ */
+export const DEFAULT_SLSKD_DOWNLOADS_DIR = "/downloads";
+
 /** Soft short-track penalty reaches this (negative) value. Same scale as a long recording. */
 export const DEFAULT_SHORT_RECORDING_PENALTY = -1900;
 
@@ -270,6 +282,8 @@ export const appConfigSchema = z.object({
     .object({
       allowed_extensions: z.array(z.string()).default([".mp3", ".flac", ".m4a", ".ogg", ".wav"]),
       max_bytes: z.number().int().positive().default(200 * 1024 * 1024),
+      /** Executable used to check codec and duration. Env: SUBWAVE_FFPROBE_PATH. */
+      ffprobe_path: z.string().min(1).default("ffprobe"),
     })
     .default({}),
   auth: z
@@ -317,6 +331,11 @@ export const appConfigSchema = z.object({
       /** Optional. Empty URL, admin user, or password is `not_configured`. */
       base_url: optionalSetting,
       admin_user: optionalSetting,
+      /**
+       * Cap on the post-import GET /dj/search wait. Default 30 minutes.
+       * Env: SUBWAVE_RADIO_SEARCH_VISIBLE_TIMEOUT_MS.
+       */
+      search_visible_timeout_ms: z.number().int().positive().default(DEFAULT_SEARCH_VISIBLE_TIMEOUT_MS),
       /** Parsed for old configs. Ignored as a source of verified. */
       verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
     })
@@ -329,6 +348,17 @@ export const appConfigSchema = z.object({
     base_url: z.string().trim().default(""),
     /** Omitted means unverified. `verified` is written only after a live test connection. */
     verify_status: z.enum(["verified", "unverified", "needs_server_inspection"]).default("unverified"),
+    /**
+     * Cap on one download, from enqueue until the file is in hand.
+     * Default 6 hours. Env: SLSKD_DOWNLOAD_TIMEOUT_MS.
+     */
+    download_timeout_ms: z.number().int().positive().default(DEFAULT_DOWNLOAD_TIMEOUT_MS),
+    /**
+     * Downloads directory as slskd sees it (container path). Default `/downloads`.
+     * A reported transfer path under this prefix is joined onto `paths.downloads`.
+     * Env: SLSKD_DOWNLOADS_PATH_PREFIX.
+     */
+    downloads_path_prefix: z.string().min(1).default(DEFAULT_SLSKD_DOWNLOADS_DIR),
     /** Deterministic search-hit score. The selector does not call an LLM. */
     selection: acquisitionSelectionSchema,
   }),
@@ -621,6 +651,7 @@ export function publicSettings(config: RuntimeConfig) {
       provider: config.radio.provider,
       base_url: config.radio.base_url,
       admin_user: config.radio.admin_user,
+      search_visible_timeout_ms: config.radio.search_visible_timeout_ms,
       verify_status: config.radio.verify_status,
     },
     acquisition: {
@@ -628,6 +659,8 @@ export function publicSettings(config: RuntimeConfig) {
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
       verify_status: config.acquisition.verify_status,
+      download_timeout_ms: config.acquisition.download_timeout_ms,
+      downloads_path_prefix: config.acquisition.downloads_path_prefix,
       selection: selectionSettings(config.acquisition.selection),
     },
     integrations: integrationStatus(config),
@@ -661,7 +694,7 @@ export type AppConfigPatch = {
   policy?: Partial<AppConfig["policy"]>;
   llm?: Partial<Pick<AppConfig["llm"], "base_url" | "model" | "timeout_ms" | "verify_status">>;
   library?: Partial<Pick<AppConfig["library"], "base_url" | "username" | "verify_status">>;
-  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user" | "verify_status">>;
+  radio?: Partial<Pick<AppConfig["radio"], "base_url" | "admin_user" | "search_visible_timeout_ms" | "verify_status">>;
   acquisition?: AcquisitionSettingsPatch;
 };
 
@@ -781,11 +814,14 @@ export function serializeAppConfig(config: AppConfig): string {
       provider: config.radio.provider,
       base_url: config.radio.base_url,
       admin_user: config.radio.admin_user,
+      search_visible_timeout_ms: config.radio.search_visible_timeout_ms,
     },
     acquisition: {
       enabled: config.acquisition.enabled,
       provider: config.acquisition.provider,
       base_url: config.acquisition.base_url,
+      download_timeout_ms: config.acquisition.download_timeout_ms,
+      downloads_path_prefix: config.acquisition.downloads_path_prefix,
       selection: selectionSettings(config.acquisition.selection),
     },
   };

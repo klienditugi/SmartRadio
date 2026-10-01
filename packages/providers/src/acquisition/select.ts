@@ -39,6 +39,11 @@ export type SelectedSearchFile = {
   extension?: string;
   /** Raw reported bitRate, including values the scorer treats as unknown. */
   bitRate?: number;
+  /**
+   * Search `length` in seconds, when the payload has one.
+   * Copied for later checks. Not used for ranking.
+   */
+  durationSeconds?: number;
 };
 
 /** Artist/title text. Version terms in the title change the score, not eligibility. */
@@ -232,6 +237,7 @@ function toSelected(row: MappedFile): SelectedSearchFile {
     ...(row.fileId ? { fileId: row.fileId } : {}),
     ...(row.track.format.ext ? { extension: row.track.format.ext } : {}),
     ...(row.rawBitRate !== undefined ? { bitRate: row.rawBitRate } : {}),
+    ...(row.track.durationSeconds !== undefined ? { durationSeconds: row.track.durationSeconds } : {}),
   };
 }
 
