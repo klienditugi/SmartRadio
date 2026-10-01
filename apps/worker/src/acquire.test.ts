@@ -98,6 +98,13 @@ function advance(
   throw new Error(`unreachable status ${to}`);
 }
 
+function failedSay(track: string, reason: string): { text: string; kind: "dj-speak" } {
+  return {
+    text: `event: request_failed\ntrack: ${track}\nreason: ${reason}`,
+    kind: "dj-speak",
+  };
+}
+
 type AcqState = {
   searchComplete?: boolean;
   responses?: unknown[];
@@ -245,7 +252,9 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toEqual([{ user: "peer-a", files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE }] }]);
     expect(order).toContain("enqueue");
     expect(order).toContain("say");
-    expect(say[0]?.text).toContain("REQUEST_ACCEPTED");
+    expect(say[0]?.text).toContain("event: copy_found_retrieval_started");
+    expect(say[0]?.text).toContain("track: Artist - Track");
+    expect(say[0]?.text).not.toContain("REQUEST_ACCEPTED");
     expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
     const accepted = listRequestEvents(db, request.id).find((event) => event.to_status === "DOWNLOADING");
     expect(JSON.parse(accepted?.payload_json ?? "{}").event).toBe("REQUEST_ACCEPTED");
@@ -698,7 +707,7 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toHaveLength(1);
     expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
     expect(order.filter((step) => step === "list")).toHaveLength(1);
-    expect(say).toEqual([]);
+    expect(say).toEqual([failedSay("Artist - Track", "enqueue_failed")]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     expect(getRequest(db, request.id)?.error).toBe("enqueue_failed");
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
@@ -789,7 +798,7 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toHaveLength(1);
     expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
     expect(order.filter((step) => step === "list")).toHaveLength(2);
-    expect(say).toEqual([]);
+    expect(say).toEqual([failedSay("Artist - Track", "enqueue_failed")]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     expect(getRequest(db, request.id)?.error).toBe("enqueue_failed");
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
@@ -836,7 +845,7 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toHaveLength(1);
     expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
     expect(order.filter((step) => step === "list")).toHaveLength(2);
-    expect(say).toEqual([]);
+    expect(say).toEqual([failedSay("Artist - Track", "enqueue_failed")]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as { enqueue_attempted?: { size: number } };
     expect(saved.enqueue_attempted?.size).toBe(TRACK_SIZE);
@@ -983,7 +992,7 @@ describe("A5 acquisition worker", () => {
     );
     expect(result).toEqual({ failed: true, reason: "download_timeout" });
     expect(getRequest(db, request.id)?.error).toBe("download_timeout");
-    expect(order).toEqual([]);
+    expect(order).toEqual(["say"]);
     expect(listJobsForRequest(db, request.id).filter((job) => job.type === "download")).toHaveLength(1);
   });
 
@@ -1113,7 +1122,7 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toEqual([]);
     expect(order.filter((step) => step === "enqueue")).toEqual([]);
     expect(order.filter((step) => step === "get-search")).toEqual(["get-search"]);
-    expect(say).toEqual([]);
+    expect(say).toEqual([failedSay("Daft Punk - Get Lucky", "selected_missing_length")]);
     expect(listJobsForRequest(db, request.id).filter((job) => job.type === "download")).toHaveLength(1);
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
     expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({
@@ -1266,8 +1275,9 @@ describe("A5 acquisition worker", () => {
       },
     });
     expect(enqueued).toEqual([]);
-    expect(say).toEqual([]);
-    expect(order).toEqual(["get-search"]);
+    expect(say).toEqual([failedSay("Daft Punk - Get Lucky", "no_suitable_result")]);
+    expect(say[0]?.text).not.toContain("locked=");
+    expect(order).toEqual(["get-search", "say"]);
     expect(listJobsForRequest(db, request.id).filter((item) => item.type === "download")).toHaveLength(1);
   });
 

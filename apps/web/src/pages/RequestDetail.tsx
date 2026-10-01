@@ -106,7 +106,14 @@ export function RequestDetailPage() {
         <div className="card" style={{ marginBottom: "1rem" }}>
           <h2>Download progress</h2>
           <div className="muted">
-            {download.filename ?? "transfer"} {download.remote_user ? `· ${download.remote_user}` : ""} · {download.status}
+            {admin ? (
+              <>
+                {download.filename ?? "transfer"}
+                {download.remote_user ? ` · ${download.remote_user}` : ""} · {download.status}
+              </>
+            ) : (
+              download.status
+            )}
           </div>
           <div className="progress" style={{ marginTop: "0.5rem" }}>
             <span style={{ width: `${pct ?? 0}%` }} />

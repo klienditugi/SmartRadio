@@ -214,12 +214,7 @@ describe("A4 radio events", () => {
     };
     await handleDownload(ctx, job);
     expect(order).toEqual(["list", "enqueue", "say"]);
-    expect(say).toEqual([
-      {
-        text: "REQUEST_ACCEPTED. Requester: Alice. Track: Artist — Track. Acquisition has started.",
-        kind: "dj-speak",
-      },
-    ]);
+    expect(say).toEqual([sayFacts("copy_found_retrieval_started", "Artist - Track", { requester: "Alice" })]);
     expect(order).not.toContain("public-request");
     // A5: stay DOWNLOADING until correlated Completed+Succeeded + file exists.
     expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
@@ -271,8 +266,8 @@ describe("A4 radio events", () => {
     ).rejects.toThrow(/no usable search result/);
     expect(getRequest(db, request.id)?.error).toBe("no usable search result");
     expect(getRequest(db, request.id)?.error).not.toContain("no_suitable_result");
-    expect(say).toEqual([]);
-    expect(order).toEqual(["get-search", "get-responses"]);
+    expect(say).toEqual([sayFacts("request_failed", "missing song", { reason: "no_usable_search_result" })]);
+    expect(order).toEqual(["get-search", "get-responses", "say"]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
   });
 
@@ -354,13 +349,8 @@ describe("A4 radio events", () => {
     expect(order).toEqual([]);
 
     const result = await handleQueueRadio(ctx, radioJob!);
-    expect(order).toEqual(["search", "say", "queue"]);
-    expect(say).toEqual([
-      {
-        text: "TRACK_READY. Track: Artist — Track. Track validated and available in library for airplay.",
-        kind: "dj-speak",
-      },
-    ]);
+    expect(order).toEqual(["search", "queue", "say"]);
+    expect(say).toEqual([sayFacts("queued_coming_up", "Artist - Track")]);
     expect(queued).toEqual([{ id: "song-1", title: "Track", artist: "Artist", album: "LP" }]);
     expect(typeof (queued[0] as { id: unknown }).id).toBe("string");
     expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
@@ -406,7 +396,7 @@ describe("A4 radio events", () => {
   it("records never-play when queue-track returns 409 after TRACK_READY", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
-    const { radio, library, acquisition, order } = harness({
+    const { radio, library, acquisition, order, say } = harness({
       search: djSearchResponse([{ id: "song-9", title: "Blocked" }]),
       queueError: new NeverPlayError("blocked"),
     });
@@ -425,7 +415,8 @@ describe("A4 radio events", () => {
         payload: { track_ready: true, filename: "blocked.mp3", version_class: "original" },
       }),
     );
-    expect(order).toEqual(["search", "say", "queue"]);
+    expect(order).toEqual(["search", "queue", "say"]);
+    expect(say).toEqual([sayFacts("request_failed", "Blocked", { reason: "never_play" })]);
     expect(result).toEqual({ queued: false, never_play: true });
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     expect(getRequest(db, request.id)?.error).toBe("never-play");
@@ -448,8 +439,8 @@ describe("A4 radio events", () => {
       },
       enqueueJob(db, { type: "queue_radio", requestId: request.id }),
     );
-    expect(order).toEqual(["search", "queue"]);
-    expect(say).toEqual([]);
+    expect(order).toEqual(["search", "queue", "say"]);
+    expect(say).toEqual([sayFacts("queued_coming_up", "Act - Known")]);
     expect(queued).toEqual([{ id: "already", title: "Known", artist: "Act", album: undefined }]);
     expect(getRequest(db, request.id)?.status).toBe("READY");
   });
@@ -505,8 +496,8 @@ describe("A4 radio events", () => {
       reason: "search_visible_timeout",
     });
     expect(failure?.payload_json ?? "").not.toContain("TRACK_READY");
-    expect(say).toEqual([]);
-    expect(order).toEqual(["search", "search"]);
+    expect(say).toEqual([sayFacts("request_failed", "Artist - Track", { reason: "search_visible_timeout" })]);
+    expect(order).toEqual(["search", "search", "say"]);
     expect(order).not.toContain("enqueue");
     expect(order).not.toContain("acq-search");
     expect(readLibrary(libraryFile)).toBe("kept-in-library");
@@ -522,6 +513,11 @@ describe("A4 radio events", () => {
       order.push("search");
       const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:9"), { code: "ECONNREFUSED" });
       throw Object.assign(new TypeError("fetch failed"), { cause });
+    };
+    radio.say = async (input) => {
+      order.push("say");
+      say.push(input);
+      throw new TypeError("fetch failed");
     };
     const request = createRequest(db, { rawQuery: "Artist - Track" });
     advance(db, request.id, "IMPORTING", { artist: "Artist", title: "Track" });
@@ -554,8 +550,8 @@ describe("A4 radio events", () => {
       reason: "radio_unreachable",
     });
     expect(failure?.payload_json ?? "").not.toContain("TRACK_READY");
-    expect(say).toEqual([]);
-    expect(order).toEqual(["search", "search"]);
+    expect(say).toEqual([sayFacts("request_failed", "Artist - Track", { reason: "radio_unreachable" })]);
+    expect(order).toEqual(["search", "search", "say"]);
     expect(getJob(db, job.id)?.status).toBe("failed");
     expect(getJob(db, job.id)?.error).toBe("radio_unreachable");
     expect(readLibrary(libraryFile)).toBe("kept-in-library");
@@ -597,7 +593,7 @@ describe("A4 radio events", () => {
     expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
     expect(queued).toEqual([sample]);
     expect(typeof (queued[0] as { id: unknown }).id).toBe("string");
-    expect(order).toEqual(["search", "say", "queue"]);
+    expect(order).toEqual(["search", "queue", "say"]);
   });
 
   it("fails handoff_no_match when no search hit is the imported file and does not queue", async () => {
@@ -639,8 +635,8 @@ describe("A4 radio events", () => {
     expect(failed).toEqual({ failed: true, reason: "handoff_no_match" });
     expect(getRequest(db, request.id)?.error).toBe("handoff_no_match");
     expect(queued).toEqual([]);
-    expect(say).toEqual([]);
-    expect(order).toEqual(["search"]);
+    expect(say).toEqual([sayFacts("request_failed", "Artist - Track", { reason: "handoff_no_match" })]);
+    expect(order).toEqual(["search", "say"]);
     expect(readLibrary(libraryFile)).toBe("kept-in-library");
   });
 
@@ -783,11 +779,22 @@ describe("A4 radio events", () => {
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     expect(getRequest(db, request.id)?.error).toBe("handoff_ambiguous");
     expect(queued).toEqual([]);
-    expect(say).toEqual([]);
+    expect(say).toEqual([sayFacts("request_failed", "Adam Beyer - Don't Go", { reason: "handoff_ambiguous" })]);
     expect(readLibrary(libraryFile)).toBe("kept-in-library");
     expect(listJobsForRequest(db, request.id).map((job) => job.type)).toEqual(["queue_radio"]);
   });
 });
+
+function sayFacts(
+  event: string,
+  track: string,
+  extra?: { requester?: string; reason?: string },
+): { text: string; kind: "dj-speak" } {
+  const lines = [`event: ${event}`, `track: ${track}`];
+  if (extra?.requester) lines.push(`requester: ${extra.requester}`);
+  if (extra?.reason) lines.push(`reason: ${extra.reason}`);
+  return { text: lines.join("\n"), kind: "dj-speak" };
+}
 
 function readLibrary(filePath: string): string {
   return existsSync(filePath) ? readFileSync(filePath, "utf8") : "";

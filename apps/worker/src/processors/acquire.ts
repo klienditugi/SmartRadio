@@ -27,7 +27,8 @@ import {
   type SelectedSearchFile,
 } from "@subwave-ai/providers";
 import type { JobHandler } from "../context.js";
-import { requestAcceptedContext } from "./notify.js";
+import { failRequest, failureReasonCategory } from "./fail-request.js";
+import { sayListenerFacts } from "./say-listener.js";
 
 /** Re-poll search / transfers without blocking the worker lease. */
 const ACQUIRE_POLL_MS = 2_000;
@@ -58,28 +59,27 @@ function acquisitionUnavailable(provider: AcquisitionProvider): boolean {
   return provider.kind === "unverified" || provider.verifyStatus !== "verified";
 }
 
-function recordFailure(
+async function recordFailure(
   ctx: Parameters<JobHandler>[0],
   requestId: string,
   message: string,
   detail?: Record<string, unknown>,
-): void {
-  transitionRequest(ctx.db, {
+): Promise<void> {
+  await failRequest(ctx, {
     requestId,
-    to: "FAILED",
-    actor: ctx.workerId,
+    reason: failureReasonCategory(message),
     payload: { error: message, reason: message, ...detail },
     patch: { error: message },
   });
 }
 
-function fail(
+async function fail(
   ctx: Parameters<JobHandler>[0],
   requestId: string,
   message: string,
   detail?: Record<string, unknown>,
-): never {
-  recordFailure(ctx, requestId, message, detail);
+): Promise<never> {
+  await recordFailure(ctx, requestId, message, detail);
   throw new Error(message);
 }
 
@@ -90,8 +90,8 @@ function httpFailureStatus(err: unknown): number | undefined {
   return undefined;
 }
 
-function failEnqueue(ctx: Parameters<JobHandler>[0], requestId: string, status: number) {
-  recordFailure(ctx, requestId, "enqueue_failed", { status });
+async function failEnqueue(ctx: Parameters<JobHandler>[0], requestId: string, status: number) {
+  await recordFailure(ctx, requestId, "enqueue_failed", { status });
   return { failed: true as const, reason: "enqueue_failed" as const, status };
 }
 
@@ -184,7 +184,8 @@ export const handleSearchAcquisition: JobHandler = async (ctx, job) => {
   if (request.status !== "SEARCHING") return { skipped: true, status: request.status };
 
   if (acquisitionUnavailable(ctx.providers.acquisition)) {
-    // Do not call the provider and do not announce REQUEST_ACCEPTED.
+    // Retryable job error. The request stays SEARCHING and is not FAILED,
+    // so there is no listener say until a later path actually fails it.
     throw new Error("acquire_unavailable");
   }
 
@@ -216,6 +217,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     return { skipped: true, status: request.status };
   }
   if (acquisitionUnavailable(ctx.providers.acquisition)) {
+    // Same retry as search: do not move the request to FAILED and do not say.
     throw new Error("acquire_unavailable");
   }
 
@@ -228,7 +230,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   if (request.status === "QUEUED") {
     if (!selected) {
       if (!payload.searchId) {
-        fail(ctx, request.id, "download job missing searchId or selected file");
+        return await fail(ctx, request.id, "download job missing searchId or selected file");
       }
       const { complete, payload: searchPayload } = await loadSearchResponses(
         ctx.providers.acquisition,
@@ -273,10 +275,10 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         };
       } else if (decision.outcome === "no_suitable_result") {
         // QUEUED → FAILED. Filters already removed every candidate; do not enqueue.
-        fail(ctx, request.id, decision.reason, { outcome: "no_suitable_result", removed: decision.removed });
+        return await fail(ctx, request.id, decision.reason, { outcome: "no_suitable_result", removed: decision.removed });
       } else {
         // No response rows, or rows with nothing the filters could consider.
-        fail(ctx, request.id, "no usable search result");
+        return await fail(ctx, request.id, "no usable search result");
       }
     }
 
@@ -294,16 +296,16 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       const snapshot = await ctx.providers.acquisition.listDownloads();
       const existingTransfer = findCorrelatedTransfer(snapshot, target);
       // Marker already saved: never POST. Adopt the row, or fail at the deadline.
-      const settleMarked = (
+      const settleMarked = async (
         found: CorrelatedTransfer | null,
         marked: EnqueueAttemptMarker,
-      ): { waiting: true; reason: "enqueue_attempted" } | { failed: true; reason: "transfer_not_found" } | null => {
+      ): Promise<{ waiting: true; reason: "enqueue_attempted" } | { failed: true; reason: "transfer_not_found" } | null> => {
         if (found) {
           transferId = found.id ?? transferId;
           return null;
         }
         if (Date.now() - marked.at >= ctx.config.acquisition.download_timeout_ms) {
-          recordFailure(ctx, request.id, "transfer_not_found");
+          await recordFailure(ctx, request.id, "transfer_not_found");
           return { failed: true, reason: "transfer_not_found" };
         }
         scheduleDownload(
@@ -314,13 +316,13 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         return { waiting: true, reason: "enqueue_attempted" };
       };
       if (attempt) {
-        const settled = settleMarked(existingTransfer, attempt);
+        const settled = await settleMarked(existingTransfer, attempt);
         if (settled) return settled;
       } else if (existingTransfer) {
         transferId = existingTransfer.id ?? transferId;
       } else if (!hasPositiveLength(chosen)) {
         // The selector is frozen and is not asked for another file.
-        recordFailure(ctx, request.id, "selected_missing_length");
+        await recordFailure(ctx, request.id, "selected_missing_length");
         return { failed: true, reason: "selected_missing_length" };
       } else {
         const claim = claimEnqueueAttempt(ctx.db, {
@@ -334,7 +336,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
         payload = { ...payload, enqueue_attempted: attempt };
         if (!claim.claimed) {
           const again = await ctx.providers.acquisition.listDownloads();
-          const settled = settleMarked(findCorrelatedTransfer(again, target), attempt);
+          const settled = await settleMarked(findCorrelatedTransfer(again, target), attempt);
           if (settled) return settled;
         } else {
           try {
@@ -360,7 +362,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
             } else {
               // No HTTP response: timeout, network error, or a lost reply. Poll only.
               const again = await ctx.providers.acquisition.listDownloads();
-              const settled = settleMarked(findCorrelatedTransfer(again, target), attempt);
+              const settled = await settleMarked(findCorrelatedTransfer(again, target), attempt);
               if (settled) return settled;
             }
           }
@@ -400,7 +402,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     });
     // Persist before the status move. A reclaimed lease must not POST again.
     updateJobPayload(ctx.db, job.id, nextPayload);
-    // REQUEST_ACCEPTED is the status move. say must not block it.
+    // REQUEST_ACCEPTED is the status move. The listener say must not block it.
     transitionRequest(ctx.db, {
       requestId: request.id,
       to: "DOWNLOADING",
@@ -412,21 +414,15 @@ export const handleDownload: JobHandler = async (ctx, job) => {
       },
     });
     scheduleDownload(ctx, request.id, nextPayload);
-    try {
-      await ctx.providers.radio.say({
-        text: requestAcceptedContext(ctx.db, request),
-        kind: "dj-speak",
-      });
-    } catch (err) {
-      console.error("REQUEST_ACCEPTED say failed", err);
-    }
+    const accepted = getRequest(ctx.db, request.id) ?? request;
+    await sayListenerFacts(ctx, accepted, { event: "copy_found_retrieval_started" });
     return { enqueued: true, selected: chosen, ...(selectionScore ? { selection_score: selectionScore } : {}) };
   }
 
   // --- Phase 2: poll transfers until correlated Completed+Succeeded + file exists ---
   selected = selectedFromPayload(payload);
   if (!selected) {
-    fail(ctx, request.id, "download poll missing selected file correlation");
+    return await fail(ctx, request.id, "download poll missing selected file correlation");
   }
 
   if (getRequest(ctx.db, request.id)?.status !== "DOWNLOADING") {
@@ -439,7 +435,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
     payload = { ...payload, selected, enqueued: true, download_started_at: Date.now() };
     updateJobPayload(ctx.db, job.id, payload);
   } else if (Date.now() - started >= timeoutMs) {
-    recordFailure(ctx, request.id, "download_timeout");
+    await recordFailure(ctx, request.id, "download_timeout");
     return { failed: true, reason: "download_timeout" };
   }
 
@@ -483,7 +479,7 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   });
 
   if (isTransferTerminalFailure(transfer.state)) {
-    recordFailure(ctx, request.id, transfer.state);
+    await recordFailure(ctx, request.id, transfer.state);
     return { failed: true, reason: transfer.state };
   }
 
@@ -504,13 +500,13 @@ export const handleDownload: JobHandler = async (ctx, job) => {
   );
   if (!located.ok) {
     const listed = located.tried.length > 0 ? located.tried.join(", ") : "(none)";
-    recordFailure(ctx, request.id, `download_not_found: tried ${listed}`);
+    await recordFailure(ctx, request.id, `download_not_found: tried ${listed}`);
     return { failed: true, reason: "download_not_found", tried: located.tried };
   }
   const resolved = located.file;
   const relative = path.relative(ctx.config.paths.downloads, resolved.absolutePath);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    recordFailure(ctx, request.id, `download_not_found: tried ${resolved.absolutePath}`);
+    await recordFailure(ctx, request.id, `download_not_found: tried ${resolved.absolutePath}`);
     return { failed: true, reason: "download_not_found", tried: [resolved.absolutePath] };
   }
 

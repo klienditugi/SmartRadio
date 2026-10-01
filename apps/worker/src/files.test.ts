@@ -278,7 +278,7 @@ describe("file moves", () => {
     expect(filesUnder(staging).concat(filesUnder(library), filesUnder(downloads)).some((file) => file.includes(".partial"))).toBe(
       false,
     );
-    expect(calls).toEqual([]);
+    expect(calls).toEqual(["radio"]);
     const failure = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
     expect(failure?.from_status).toBe("VALIDATING");
     expect(JSON.parse(failure?.payload_json ?? "{}").error).toMatch(/move verification failed/);

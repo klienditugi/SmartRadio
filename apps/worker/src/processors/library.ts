@@ -1,7 +1,9 @@
 import { enqueueJob, getRequest, insertLibraryMatch, transitionRequest } from "@subwave-ai/db";
 import { NotConfiguredError } from "@subwave-ai/providers";
 import type { JobHandler } from "../context.js";
+import { failRequest } from "./fail-request.js";
 import { runIntegration } from "./guard.js";
+import { sayListenerFacts } from "./say-listener.js";
 
 export const handleCheckLibrary: JobHandler = async (ctx, job) => {
   if (!job.request_id) throw new Error("check_library job missing request_id");
@@ -13,6 +15,10 @@ export const handleCheckLibrary: JobHandler = async (ctx, job) => {
   const current = getRequest(ctx.db, request.id)!;
   if (current.status !== "CHECKING_LIBRARY") return { skipped: true, status: current.status };
 
+  // After classify has approved the request, and before the library search.
+  // POST /requests has only the raw query. search_acquisition never runs for a library hit.
+  await sayListenerFacts(ctx, current, { event: "request_received" });
+
   const query = [current.artist, current.title].filter(Boolean).join(" ") || current.raw_query;
   let songs;
   try {
@@ -21,10 +27,9 @@ export const handleCheckLibrary: JobHandler = async (ctx, job) => {
     if (err instanceof NotConfiguredError) {
       const row = getRequest(ctx.db, request.id);
       if (row && row.status !== "FAILED" && row.status !== "CANCELLED" && row.status !== "REJECTED" && row.status !== "READY") {
-        transitionRequest(ctx.db, {
+        await failRequest(ctx, {
           requestId: request.id,
-          to: "FAILED",
-          actor: ctx.workerId,
+          reason: "not_configured",
           payload: { error: err.message, outcome: "not_configured" },
           patch: { error: err.message },
         });

@@ -6,6 +6,7 @@ import {
   transitionRequest,
 } from "@subwave-ai/db";
 import type { JobHandler } from "../context.js";
+import { failRequest, failureReasonCategory } from "./fail-request.js";
 
 export const handleClassify: JobHandler = async (ctx, job) => {
   if (!job.request_id) throw new Error("classify job missing request_id");
@@ -78,12 +79,13 @@ export const handleClassify: JobHandler = async (ctx, job) => {
     });
     const current = getRequest(ctx.db, request.id);
     if (current && current.status !== "FAILED" && current.status !== "CANCELLED") {
-      transitionRequest(ctx.db, {
+      const message = (err as Error).message;
+      const category = failureReasonCategory(message);
+      await failRequest(ctx, {
         requestId: request.id,
-        to: "FAILED",
-        actor: ctx.workerId,
-        payload: { error: (err as Error).message },
-        patch: { error: (err as Error).message },
+        reason: category === "request_failed" ? "classify_failed" : category,
+        payload: { error: message },
+        patch: { error: message },
       });
     }
     throw err;
