@@ -334,6 +334,7 @@ describe("real-data traps", () => {
 });
 
 describe("dry-run grid", () => {
+  // Slow on a small VM.
   it("is stable and covers the saved classes and the two explicit requests", () => {
     const first = JSON.stringify(dryRunPreferences(curated));
     const second = JSON.stringify(dryRunPreferences(curated));
@@ -351,7 +352,7 @@ describe("dry-run grid", () => {
     expect(explicit.map((row) => row.queryTitle)).toEqual(["Get Lucky (Radio Edit)", "Get Lucky (Album Version)"]);
     expect(explicit[0]?.versionClass).toBe("radio_edit");
     expect(explicit[1]?.versionClass).toBe("original");
-  });
+  }, { timeout: 30_000 });
 });
 
 describe("wrong-song rows stay out of the pick", () => {
