@@ -4,8 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "@subwave-ai/shared";
 import { createRequest, enqueueJob, getRequest, listRequestEvents, openDatabase } from "@subwave-ai/db";
-import { createProviders, OllamaProvider, type ProviderBundle } from "@subwave-ai/providers";
+import { createProviders, OllamaProvider, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
 import { claimAndRun } from "./dispatch.js";
+import { handleClassify } from "./processors/classify.js";
 import type { WorkerContext } from "./context.js";
 
 const classification = {
@@ -135,6 +136,71 @@ describe("worker classify", () => {
       workerId: "worker-test",
     });
     expect(getRequest(db, request.id)?.status).toBe("REJECTED");
+  });
+
+  it("sends one out_of_format say when station policy rejects, and keeps REJECTED", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    let llmCalls = 0;
+    const llm = new OllamaProvider({
+      baseUrl: "http://ollama.test",
+      model: "test-model",
+      verifyStatus: "verified",
+      fetch: async () => {
+        llmCalls += 1;
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({ ...classification, electronic: false, station_match: false }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    const say: SayRequest[] = [];
+    const radio = {
+      say: async (input: SayRequest) => {
+        say.push(input);
+        throw new TypeError("fetch failed");
+      },
+    } as unknown as ProviderBundle["radio"];
+    const request = createRequest(db, { rawQuery: "play a country ballad" });
+    const job = enqueueJob(db, { type: "classify", requestId: request.id });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: {
+        llm,
+        library: {} as ProviderBundle["library"],
+        radio,
+        acquisition: {} as ProviderBundle["acquisition"],
+      },
+      workerId: "worker-test",
+    };
+    expect(await claimAndRun(ctx)).toBe(true);
+    const updated = getRequest(db, request.id);
+    expect(updated?.status).toBe("REJECTED");
+    expect(updated?.error).toBeNull();
+    expect(JSON.parse(updated?.policy_json ?? "{}").decision).toBe("REJECTED");
+    expect(JSON.parse(updated?.classification_json ?? "{}").electronic).toBe(false);
+    const events = listRequestEvents(db, request.id).map((event) => `${event.from_status}->${event.to_status}`);
+    expect(events).toContain("CLASSIFYING->REJECTED");
+    expect(events.some((event) => event.endsWith("->FAILED"))).toBe(false);
+    expect(say).toEqual([
+      {
+        text: "event: request_failed\ntrack: Artist - Track\nreason: out_of_format",
+        kind: "dj-speak",
+      },
+    ]);
+    expect(llmCalls).toBe(1);
+
+    enqueueJob(db, { type: "classify", requestId: request.id });
+    expect(await claimAndRun(ctx)).toBe(true);
+    await handleClassify(ctx, job);
+    expect(getRequest(db, request.id)?.status).toBe("REJECTED");
+    expect(say).toHaveLength(1);
+    expect(llmCalls).toBe(1);
   });
 
   it("fails a filled but unverified Ollama config with an actionable message and does not call it", async () => {

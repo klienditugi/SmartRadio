@@ -48,7 +48,7 @@ SmartRadio provides **event + context only**. SUB/WAVE owns DJ personality, word
 | `request_received` | `check_library`, after classify approved the request, including a library hit | `event`, `track`, `requester` when known |
 | `copy_found_retrieval_started` | After `enqueueDownload`, the `DOWNLOADING` / `REQUEST_ACCEPTED` move, and poll scheduling | `event`, `track`, `requester` when known |
 | `queued_coming_up` | After `POST /dj/queue-track` succeeds and the request is `READY` | `event`, `track`, `requester` when known |
-| `request_failed` | The single move to `FAILED`. `reason` is a stable category | `event`, `track`, `requester` when known, `reason` |
+| `request_failed` | The single move to `FAILED`. `reason` is a stable category. Station-policy rejection stays `REJECTED` and still sends this say once with `reason: out_of_format` | `event`, `track`, `requester` when known, `reason` |
 
 **Notify binding (A4):** `POST {base_url}/dj/say` with the same admin HTTP Basic credentials as the other `/dj/*` routes. Body is `{ text, mode: "styled", kind }` where `text` is context only (required, max 500 characters), `kind` defaults to `"dj-speak"` and may be `"link"`, and `sfx` is optional. Success is `{ ok, mode, kind, spoken, sfx }`. Public `POST /request` is not used for announcements. There is no second DJ personality in SmartRadio.
 

@@ -7,6 +7,7 @@ import {
 } from "@subwave-ai/db";
 import type { JobHandler } from "../context.js";
 import { failRequest, failureReasonCategory } from "./fail-request.js";
+import { sayListenerFacts } from "./say-listener.js";
 
 export const handleClassify: JobHandler = async (ctx, job) => {
   if (!job.request_id) throw new Error("classify job missing request_id");
@@ -36,7 +37,9 @@ export const handleClassify: JobHandler = async (ctx, job) => {
     });
     const policy = applyStationPolicy(classification, ctx.config.policy);
     if (policy.decision === "REJECTED") {
-      transitionRequest(ctx.db, {
+      // Station policy is the out-of-format path. Status stays REJECTED.
+      // FAILED is a different terminal state, so this does not call failRequest.
+      const rejected = transitionRequest(ctx.db, {
         requestId: request.id,
         to: "REJECTED",
         actor: ctx.workerId,
@@ -49,6 +52,7 @@ export const handleClassify: JobHandler = async (ctx, job) => {
           policy_json: JSON.stringify(policy),
         },
       });
+      await sayListenerFacts(ctx, rejected, { event: "request_failed", reason: "out_of_format" });
       return { decision: "REJECTED", policy };
     }
     transitionRequest(ctx.db, {
