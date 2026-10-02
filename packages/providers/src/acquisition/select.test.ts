@@ -1032,7 +1032,7 @@ describe("slskd search ranking", () => {
             },
           ],
         },
-        { allowedExtensions: [".ogg"], minFileSizeMb: null, query: { title: "drums" } },
+        { allowedExtensions: [".ogg"], minFileSizeMb: null, query: { title: "drums", text: "drums" } },
       )?.filename,
     ).toBe(`${parts}drums.ogg`);
     expect(
@@ -1045,7 +1045,7 @@ describe("slskd search ranking", () => {
             },
           ],
         },
-        { allowedExtensions: [".ogg"], minFileSizeMb: null, query: { title: "drums" } },
+        { allowedExtensions: [".ogg"], minFileSizeMb: null, query: { title: "drums", text: "drums" } },
       ),
     ).toBeNull();
   });

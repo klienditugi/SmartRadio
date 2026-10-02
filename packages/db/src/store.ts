@@ -375,6 +375,27 @@ export function claimEnqueueAttempt(
   return claim.immediate();
 }
 
+/**
+ * Claim the single listener say for this request and event.
+ * BEGIN IMMEDIATE so two workers cannot both send. The row stays after a
+ * failed send; callers must not retry.
+ */
+export function claimListenerSay(db: Db, input: { requestId: string; event: string }): boolean {
+  const claim = db.transaction((): boolean => {
+    const existing = db
+      .prepare(`SELECT 1 AS ok FROM listener_say_events WHERE request_id = ? AND event = ?`)
+      .get(input.requestId, input.event);
+    if (existing) return false;
+    db.prepare(`INSERT INTO listener_say_events (request_id, event, claimed_at) VALUES (?, ?, ?)`).run(
+      input.requestId,
+      input.event,
+      now(),
+    );
+    return true;
+  });
+  return claim.immediate();
+}
+
 export function listJobs(db: Db, limit = 100): JobRow[] {
   return db.prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?").all(limit) as JobRow[];
 }

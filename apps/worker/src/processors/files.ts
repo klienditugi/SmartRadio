@@ -1,13 +1,14 @@
 import fs from "node:fs";
 import { fileVersionClass, type CandidateTrack, type VersionClass } from "@subwave-ai/core";
 import { enqueueJob, getRequest, transitionRequest, updateJobPayload, type JobRow } from "@subwave-ai/db";
-import { NeverPlayError, NotConfiguredError, ProviderHttpError } from "@subwave-ai/providers";
+import { NeverPlayError, NotConfiguredError, ProviderHttpError, providerId } from "@subwave-ai/providers";
 import { isAllowedAudioExtension, safeJoin } from "@subwave-ai/shared";
 import type { JobHandler } from "../context.js";
 import { FFPROBE_DURATION_TOLERANCE_SECONDS, probeMatchesExtension, runFfprobe } from "./ffprobe.js";
 import { runIntegration } from "./guard.js";
+import { failRequest, failureReasonCategory } from "./fail-request.js";
 import { moveFileSync, removeEmptyChildDirectory } from "./move-file.js";
-import { trackReadyContext } from "./notify.js";
+import { sayListenerFacts } from "./say-listener.js";
 
 /** Wait for Navidrome’s passive scanner before the next /dj/search. Not a scan trigger. */
 const TRACK_READY_POLL_MS = 15_000;
@@ -47,7 +48,7 @@ type FilePayload = {
 type TrackReadyPayload = FilePayload & {
   track_ready?: boolean;
   search_wait_started_at?: number;
-  /** Set once /dj/search returned string ids that were not the imported file. */
+  /** Set once /dj/search returned ids that were not the imported file. */
   handoff_unmatched?: boolean;
 };
 
@@ -71,9 +72,9 @@ function optionalString(value: unknown): string | undefined {
 }
 
 /**
- * `/dj/search` hits with a string id. Numeric ids are not treated as visible.
- * Only `id`, `title`, `artist`, and `album` are read. Those are the fields the
- * SUB/WAVE client and docs define. There is no path and no duration.
+ * `/dj/search` hits SmartRadio can queue. A finite numeric id is coerced to a
+ * string at this boundary. Other non-string ids are not visible. Only `id`,
+ * `title`, `artist`, and `album` are read. There is no path and no duration.
  */
 function searchHits(search: unknown): SearchHit[] {
   if (!search || typeof search !== "object") return [];
@@ -83,10 +84,11 @@ function searchHits(search: unknown): SearchHit[] {
   for (const row of results) {
     if (!row || typeof row !== "object") continue;
     const item = row as { id?: unknown; title?: unknown; artist?: unknown; album?: unknown };
-    if (typeof item.id !== "string" || item.id.length === 0) continue;
+    const id = providerId(item.id);
+    if (!id) continue;
     if (typeof item.title !== "string" || item.title.length === 0) continue;
     hits.push({
-      id: item.id,
+      id,
       title: item.title,
       artist: optionalString(item.artist),
       album: optionalString(item.album),
@@ -95,7 +97,7 @@ function searchHits(search: unknown): SearchHit[] {
   return hits;
 }
 
-/** First `/dj/search` hit with a string id. Library-hit playback still uses this. */
+/** First `/dj/search` hit with an id. Library-hit playback still uses this. */
 function visibleTrack(search: unknown): VisibleTrack | null {
   return searchHits(search)[0] ?? null;
 }
@@ -166,7 +168,7 @@ function hitVersionClass(title: string): VersionClass {
 /**
  * Every artist/title hit, then only those in the selected file's version class.
  * Exactly one may be queued. None or several is ambiguous. Not a file identity
- * match: the response has no path, and its string `id` is assigned after the scan.
+ * match: the response has no path, and its `id` is assigned after the scan.
  */
 function matchImportedTrack(
   search: unknown,
@@ -188,36 +190,35 @@ function matchImportedTrack(
   return { kind: "ambiguous" };
 }
 
-function recordFailure(ctx: Parameters<JobHandler>[0], requestId: string, message: string): void {
-  transitionRequest(ctx.db, {
+async function recordFailure(ctx: Parameters<JobHandler>[0], requestId: string, message: string): Promise<void> {
+  await failRequest(ctx, {
     requestId,
-    to: "FAILED",
-    actor: ctx.workerId,
+    reason: failureReasonCategory(message),
     payload: { error: message, reason: message },
     patch: { error: message },
   });
 }
 
-function fail(ctx: Parameters<JobHandler>[0], requestId: string, message: string): never {
-  recordFailure(ctx, requestId, message);
+async function fail(ctx: Parameters<JobHandler>[0], requestId: string, message: string): Promise<never> {
+  await recordFailure(ctx, requestId, message);
   throw new Error(message);
 }
 
-function moveInto(
+async function moveInto(
   ctx: Parameters<JobHandler>[0],
   requestId: string,
   source: string,
   destination: string,
   expected: number | undefined,
   occupiedMessage: string,
-): void {
+): Promise<void> {
   if (fs.existsSync(destination)) {
-    fail(ctx, requestId, occupiedMessage);
+    return await fail(ctx, requestId, occupiedMessage);
   }
   try {
     moveFileSync({ source, destination, expectedBytes: expected });
   } catch (err) {
-    fail(ctx, requestId, (err as Error).message);
+    return await fail(ctx, requestId, (err as Error).message);
   }
 }
 
@@ -255,39 +256,39 @@ export const handleValidateFile: JobHandler = async (ctx, job) => {
   // A5: never invent `{requestId}.bin` — require the real completed basename from acquisition.
   const filename = payload.filename;
   if (!filename || typeof filename !== "string") {
-    fail(ctx, request.id, "validate_file missing real download basename");
+    return await fail(ctx, request.id, "validate_file missing real download basename");
   }
   if (!isAllowedAudioExtension(filename, ctx.config.files.allowed_extensions)) {
-    fail(ctx, request.id, `disallowed extension for ${filename}`);
+    return await fail(ctx, request.id, `disallowed extension for ${filename}`);
   }
   const source = safeJoin(ctx.config.paths.downloads, filename);
   if (!fs.existsSync(source)) {
-    fail(ctx, request.id, `download missing: ${filename}`);
+    return await fail(ctx, request.id, `download missing: ${filename}`);
   }
   const stat = fs.statSync(source);
   if (stat.size <= 0 || stat.size > ctx.config.files.max_bytes) {
-    fail(ctx, request.id, `invalid size ${stat.size}`);
+    return await fail(ctx, request.id, `invalid size ${stat.size}`);
   }
   const expected = expectedBytes(payload);
   if (expected !== undefined && stat.size !== expected) {
-    fail(ctx, request.id, `size mismatch: source ${stat.size} bytes, expected ${expected}`);
+    return await fail(ctx, request.id, `size mismatch: source ${stat.size} bytes, expected ${expected}`);
   }
   const probe = await runFfprobe(ctx.config.files.ffprobe_path, source);
-  if (probe === "unavailable") fail(ctx, request.id, "ffprobe_unavailable");
-  if (probe === "failed") fail(ctx, request.id, "ffprobe_failed");
-  if (!probeMatchesExtension(filename, probe)) fail(ctx, request.id, "ffprobe_format_mismatch");
+  if (probe === "unavailable") return await fail(ctx, request.id, "ffprobe_unavailable");
+  if (probe === "failed") return await fail(ctx, request.id, "ffprobe_failed");
+  if (!probeMatchesExtension(filename, probe)) return await fail(ctx, request.id, "ffprobe_format_mismatch");
   const expectedDuration = finiteNumber(payload.duration_seconds);
   if (expectedDuration === undefined || expectedDuration <= 0) {
-    fail(ctx, request.id, "duration_unknown");
+    return await fail(ctx, request.id, "duration_unknown");
   }
   if (
     probe.durationSeconds === undefined ||
     Math.abs(probe.durationSeconds - expectedDuration) > FFPROBE_DURATION_TOLERANCE_SECONDS
   ) {
-    fail(ctx, request.id, "ffprobe_duration_mismatch");
+    return await fail(ctx, request.id, "ffprobe_duration_mismatch");
   }
   const dest = safeJoin(ctx.config.paths.staging, filename);
-  moveInto(ctx, request.id, source, dest, expected, `staging file already exists: ${filename}`);
+  await moveInto(ctx, request.id, source, dest, expected, `staging file already exists: ${filename}`);
   removeEmptyChildDirectory(ctx.config.paths.downloads, source);
   const importPayload: FilePayload = { filename };
   if (expected !== undefined) importPayload.size = expected;
@@ -310,16 +311,16 @@ export const handleImportLibrary: JobHandler = async (ctx, job) => {
   const payload: FilePayload = job.payload_json ? (JSON.parse(job.payload_json) as FilePayload) : {};
   const filename = payload.filename;
   if (!filename || typeof filename !== "string") {
-    fail(ctx, request.id, "import_library missing real download basename");
+    return await fail(ctx, request.id, "import_library missing real download basename");
   }
   const source = safeJoin(ctx.config.paths.staging, filename);
-  if (!fs.existsSync(source)) fail(ctx, request.id, "staging file missing");
+  if (!fs.existsSync(source)) return await fail(ctx, request.id, "staging file missing");
   const expected = expectedBytes(payload);
   const dest = safeJoin(ctx.config.paths.library, filename);
-  moveInto(ctx, request.id, source, dest, expected, `library file already exists: ${filename}`);
+  await moveInto(ctx, request.id, source, dest, expected, `library file already exists: ${filename}`);
   removeEmptyChildDirectory(ctx.config.paths.staging, source);
   // A4: Navidrome scans passively (~1 min). Do not enqueue index_library on this path.
-  // queue_radio polls GET /dj/search, then say(TRACK_READY), then POST /dj/queue-track.
+  // queue_radio polls GET /dj/search, then POST /dj/queue-track, then says queued_coming_up.
   const queuePayload: TrackReadyPayload = { filename, track_ready: true, search_wait_started_at: Date.now() };
   const duration = finiteNumber(payload.duration_seconds);
   if (duration !== undefined && duration > 0) queuePayload.duration_seconds = duration;
@@ -375,10 +376,9 @@ async function queueVisibleTrack(
     );
   } catch (err) {
     if (err instanceof NeverPlayError) {
-      transitionRequest(ctx.db, {
+      await failRequest(ctx, {
         requestId,
-        to: "FAILED",
-        actor: ctx.workerId,
+        reason: "never_play",
         payload: { never_play: true, error: "never-play" },
         patch: { error: "never-play" },
       });
@@ -392,6 +392,8 @@ async function queueVisibleTrack(
     actor: ctx.workerId,
     payload: event ? { event, track } : { track },
   });
+  const ready = getRequest(ctx.db, requestId);
+  if (ready) await sayListenerFacts(ctx, ready, { event: "queued_coming_up" });
   return { queued: true, track };
 }
 
@@ -405,7 +407,7 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
     return await queueRadio(ctx, job, request, payload);
   } catch (err) {
     if (err instanceof NotConfiguredError) {
-      fail(ctx, request.id, err.message);
+      return await fail(ctx, request.id, err.message);
     }
     if (payload.track_ready === true && job.attempts >= job.max_attempts && isRadioUnreachable(err)) {
       const current = getRequest(ctx.db, request.id);
@@ -416,7 +418,7 @@ export const handleQueueRadio: JobHandler = async (ctx, job) => {
         current.status !== "READY" &&
         current.status !== "REJECTED"
       ) {
-        fail(ctx, request.id, RADIO_UNREACHABLE);
+        return await fail(ctx, request.id, RADIO_UNREACHABLE);
       }
     }
     throw err;
@@ -439,13 +441,13 @@ async function queueRadio(
     const started = finiteNumber(payload.search_wait_started_at);
     if (searchWaitTimedOut(started, timeoutMs)) {
       const reason = payload.handoff_unmatched ? HANDOFF_NO_MATCH : SEARCH_VISIBLE_TIMEOUT;
-      recordFailure(ctx, request.id, reason);
+      await recordFailure(ctx, request.id, reason);
       return { failed: true, reason };
     }
     const search = await runIntegration(ctx, request.id, () => ctx.providers.radio.djSearch(radioQuery(request)));
     const picked = matchImportedTrack(search, request, optionalString(payload.version_class));
     if (picked.kind === "ambiguous") {
-      recordFailure(ctx, request.id, HANDOFF_AMBIGUOUS);
+      await recordFailure(ctx, request.id, HANDOFF_AMBIGUOUS);
       return { failed: true, reason: HANDOFF_AMBIGUOUS };
     }
     const track = picked.kind === "match" ? picked.track : null;
@@ -454,7 +456,7 @@ async function queueRadio(
       const unmatched = searchHits(search).length > 0;
       if (searchWaitTimedOut(start, timeoutMs)) {
         const reason = unmatched ? HANDOFF_NO_MATCH : SEARCH_VISIBLE_TIMEOUT;
-        recordFailure(ctx, request.id, reason);
+        await recordFailure(ctx, request.id, reason);
         return { failed: true, reason };
       }
       const nextPayload: TrackReadyPayload = {
@@ -473,12 +475,6 @@ async function queueRadio(
       });
       return { waiting: true, reason: "not_search_visible" };
     }
-    await runIntegration(ctx, request.id, () =>
-      ctx.providers.radio.say({
-        text: trackReadyContext(ctx.db, request),
-        kind: "dj-speak",
-      }),
-    );
     const queued = await queueVisibleTrack(ctx, request.id, track, "TRACK_READY");
     if (!queued.queued) return queued;
     return { ...queued, event: "TRACK_READY" as const };
@@ -493,10 +489,9 @@ async function queueRadio(
   const search = await runIntegration(ctx, request.id, () => ctx.providers.radio.djSearch(radioQuery(current)));
   const track = visibleTrack(search);
   if (!track) {
-    transitionRequest(ctx.db, {
+    await failRequest(ctx, {
       requestId: request.id,
-      to: "FAILED",
-      actor: ctx.workerId,
+      reason: "no_radio_search_result",
       payload: { error: "no radio search result" },
       patch: { error: "no radio search result" },
     });

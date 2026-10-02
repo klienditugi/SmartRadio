@@ -17,6 +17,7 @@ export type {
   SayResult,
 } from "./types.js";
 export { SAY_KINDS, SAY_TEXT_MAX_CHARS } from "./types.js";
+export { providerId } from "./ids.js";
 export { OllamaProvider, NavidromeProvider, SubWaveProvider, SoulseekProvider, UnverifiedAcquisitionProvider };
 export { NeverPlayError } from "./radio/subwave.js";
 export { createProviders } from "./factory.js";

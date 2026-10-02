@@ -39,20 +39,23 @@ SmartRadio does **not** manage Navidrome scanning on the happy path. Once a vali
 
 `startScan` / `getScanStatus` and admin `POST /api/v1/admin/library/scan` remain **optional / ops-only**. They are not required for the primary workflow.
 
-### Two semantic radio events
+### Listener fact events
 
 SmartRadio provides **event + context only**. SUB/WAVE owns DJ personality, wording, voice, station identity, and the spoken announcement. There is **no** second DJ personality or prompt system in SmartRadio.
 
-| Event | When | Listener meaning |
+| `event` | When | Facts lines |
 | --- | --- | --- |
-| `REQUEST_ACCEPTED` | A verified acquisition provider has accepted `enqueueDownload` | Factual: event + track (+ requester if known) + acquisition started |
-| `TRACK_READY` | Validated file is in the music library and `GET /dj/search` returns a string `id` | Factual: event + track (+ requester if known) + validated/available for airplay |
+| `request_received` | `check_library`, after classify approved the request, including a library hit | `event`, `track`, `requester` when known |
+| `copy_found_retrieval_started` | After `enqueueDownload`, the `DOWNLOADING` / `REQUEST_ACCEPTED` move, and poll scheduling | `event`, `track`, `requester` when known |
+| `queued_coming_up` | After `POST /dj/queue-track` succeeds and the request is `READY` | `event`, `track`, `requester` when known |
+| `request_rejected` | Station-policy rejection stays `REJECTED`. One say, claimed as `request_rejected`, with `reason: out_of_format`. An admin override to `APPROVED` does not repeat it. | `event`, `track`, `requester` when known, `reason` |
+| `request_failed` | The single move to `FAILED`. `reason` is a stable category. This key is not used for out-of-format, so an overridden request can still say it if it later fails. | `event`, `track`, `requester` when known, `reason` |
 
-**Notify binding (A4):** `POST {base_url}/dj/say` with the same admin HTTP Basic credentials as the other `/dj/*` routes. Body is `{ text, mode: "styled", kind }` where `text` is context only (required, max 500 characters), `kind` defaults to `"dj-speak"` and may be `"link"`, and `sfx` is optional. Success is `{ ok, mode, kind, spoken, sfx }`. Public `POST /request` is not used for announcements. There is no second DJ personality in SmartRadio.
+**Notify binding (A4):** `POST {base_url}/dj/say` with the same admin HTTP Basic credentials as the other `/dj/*` routes. Listener says send `{ text, mode: "styled", kind: "dj-speak" }` and do not send `sfx`. `text` is facts only. The wire max is 500 characters. Styled mode cuts the operator instruction at 300, so listener facts are capped at 300 by shortening the track line first. Success is `{ ok, mode, kind, spoken, sfx }`. HTTP 500 means the SUB/WAVE LLM failed and nothing went on air; SmartRadio logs that and continues. Public `POST /request` is not used for announcements. There is no second DJ personality in SmartRadio.
 
-`REQUEST_ACCEPTED` is not sent on approval, on search, or when a download job only polls transfers. If `AcquisitionProvider` is unverified, the worker fails with `acquire_unavailable` and does not call `say`.
+`copy_found_retrieval_started` is not sent on approval, on search, or when a download job only polls transfers. If `AcquisitionProvider` is unverified, the worker throws `acquire_unavailable`, leaves the request where it is, and does not call `say`. That remains a retry. It is not a `FAILED` transition.
 
-`TRACK_READY` order is fixed: search-visible → `say` → `POST /dj/queue-track` with `{ id, title }` and optional `artist` / `album`. HTTP 409 is never-play and fails the request.
+`TRACK_READY` stays the post-import `READY` event. The say order is search-visible → `POST /dj/queue-track` with `{ id, title }` and optional `artist` / `album` → `queued_coming_up`. HTTP 409 is never-play: the request fails and the say is `request_failed` with `reason: never_play`.
 
 Playback handoff continues to use the verified admin APIs under the opaque `/api` `base_url`:
 
@@ -66,11 +69,11 @@ Playback handoff continues to use the verified admin APIs under the opaque `/api
 ## Amendment A4 (locked)
 
 - `RadioProvider.say` → `POST {base_url}/dj/say`, admin Basic, `mode` forced to `"styled"`, `kind` `"dj-speak"` or `"link"`, `text` truncated to 500 characters. Credentials and base URL stay in config/secrets.
-- `REQUEST_ACCEPTED` fires from the download processor after `enqueueDownload` returns. Unavailable acquisition (`acquire_unavailable`) does not announce and does not enter `DOWNLOADING`.
-- `TRACK_READY` fires from `queue_radio` only for a post-import job (`track_ready`), and only after `GET /dj/search?q=` yields exactly one string `id` in the selected file's version class. Artist and title are compared after lowercase, trim, collapsed whitespace, and folding `'` / `’` / `‘`. A hit title may be that title plus one trailing `( )` or `[ ]` whose label is an accepted version. A bare title or Original Mix is `original`; the other labels use the selector classes (`extended`, including Club Mix, `radio_edit`, `remix`; Album Version is `original`). Several hits in that class, or none of the title matches in that class, fail immediately as `handoff_ambiguous`. The defined body is `{ results, hasMore, ok }` with string `id` and `title` and optional `artist` and `album`. It has no path, filename, or duration. The string `id` cannot be tied to the file just placed. This is not a file identity match. Optional `album` is not compared. Then `say`, then `POST /dj/queue-track`. A miss with no title match reschedules the same job until `radio.search_visible_timeout_ms` (default 30 minutes, `1800000`). The wait start is stored on that job (`search_wait_started_at`) so a restart does not extend it. The reschedule interval stays 15 seconds. It does not call Navidrome `startScan`.
-- When nothing with a string id appears before that limit, the request becomes `FAILED` with error `search_visible_timeout`. When hits appear but none match artist and title, the same wait ends as `handoff_no_match` and nothing is queued. `handoff_ambiguous` is immediate: nothing is queued, the library file stays, and no new acquisition is enqueued. When `GET /dj/search` cannot connect and the `queue_radio` job uses up its attempts, the request becomes `FAILED` with error `radio_unreachable`. None of these send `TRACK_READY`, delete the library file, or enqueue another acquisition, search, or download.
-- Library-hit playback stays `GET /dj/search` → `POST /dj/queue-track` and does not send `TRACK_READY`.
-- HTTP 409 from `queue-track` is never-play (`FAILED`).
+- `copy_found_retrieval_started` fires from the download processor after `enqueueDownload` returns, the move to `DOWNLOADING`, and poll scheduling. The state payload event remains `REQUEST_ACCEPTED`. Unavailable acquisition (`acquire_unavailable`) does not announce and does not enter `DOWNLOADING`.
+- `TRACK_READY` fires from `queue_radio` only for a post-import job (`track_ready`), and only after `GET /dj/search?q=` yields exactly one id in the selected file's version class. A JSON number is coerced to a string at parse. Artist and title are compared after lowercase, trim, collapsed whitespace, and folding `'` / `’` / `‘`. A hit title may be that title plus one trailing `( )` or `[ ]` whose label is an accepted version. A bare title or Original Mix is `original`; the other labels use the selector classes (`extended`, including Club Mix, `radio_edit`, `remix`; Album Version is `original`). Several hits in that class, or none of the title matches in that class, fail immediately as `handoff_ambiguous`. The defined body is `{ results, hasMore, ok }` with `id` and `title` and optional `artist` and `album`. It has no path, filename, or duration. The `id` cannot be tied to the file just placed. This is not a file identity match. Optional `album` is not compared. Then `POST /dj/queue-track`, then a best-effort `queued_coming_up` say. There is no say before the queue. A miss with no title match reschedules the same job until `radio.search_visible_timeout_ms` (default 30 minutes, `1800000`). The wait start is stored on that job (`search_wait_started_at`) so a restart does not extend it. The reschedule interval stays 15 seconds. It does not call Navidrome `startScan`.
+- When nothing with an id appears before that limit, the request becomes `FAILED` with error `search_visible_timeout`. When hits appear but none match artist and title, the same wait ends as `handoff_no_match` and nothing is queued. `handoff_ambiguous` is immediate: nothing is queued, the library file stays, and no new acquisition is enqueued. When `GET /dj/search` cannot connect and the `queue_radio` job uses up its attempts, the request becomes `FAILED` with error `radio_unreachable`. None of these send `TRACK_READY`, delete the library file, or enqueue another acquisition, search, or download.
+- Library-hit playback stays `GET /dj/search` → `POST /dj/queue-track` and does not send `TRACK_READY`. A successful queue still says `queued_coming_up`. `request_received` was already sent at `check_library`.
+- HTTP 409 from `queue-track` is never-play (`FAILED`) and says `request_failed` with `reason: never_play`.
 - No acquisition daemon is added in this amendment.
 
 ## Amendment A5 (locked)
@@ -106,7 +109,7 @@ A3 / A4 mapping:
 
 - `RECEIVED` = semantic `REQUESTED`
 - After `APPROVED`, library check may skip download (`ALREADY_AVAILABLE`) or enter acquisition (`SEARCHING` …)
-- File flow: `/music/downloads` (landing) → validation (extension, size, ffprobe) → move into `/music/library` (final) → poll `GET /dj/search` until an artist and title hit matches or `search_visible_timeout` / `handoff_no_match` → `say` (`TRACK_READY`) → `POST /dj/queue-track`
+- File flow: `/music/downloads` (landing) → validation (extension, size, ffprobe) → move into `/music/library` (final) → poll `GET /dj/search` until an artist and title hit matches or `search_visible_timeout` / `handoff_no_match` → `POST /dj/queue-track` → `queued_coming_up`
 - Downloads → staging and staging → library move that one validated file. Same filesystem uses `rename`. A cross-filesystem move copies to a temporary name in the destination directory, fsyncs when the platform allows, checks the byte size against the source and against the transfer size when that size is known, renames the temporary file into place, then removes the source. If the check fails, the temporary file is removed and the source stays. An existing library file is left in place and the request fails. Nothing else under downloads is deleted. An empty directory that contained only that file, and is not the downloads or staging root, may be removed. That removal is not recursive. The worker must be allowed to delete that one file in the downloads directory (the completed-downloads directory shared with slskd). Unlink needs write permission on the directory.
 - `IMPORTING → READY` is the happy-path edge (`queue_radio`). `IMPORTING → INDEXING` remains only when an operator enqueues `index_library` for that request. Standalone admin scan has no request id.
 

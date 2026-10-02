@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { CONFIGURED_UNVERIFIED_MESSAGE, NAVIDROME_NOT_CONFIGURED, type VerifyStatus } from "@subwave-ai/shared";
 import { defaultFetch, joinUrl, NotConfiguredError, ProviderHttpError, readJson, type FetchLike, type ProviderHealth } from "../http.js";
+import { providerId } from "../ids.js";
 import type { LibrarySong, MusicLibraryProvider } from "../types.js";
 
 export type NavidromeProviderOptions = {
@@ -14,7 +15,7 @@ export type NavidromeProviderOptions = {
 };
 
 type SubsonicSong = {
-  id: string | number;
+  id?: unknown;
   title?: string;
   artist?: string;
   album?: string;
@@ -22,15 +23,51 @@ type SubsonicSong = {
   suffix?: string;
 };
 
-function asSong(raw: SubsonicSong): LibrarySong {
+type MusicFolder = {
+  id: string;
+  name?: string;
+};
+
+function asSong(raw: SubsonicSong): LibrarySong | null {
+  const id = providerId(raw.id);
+  if (!id) return null;
   return {
-    id: String(raw.id),
+    id,
     title: raw.title ?? "",
     artist: raw.artist,
     album: raw.album,
     path: raw.path,
     suffix: raw.suffix,
   };
+}
+
+function asSongs(song: SubsonicSong | SubsonicSong[] | undefined): LibrarySong[] {
+  const rows = song == null ? [] : Array.isArray(song) ? song : [song];
+  const songs: LibrarySong[] = [];
+  for (const row of rows) {
+    const parsed = asSong(row);
+    if (parsed) songs.push(parsed);
+  }
+  return songs;
+}
+
+/** `getMusicFolders` may return one object or an array. Folder ids are strings. */
+function asMusicFolders(payload: Record<string, unknown>): MusicFolder[] {
+  const wrapper = payload.musicFolders;
+  if (!wrapper || typeof wrapper !== "object") return [];
+  const raw = (wrapper as { musicFolder?: unknown }).musicFolder;
+  const rows = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
+  const folders: MusicFolder[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as { id?: unknown; name?: unknown };
+    const id = providerId(item.id);
+    if (!id) continue;
+    const folder: MusicFolder = { id };
+    if (typeof item.name === "string" && item.name.length > 0) folder.name = item.name;
+    folders.push(folder);
+  }
+  return folders;
 }
 
 export class NavidromeProvider implements MusicLibraryProvider {
@@ -110,14 +147,22 @@ export class NavidromeProvider implements MusicLibraryProvider {
       }),
     );
     const result = (payload.searchResult3 ?? {}) as { song?: SubsonicSong | SubsonicSong[] };
-    const songs = result.song ?? [];
-    return (Array.isArray(songs) ? songs : [songs]).map(asSong);
+    return asSongs(result.song);
   }
 
   async getSong(id: string): Promise<LibrarySong | null> {
-    const payload = this.unwrap(await this.rest("getSong", { id: String(id) }));
+    const payload = this.unwrap(await this.rest("getSong", { id: providerId(id) ?? String(id) }));
     const song = payload.song as SubsonicSong | undefined;
     return song ? asSong(song) : null;
+  }
+
+  /**
+   * Subsonic `getMusicFolders`. Not used on the request path. Folder id `1`
+   * arrives as a JSON number and is stored as the string `"1"`.
+   */
+  async getMusicFolders(): Promise<MusicFolder[]> {
+    const payload = this.unwrap(await this.rest("getMusicFolders"));
+    return asMusicFolders(payload);
   }
 
   /** Ops-only index trigger. A3 happy path relies on Navidrome’s own ~1min scanner. */
