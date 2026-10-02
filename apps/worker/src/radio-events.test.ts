@@ -360,11 +360,11 @@ describe("A4 radio events", () => {
     expect(scanCalls).toEqual([]);
   });
 
-  it("waits without saying when /dj/search has no string id", async () => {
+  it("waits without saying when /dj/search has no id", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
     const { radio, library, acquisition, order, say } = harness({
-      search: { results: [{ id: 99, title: "Not a string id" }] },
+      search: { results: [{ id: { n: 99 }, title: "Not an id" }, { title: "Missing id" }] },
     });
     const request = createRequest(db, { rawQuery: "pending" });
     advance(db, request.id, "IMPORTING");
@@ -391,6 +391,36 @@ describe("A4 radio events", () => {
     expect(followUps[0]?.type).toBe("queue_radio");
     expect(followUps[0]?.run_after).toBeGreaterThan(Date.now());
     expect(JSON.parse(followUps[0]?.payload_json ?? "{}").track_ready).toBe(true);
+  });
+
+  it("queues a numeric /dj/search id as a string", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const { radio, library, acquisition, queued } = harness({
+      search: { results: [{ id: 1, title: "Track", artist: "Artist" }] },
+    });
+    const request = createRequest(db, { rawQuery: "numeric id" });
+    advance(db, request.id, "IMPORTING", { artist: "Artist", title: "Track" });
+    const result = await handleQueueRadio(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, {
+        type: "queue_radio",
+        requestId: request.id,
+        payload: { track_ready: true, filename: "track.mp3", version_class: "original", search_wait_started_at: Date.now() },
+      }),
+    );
+    expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
+    expect(queued).toEqual([{ id: "1", title: "Track", artist: "Artist", album: undefined }]);
+    expect(typeof (queued[0] as { id: unknown }).id).toBe("string");
+    const ready = listRequestEvents(db, request.id).find((event) => event.to_status === "READY");
+    const stored = JSON.parse(ready?.payload_json ?? "{}") as { track?: { id?: unknown } };
+    expect(stored.track?.id).toBe("1");
+    expect(typeof stored.track?.id).toBe("string");
   });
 
   it("records never-play when queue-track returns 409 after TRACK_READY", async () => {

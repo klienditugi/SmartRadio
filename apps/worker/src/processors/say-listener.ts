@@ -23,8 +23,9 @@ export async function sayListenerFacts(
   try {
     const text = factsForRequest(ctx.db, request, input.event, input.reason);
     await ctx.providers.radio.say({ text, kind: "dj-speak" });
-  } catch {
+  } catch (err) {
     const reason = input.reason ? ` reason=${input.reason}` : "";
-    console.error(`listener say failed event=${input.event}${reason}`);
+    const detail = err instanceof Error ? ` ${err.message}` : "";
+    console.error(`listener say failed event=${input.event}${reason}${detail}`);
   }
 }

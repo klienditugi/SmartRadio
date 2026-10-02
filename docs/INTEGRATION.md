@@ -45,7 +45,7 @@ Navidrome, SUB/WAVE, and Ollama settings are **optional at first boot**. Empty o
 - Auth: `u` + `t/s` (md5 token from password + salt)
 - Happy-path methods: `search3`, `getSong`
 - Ops-only methods: `startScan`, `getScanStatus` (admin index / scan-trigger). **Not required** for the primary workflow.
-- IDs are strings end-to-end
+- IDs are strings end-to-end. A numeric JSON id is coerced to a string at the parse boundary before it is stored or compared. `getMusicFolders` returns folder id `1` as a number; that value is `"1"`. `search3` and `getSong` use the same coercion. `getMusicFolders` is not on the request path.
 - A3: SmartRadio does **not** manage Navidrome scanning on the happy path. After a validated file is in `/music/library`, the existing ~1 minute scanner discovers it.
 
 ## SUB/WAVE (VERIFIED = perminder-klair/subwave) — RadioProvider
@@ -70,14 +70,16 @@ SmartRadio supplies **context text only**. SUB/WAVE owns DJ personality, wording
 
 `POST {base_url}/dj/say` uses the same admin Basic auth as the other admin DJ routes.
 
+`POST /dj/say` is admin only. There is no `context` field. `mode: "styled"` uses `text` as the operator instruction and cuts it at 300 characters. Any other `mode` is raw. If the SUB/WAVE LLM fails, the route returns HTTP 500 and nothing goes on air.
+
 | Field | Rule |
 | --- | --- |
-| `text` | Required. Max 500 characters (adapter truncates). Empty text is rejected. |
-| `mode` | Always `"styled"`. |
-| `kind` | `"dj-speak"` (default) or `"link"`. |
-| `sfx` | Optional passthrough. |
+| `text` | Required, trimmed. Wire max 500 characters (adapter truncates). Listener facts are capped at 300. A long artist or title is shortened first so the `event` and `reason` lines stay whole. Empty text is rejected. |
+| `mode` | Listener says send `"styled"`. |
+| `kind` | Listener says send `"dj-speak"` (the adapter default when `kind` is omitted). `"link"` is the other accepted value. |
+| `sfx` | Not sent on listener says. |
 
-Success body: `{ ok, mode, kind, spoken, sfx }`.
+Success body: `{ ok, mode, kind, spoken, sfx }`. HTTP 500, and any other say error, is logged and swallowed. It does not change request state and it is not retried.
 
 `text` is short newline-separated facts. SmartRadio does not send announcer sentences. Lines, and only the ones that apply:
 
@@ -95,7 +97,7 @@ No peer username, filename, path, or internal id. Each event is claimed once per
 | `queued_coming_up` | After `POST /dj/queue-track` succeeds and the request is `READY`. | `event`, `track` when known, `requester` when known |
 | `request_failed` | The single `FAILED` transition. `reason` is a stable category (`no_suitable_result`, `enqueue_failed`, `never_play`, `radio_unreachable`, a terminal transfer state, and the other existing codes), never a raw error string. Station-policy rejection stays `REJECTED` and is not moved to `FAILED`; that path still sends this say once with `reason: out_of_format`. | `event`, `track` when known, `requester` when known, `reason` |
 
-`TRACK_READY` stays the `READY` payload event for a post-import queue. It is not a say. Download validated, file moved into the music library, and `GET /dj/search?q=` returned exactly one string `id` whose normalized artist and title match and whose version class equals the selected file. A bare title or Original Mix is `original`; other accepted labels use the selector classes. Zero or several hits in that class fail immediately as `handoff_ambiguous` (not queued, library file kept, no new acquisition). The defined body has string `id` and `title`, optional `artist` and `album`, and no path, filename, or duration, so this is not a file identity match. Order: match → `POST /dj/queue-track` → `queued_coming_up`. The search wait is capped by `radio.search_visible_timeout_ms` (default 30 minutes). At the cap with no string id the request fails as `search_visible_timeout`. Visible hits that do not match artist and title fail as `handoff_no_match`. If `/dj/search` cannot connect and that job uses up its attempts, the request fails as `radio_unreachable`. HTTP 409 is `request_failed` with `reason: never_play`. `acquire_unavailable` is still a retryable job error: the request is not moved to `FAILED`, and there is no say until some later path actually fails it.
+`TRACK_READY` stays the `READY` payload event for a post-import queue. It is not a say. Download validated, file moved into the music library, and `GET /dj/search?q=` returned exactly one id (a JSON number is coerced to a string at parse) whose normalized artist and title match and whose version class equals the selected file. A bare title or Original Mix is `original`; other accepted labels use the selector classes. Zero or several hits in that class fail immediately as `handoff_ambiguous` (not queued, library file kept, no new acquisition). The defined body has `id` and `title`, optional `artist` and `album`, and no path, filename, or duration, so this is not a file identity match. A numeric `id` is coerced to a string before it is queued or stored. Order: match → `POST /dj/queue-track` → `queued_coming_up`. The search wait is capped by `radio.search_visible_timeout_ms` (default 30 minutes). At the cap with no id the request fails as `search_visible_timeout`. Visible hits that do not match artist and title fail as `handoff_no_match`. If `/dj/search` cannot connect and that job uses up its attempts, the request fails as `radio_unreachable`. HTTP 409 is `request_failed` with `reason: never_play`. `acquire_unavailable` is still a retryable job error: the request is not moved to `FAILED`, and there is no say until some later path actually fails it.
 
 ## Soulseek / acquisition (VERIFIED via slskd only) — AcquisitionProvider (optional)
 

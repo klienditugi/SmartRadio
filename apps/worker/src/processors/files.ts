@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { fileVersionClass, type CandidateTrack, type VersionClass } from "@subwave-ai/core";
 import { enqueueJob, getRequest, transitionRequest, updateJobPayload, type JobRow } from "@subwave-ai/db";
-import { NeverPlayError, NotConfiguredError, ProviderHttpError } from "@subwave-ai/providers";
+import { NeverPlayError, NotConfiguredError, ProviderHttpError, providerId } from "@subwave-ai/providers";
 import { isAllowedAudioExtension, safeJoin } from "@subwave-ai/shared";
 import type { JobHandler } from "../context.js";
 import { FFPROBE_DURATION_TOLERANCE_SECONDS, probeMatchesExtension, runFfprobe } from "./ffprobe.js";
@@ -48,7 +48,7 @@ type FilePayload = {
 type TrackReadyPayload = FilePayload & {
   track_ready?: boolean;
   search_wait_started_at?: number;
-  /** Set once /dj/search returned string ids that were not the imported file. */
+  /** Set once /dj/search returned ids that were not the imported file. */
   handoff_unmatched?: boolean;
 };
 
@@ -72,9 +72,9 @@ function optionalString(value: unknown): string | undefined {
 }
 
 /**
- * `/dj/search` hits with a string id. Numeric ids are not treated as visible.
- * Only `id`, `title`, `artist`, and `album` are read. Those are the fields the
- * SUB/WAVE client and docs define. There is no path and no duration.
+ * `/dj/search` hits SmartRadio can queue. A finite numeric id is coerced to a
+ * string at this boundary. Other non-string ids are not visible. Only `id`,
+ * `title`, `artist`, and `album` are read. There is no path and no duration.
  */
 function searchHits(search: unknown): SearchHit[] {
   if (!search || typeof search !== "object") return [];
@@ -84,10 +84,11 @@ function searchHits(search: unknown): SearchHit[] {
   for (const row of results) {
     if (!row || typeof row !== "object") continue;
     const item = row as { id?: unknown; title?: unknown; artist?: unknown; album?: unknown };
-    if (typeof item.id !== "string" || item.id.length === 0) continue;
+    const id = providerId(item.id);
+    if (!id) continue;
     if (typeof item.title !== "string" || item.title.length === 0) continue;
     hits.push({
-      id: item.id,
+      id,
       title: item.title,
       artist: optionalString(item.artist),
       album: optionalString(item.album),
@@ -96,7 +97,7 @@ function searchHits(search: unknown): SearchHit[] {
   return hits;
 }
 
-/** First `/dj/search` hit with a string id. Library-hit playback still uses this. */
+/** First `/dj/search` hit with an id. Library-hit playback still uses this. */
 function visibleTrack(search: unknown): VisibleTrack | null {
   return searchHits(search)[0] ?? null;
 }
@@ -167,7 +168,7 @@ function hitVersionClass(title: string): VersionClass {
 /**
  * Every artist/title hit, then only those in the selected file's version class.
  * Exactly one may be queued. None or several is ambiguous. Not a file identity
- * match: the response has no path, and its string `id` is assigned after the scan.
+ * match: the response has no path, and its `id` is assigned after the scan.
  */
 function matchImportedTrack(
   search: unknown,

@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRequest, enqueueJob, getRequest, openDatabase, transitionRequest } from "@subwave-ai/db";
-import { NeverPlayError, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
+import { NeverPlayError, SubWaveProvider, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
 import { loadConfig, type RequestStatus } from "@subwave-ai/shared";
 import type { WorkerContext } from "./context.js";
 import { handleCheckLibrary } from "./processors/library.js";
@@ -312,5 +312,67 @@ describe("listener say facts", () => {
     expect(getRequest(db, failedRequest.id)?.error).toBe("search_visible_timeout");
     expect(say).toHaveLength(2);
     expect(queued).toHaveLength(1);
+  });
+
+  it("logs and swallows an HTTP 500 from say and still reaches READY", async () => {
+    const { ctx, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const sayBodies: Array<Record<string, unknown>> = [];
+    ctx.providers.radio = new SubWaveProvider({
+      baseUrl: "http://radio.test/api",
+      adminUser: "dj",
+      adminPassword: "x",
+      verifyStatus: "verified",
+      fetch: async (url, init) => {
+        const href = String(url);
+        if (href.includes("/dj/say")) {
+          sayBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return new Response("llm failed", { status: 500 });
+        }
+        if (href.includes("/dj/queue-track")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ results: [{ id: "song-1", title: "Track", artist: "Artist" }], ok: true }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map((part) => String(part)).join(" "));
+    });
+    try {
+      const request = createRequest(db, { rawQuery: "Artist - Track" });
+      advance(db, request.id, "IMPORTING");
+      const result = await handleQueueRadio(
+        ctx,
+        enqueueJob(db, {
+          type: "queue_radio",
+          requestId: request.id,
+          payload: {
+            track_ready: true,
+            filename: "track.mp3",
+            version_class: "original",
+            search_wait_started_at: Date.now(),
+          },
+        }),
+      );
+      expect(result).toMatchObject({ queued: true, event: "TRACK_READY" });
+      expect(getRequest(db, request.id)?.status).toBe("READY");
+      expect(sayBodies).toEqual([
+        {
+          text: "event: queued_coming_up\ntrack: Artist - Track",
+          mode: "styled",
+          kind: "dj-speak",
+        },
+      ]);
+      expect(errors.some((line) => line.includes("listener say failed") && line.includes("500"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

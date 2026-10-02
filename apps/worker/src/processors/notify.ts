@@ -1,5 +1,11 @@
 import { findUserById, type Db, type RequestRow } from "@subwave-ai/db";
-import { SAY_TEXT_MAX_CHARS } from "@subwave-ai/providers";
+
+/**
+ * Styled mode uses `text` as the operator instruction and cuts it at 300
+ * characters. Facts stay inside that limit so `event` and `reason` are not
+ * the lines that get cut. The wire clamp on `POST /dj/say` is still 500.
+ */
+export const LISTENER_FACTS_MAX_CHARS = 300;
 
 export type NotifyRequest = Pick<RequestRow, "artist" | "title" | "raw_query" | "user_id">;
 
@@ -45,23 +51,53 @@ function factValue(value: string | null | undefined): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
+function codePointLength(value: string): number {
+  return Array.from(value).length;
+}
+
+function codePointSlice(value: string, max: number): string {
+  if (max <= 0) return "";
+  const chars = Array.from(value);
+  return chars.length <= max ? value : chars.slice(0, max).join("");
+}
+
 /**
- * Newline-separated facts for SUB/WAVE `POST /dj/say` (`mode: "styled"`).
- * Lines, only when they apply: `event`, `track`, `requester`, `reason`.
- * No announcer sentences. No peer, filename, path, or internal id.
+ * Newline-separated facts for SUB/WAVE `POST /dj/say` (`mode: "styled"`,
+ * `kind: "dj-speak"`, no `sfx`). Lines, only when they apply: `event`,
+ * `track`, `requester`, `reason`. No announcer sentences. No peer, filename,
+ * path, or internal id. A long artist or title is shortened first so `event`
+ * and `reason` stay whole inside {@link LISTENER_FACTS_MAX_CHARS}.
  */
 export function listenerFactsText(input: ListenerFactInput): string {
-  const lines = [`event: ${input.event}`];
-  const track = factValue(input.track);
-  if (track) lines.push(`track: ${track}`);
-  const requester = factValue(input.requester);
-  if (requester) lines.push(`requester: ${requester}`);
+  const eventLine = `event: ${input.event}`;
   const reason = factValue(input.reason);
-  if (reason) lines.push(`reason: ${reason}`);
-  const text = lines.join("\n");
-  const chars = Array.from(text);
-  if (chars.length <= SAY_TEXT_MAX_CHARS) return text;
-  return chars.slice(0, SAY_TEXT_MAX_CHARS).join("");
+  const reasonLine = reason ? `reason: ${reason}` : null;
+  let track = factValue(input.track);
+  let requester = factValue(input.requester);
+
+  const assemble = (): string => {
+    const lines = [eventLine];
+    if (track) lines.push(`track: ${track}`);
+    if (requester) lines.push(`requester: ${requester}`);
+    if (reasonLine) lines.push(reasonLine);
+    return lines.join("\n");
+  };
+
+  const fit = (label: "track" | "requester"): void => {
+    const current = label === "track" ? track : requester;
+    if (!current) return;
+    if (label === "track") track = null;
+    else requester = null;
+    const room = LISTENER_FACTS_MAX_CHARS - codePointLength(assemble()) - codePointLength(`\n${label}: `);
+    const next = room > 0 ? codePointSlice(current, room) : "";
+    if (label === "track") track = next || null;
+    else requester = next || null;
+  };
+
+  if (codePointLength(assemble()) <= LISTENER_FACTS_MAX_CHARS) return assemble();
+  fit("track");
+  if (codePointLength(assemble()) > LISTENER_FACTS_MAX_CHARS) fit("requester");
+  return assemble();
 }
 
 export function factsForRequest(
