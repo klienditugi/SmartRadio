@@ -1019,14 +1019,31 @@ function unacceptedVersion(track: CandidateTrack): boolean {
   return fileVersionClass(track) === "other";
 }
 
+/**
+ * Basename words that may skip the instrument-part reject.
+ * A set `query.text` is the listener's original request and is the only
+ * source, including when it is empty. Empty text does not skip.
+ * Callers that omit `text` still use the title, as they do for a version ask.
+ */
+function instrumentPartSkipTokens(query: SelectionQuery, terms: readonly string[]): string[] | null {
+  if (typeof query.text === "string") {
+    if (!query.text.trim()) return null;
+    const tokens = significantTokens(
+      stripVersionTerms(normalizeMatchText(query.text), [...TITLE_STRIP_PHRASES, ...terms]),
+    );
+    return tokens.length > 0 ? tokens : null;
+  }
+  return requiredTitleTokens(query, terms);
+}
+
 function incidentalStem(
   track: CandidateTrack,
   policy: ResolvedPolicy,
-  titleTokens: readonly string[] | null,
   asked: readonly string[],
 ): boolean {
   const stemName = basenameText(track);
-  const waived = Boolean(titleTokens && titleTokens.length > 0 && hasEveryToken(stemName, titleTokens));
+  const skipTokens = instrumentPartSkipTokens(policy.query, policy.versionPenaltyTerms);
+  const waived = Boolean(skipTokens && hasEveryToken(stemName, skipTokens));
   if (!waived) {
     const tokens = stemName.split(" ").filter((token) => token.length > 0);
     const wanted = new Set(policy.instrumentPartBasenames.map((term) => term.trim().toLowerCase()).filter(Boolean));
@@ -1049,7 +1066,7 @@ function firstRejection(
   const identity = identityRejection(track, policy, titleTokens);
   if (identity) return identity;
   const asked = matchedTerms(listenerAskText(policy.query), policy.versionPenaltyTerms);
-  if (incidentalStem(track, policy, titleTokens, asked)) return "stem";
+  if (incidentalStem(track, policy, asked)) return "stem";
   if (unacceptedVersion(track)) return "unaccepted_version";
   if (matchesLongRecording(track, policy.longRecordingPhrases)) return "long_recording";
   if (underBitrate(track)) return "under_bitrate";

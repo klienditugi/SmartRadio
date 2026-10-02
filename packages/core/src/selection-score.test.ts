@@ -736,6 +736,24 @@ describe("ordered selector", () => {
     expect(decision.removed.stem).toBe(0);
   });
 
+  it("still rejects an instrument part when only the classified title names that part", () => {
+    const drums = mp3("drums", "Daft Punk - Drums.mp3", {
+      path: "music\\Daft Punk\\Get Lucky\\Daft Punk - Drums.mp3",
+    });
+    const decision = selectTracks([drums], {
+      query: { artist: "Daft Punk", title: "Drums", text: "play Get Lucky by Daft Punk" },
+    });
+    expect(decision.outcome).toBe("no_suitable_result");
+    if (decision.outcome !== "no_suitable_result") return;
+    expect(decision.removed.stem).toBe(1);
+
+    const blank = selectTracks([drums], {
+      query: { artist: "Daft Punk", title: "Drums", text: "" },
+    });
+    expect(blank.outcome).toBe("no_suitable_result");
+    if (blank.outcome === "no_suitable_result") expect(blank.removed.stem).toBe(1);
+  });
+
   it("treats an empty original text as asking for nothing extra", () => {
     const acapella = mp3("acapella", "Daft Punk - Get Lucky.mp3", {
       path: "music\\Acapella\\Daft Punk - Get Lucky.mp3",
