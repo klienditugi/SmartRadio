@@ -232,7 +232,7 @@ export function doctorReport(db: Db, config: RuntimeConfig) {
       "Music library/downloads/staging must be host-mounted persistent paths, never only in an ephemeral container.",
       "Selection sizes are MiB (1 MiB = 1,048,576 bytes): preferred_max_file_size_mb, min_file_size_mb, and max_file_size_mb. The key names are unchanged.",
       "Navidrome is passive on the happy path; index_library/startScan is ops-only and is not enqueued after import.",
-      "SUB/WAVE notify is admin POST {radio base_url}/dj/say with mode styled and kind dj-speak. Fact lines are capped at 300 characters. A 500 from say is logged and does not change the request.",
+      "SUB/WAVE notify is admin POST {radio base_url}/dj/say with mode styled and kind dj-speak. Fact lines are capped at 300 characters. Out-of-format uses event request_rejected. A 500 from say is logged and does not change the request.",
       ...(acquire_unavailable
         ? ["AcquisitionProvider is optional until a verified download daemon exists (acquire_unavailable)."]
         : []),

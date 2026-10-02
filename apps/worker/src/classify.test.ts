@@ -15,6 +15,7 @@ import {
 import { createProviders, OllamaProvider, SubWaveProvider, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
 import { claimAndRun } from "./dispatch.js";
 import { handleClassify } from "./processors/classify.js";
+import { failRequest } from "./processors/fail-request.js";
 import type { WorkerContext } from "./context.js";
 
 const classification = {
@@ -197,7 +198,7 @@ describe("worker classify", () => {
     expect(events.some((event) => event.endsWith("->FAILED"))).toBe(false);
     expect(say).toEqual([
       {
-        text: "event: request_failed\ntrack: Artist - Track\nreason: out_of_format",
+        text: "event: request_rejected\ntrack: Artist - Track\nreason: out_of_format",
         kind: "dj-speak",
       },
     ]);
@@ -290,7 +291,7 @@ describe("worker classify", () => {
     expect(getRequest(db, request.id)?.status).toBe("REJECTED");
     expect(sayBodies).toEqual([
       {
-        text: "event: request_failed\ntrack: Artist - Track\nreason: out_of_format",
+        text: "event: request_rejected\ntrack: Artist - Track\nreason: out_of_format",
         mode: "styled",
         kind: "dj-speak",
       },
@@ -300,7 +301,7 @@ describe("worker classify", () => {
     const claimed = db
       .prepare(`SELECT event FROM listener_say_events WHERE request_id = ?`)
       .all(request.id) as Array<{ event: string }>;
-    expect(claimed.map((row) => row.event)).toEqual(["request_failed"]);
+    expect(claimed.map((row) => row.event)).toEqual(["request_rejected"]);
   });
 
   it("does not repeat out_of_format when an admin approves the rejected request", async () => {
@@ -395,7 +396,7 @@ describe("worker classify", () => {
     enqueueJob(db, { type: "check_library", requestId: request.id });
     expect(sayBodies).toEqual([
       {
-        text: "event: request_failed\ntrack: Artist - Track\nreason: out_of_format",
+        text: "event: request_rejected\ntrack: Artist - Track\nreason: out_of_format",
         mode: "styled",
         kind: "dj-speak",
       },
@@ -405,17 +406,110 @@ describe("worker classify", () => {
     expect(await claimAndRun(ctx)).toBe(true);
     expect(getRequest(db, request.id)?.status).toBe("SEARCHING");
     expect(sayBodies.map((body) => body.text)).toEqual([
-      "event: request_failed\ntrack: Artist - Track\nreason: out_of_format",
+      "event: request_rejected\ntrack: Artist - Track\nreason: out_of_format",
       "event: request_received\ntrack: Artist - Track",
     ]);
     expect(sayBodies.every((body) => body.mode === "styled" && body.kind === "dj-speak")).toBe(true);
     expect(sayBodies.filter((body) => body.text?.includes("reason: out_of_format"))).toHaveLength(1);
+    expect(sayBodies.filter((body) => body.text?.startsWith("event: request_failed"))).toHaveLength(0);
     expect(acquisitionCalls).toEqual([]);
     const claimed = db
       .prepare(`SELECT event FROM listener_say_events WHERE request_id = ? ORDER BY event`)
       .all(request.id) as Array<{ event: string }>;
-    expect(claimed.map((row) => row.event)).toEqual(["request_failed", "request_received"]);
+    expect(claimed.map((row) => row.event)).toEqual(["request_received", "request_rejected"]);
     expect(listJobsForRequest(db, request.id).map((job) => job.type)).toEqual(["classify", "check_library", "search_acquisition"]);
+  });
+
+  it("sends request_failed after an overridden rejection, and does not repeat request_rejected", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const llm = new OllamaProvider({
+      baseUrl: "http://ollama.test",
+      model: "test-model",
+      verifyStatus: "verified",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({ ...classification, electronic: false, station_match: false }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    const sayBodies: Array<{ text?: string; mode?: string; kind?: string; sfx?: unknown }> = [];
+    const radio = new SubWaveProvider({
+      baseUrl: "http://radio.test/api",
+      adminUser: "dj",
+      adminPassword: "secret",
+      verifyStatus: "verified",
+      fetch: async (url, init) => {
+        expect(String(url)).toContain("/dj/say");
+        sayBodies.push(JSON.parse(String(init?.body)) as { text?: string; mode?: string; kind?: string; sfx?: unknown });
+        return new Response(JSON.stringify({ ok: true, mode: "styled", kind: "dj-speak", spoken: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    const request = createRequest(db, { rawQuery: "play a country ballad" });
+    enqueueJob(db, { type: "classify", requestId: request.id });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: {
+        llm,
+        library: {} as ProviderBundle["library"],
+        radio,
+        acquisition: {} as ProviderBundle["acquisition"],
+      },
+      workerId: "worker-test",
+    };
+    expect(await claimAndRun(ctx)).toBe(true);
+    expect(getRequest(db, request.id)?.status).toBe("REJECTED");
+
+    transitionRequest(db, {
+      requestId: request.id,
+      to: "APPROVED",
+      actor: "admin",
+      payload: { admin: "approve" },
+      patch: { error: null },
+    });
+    enqueueJob(db, { type: "check_library", requestId: request.id });
+    expect(sayBodies).toEqual([
+      {
+        text: "event: request_rejected\ntrack: Artist - Track\nreason: out_of_format",
+        mode: "styled",
+        kind: "dj-speak",
+      },
+    ]);
+
+    await failRequest(ctx, {
+      requestId: request.id,
+      reason: "enqueue_failed",
+      payload: { error: "enqueue_failed", reason: "enqueue_failed" },
+      patch: { error: "enqueue_failed" },
+    });
+    expect(getRequest(db, request.id)?.status).toBe("FAILED");
+    expect(sayBodies).toEqual([
+      {
+        text: "event: request_rejected\ntrack: Artist - Track\nreason: out_of_format",
+        mode: "styled",
+        kind: "dj-speak",
+      },
+      {
+        text: "event: request_failed\ntrack: Artist - Track\nreason: enqueue_failed",
+        mode: "styled",
+        kind: "dj-speak",
+      },
+    ]);
+    expect(sayBodies.filter((body) => body.text?.startsWith("event: request_rejected"))).toHaveLength(1);
+    expect(sayBodies.filter((body) => body.text?.startsWith("event: request_failed"))).toHaveLength(1);
+    expect(sayBodies.every((body) => body.sfx === undefined)).toBe(true);
+    const claimed = db
+      .prepare(`SELECT event FROM listener_say_events WHERE request_id = ? ORDER BY event`)
+      .all(request.id) as Array<{ event: string }>;
+    expect(claimed.map((row) => row.event)).toEqual(["request_failed", "request_rejected"]);
   });
 
   it("fails a filled but unverified Ollama config with an actionable message and does not call it", async () => {

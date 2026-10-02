@@ -38,7 +38,8 @@ export const handleClassify: JobHandler = async (ctx, job) => {
     const policy = applyStationPolicy(classification, ctx.config.policy);
     if (policy.decision === "REJECTED") {
       // Station policy is the out-of-format path. Status stays REJECTED.
-      // FAILED is a different terminal state, so this does not call failRequest.
+      // The say is claimed as request_rejected, not request_failed, so a later
+      // real failure can still send request_failed. This does not call failRequest.
       const rejected = transitionRequest(ctx.db, {
         requestId: request.id,
         to: "REJECTED",
@@ -52,7 +53,7 @@ export const handleClassify: JobHandler = async (ctx, job) => {
           policy_json: JSON.stringify(policy),
         },
       });
-      await sayListenerFacts(ctx, rejected, { event: "request_failed", reason: "out_of_format" });
+      await sayListenerFacts(ctx, rejected, { event: "request_rejected", reason: "out_of_format" });
       return { decision: "REJECTED", policy };
     }
     transitionRequest(ctx.db, {

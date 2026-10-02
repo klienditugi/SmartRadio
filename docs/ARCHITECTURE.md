@@ -48,7 +48,8 @@ SmartRadio provides **event + context only**. SUB/WAVE owns DJ personality, word
 | `request_received` | `check_library`, after classify approved the request, including a library hit | `event`, `track`, `requester` when known |
 | `copy_found_retrieval_started` | After `enqueueDownload`, the `DOWNLOADING` / `REQUEST_ACCEPTED` move, and poll scheduling | `event`, `track`, `requester` when known |
 | `queued_coming_up` | After `POST /dj/queue-track` succeeds and the request is `READY` | `event`, `track`, `requester` when known |
-| `request_failed` | The single move to `FAILED`. `reason` is a stable category. Station-policy rejection stays `REJECTED` and still sends this say once with `reason: out_of_format` | `event`, `track`, `requester` when known, `reason` |
+| `request_rejected` | Station-policy rejection stays `REJECTED`. One say, claimed as `request_rejected`, with `reason: out_of_format`. An admin override to `APPROVED` does not repeat it. | `event`, `track`, `requester` when known, `reason` |
+| `request_failed` | The single move to `FAILED`. `reason` is a stable category. This key is not used for out-of-format, so an overridden request can still say it if it later fails. | `event`, `track`, `requester` when known, `reason` |
 
 **Notify binding (A4):** `POST {base_url}/dj/say` with the same admin HTTP Basic credentials as the other `/dj/*` routes. Listener says send `{ text, mode: "styled", kind: "dj-speak" }` and do not send `sfx`. `text` is facts only. The wire max is 500 characters. Styled mode cuts the operator instruction at 300, so listener facts are capped at 300 by shortening the track line first. Success is `{ ok, mode, kind, spoken, sfx }`. HTTP 500 means the SUB/WAVE LLM failed and nothing went on air; SmartRadio logs that and continues. Public `POST /request` is not used for announcements. There is no second DJ personality in SmartRadio.
 

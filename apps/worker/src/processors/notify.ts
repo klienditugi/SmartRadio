@@ -14,6 +14,7 @@ export const LISTENER_EVENTS = [
   "copy_found_retrieval_started",
   "queued_coming_up",
   "request_failed",
+  "request_rejected",
 ] as const;
 
 export type ListenerEvent = (typeof LISTENER_EVENTS)[number];
