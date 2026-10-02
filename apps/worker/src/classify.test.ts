@@ -3,8 +3,16 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "@subwave-ai/shared";
-import { createRequest, enqueueJob, getRequest, listRequestEvents, openDatabase } from "@subwave-ai/db";
-import { createProviders, OllamaProvider, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
+import {
+  createRequest,
+  enqueueJob,
+  getRequest,
+  listJobsForRequest,
+  listRequestEvents,
+  openDatabase,
+  transitionRequest,
+} from "@subwave-ai/db";
+import { createProviders, OllamaProvider, SubWaveProvider, type ProviderBundle, type SayRequest } from "@subwave-ai/providers";
 import { claimAndRun } from "./dispatch.js";
 import { handleClassify } from "./processors/classify.js";
 import type { WorkerContext } from "./context.js";
@@ -201,6 +209,213 @@ describe("worker classify", () => {
     expect(getRequest(db, request.id)?.status).toBe("REJECTED");
     expect(say).toHaveLength(1);
     expect(llmCalls).toBe(1);
+  });
+
+  it("ends REJECTED with one styled out_of_format say and does not call acquisition", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const llm = new OllamaProvider({
+      baseUrl: "http://ollama.test",
+      model: "test-model",
+      verifyStatus: "verified",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({ ...classification, electronic: false, station_match: false }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    const sayBodies: Array<{ text?: string; mode?: string; kind?: string }> = [];
+    const radio = new SubWaveProvider({
+      baseUrl: "http://radio.test/api",
+      adminUser: "dj",
+      adminPassword: "secret",
+      verifyStatus: "verified",
+      fetch: async (url, init) => {
+        expect(String(url)).toContain("/dj/say");
+        sayBodies.push(JSON.parse(String(init?.body)) as { text?: string; mode?: string; kind?: string });
+        return new Response(JSON.stringify({ ok: true, mode: "styled", kind: "dj-speak", spoken: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    const acquisitionCalls: string[] = [];
+    const acquisition = {
+      kind: "slskd",
+      verifyStatus: "verified",
+      search: async () => {
+        acquisitionCalls.push("search");
+        return {};
+      },
+      getSearch: async () => {
+        acquisitionCalls.push("getSearch");
+        return {};
+      },
+      getSearchResponses: async () => {
+        acquisitionCalls.push("getSearchResponses");
+        return [];
+      },
+      enqueueDownload: async () => {
+        acquisitionCalls.push("enqueueDownload");
+        return {};
+      },
+      listDownloads: async () => {
+        acquisitionCalls.push("listDownloads");
+        return [];
+      },
+      health: async () => {
+        acquisitionCalls.push("health");
+        return { ok: true, verifyStatus: "verified" as const, checked_at: "t" };
+      },
+    } as ProviderBundle["acquisition"];
+    const request = createRequest(db, { rawQuery: "play a country ballad" });
+    enqueueJob(db, { type: "classify", requestId: request.id });
+    expect(
+      await claimAndRun({
+        db,
+        config,
+        providers: {
+          llm,
+          library: {} as ProviderBundle["library"],
+          radio,
+          acquisition,
+        },
+        workerId: "worker-test",
+      }),
+    ).toBe(true);
+    expect(getRequest(db, request.id)?.status).toBe("REJECTED");
+    expect(sayBodies).toEqual([
+      {
+        text: "event: request_failed\ntrack: Artist - Track\nreason: out_of_format",
+        mode: "styled",
+        kind: "dj-speak",
+      },
+    ]);
+    expect(acquisitionCalls).toEqual([]);
+    expect(listJobsForRequest(db, request.id).map((job) => job.type)).toEqual(["classify"]);
+    const claimed = db
+      .prepare(`SELECT event FROM listener_say_events WHERE request_id = ?`)
+      .all(request.id) as Array<{ event: string }>;
+    expect(claimed.map((row) => row.event)).toEqual(["request_failed"]);
+  });
+
+  it("does not repeat out_of_format when an admin approves the rejected request", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const llm = new OllamaProvider({
+      baseUrl: "http://ollama.test",
+      model: "test-model",
+      verifyStatus: "verified",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({ ...classification, electronic: false, station_match: false }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    const sayBodies: Array<{ text?: string; mode?: string; kind?: string }> = [];
+    const radio = new SubWaveProvider({
+      baseUrl: "http://radio.test/api",
+      adminUser: "dj",
+      adminPassword: "secret",
+      verifyStatus: "verified",
+      fetch: async (url, init) => {
+        expect(String(url)).toContain("/dj/say");
+        sayBodies.push(JSON.parse(String(init?.body)) as { text?: string; mode?: string; kind?: string });
+        return new Response(JSON.stringify({ ok: true, mode: "styled", kind: "dj-speak", spoken: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    const acquisitionCalls: string[] = [];
+    const acquisition = {
+      kind: "slskd",
+      verifyStatus: "verified",
+      search: async () => {
+        acquisitionCalls.push("search");
+        return {};
+      },
+      getSearch: async () => {
+        acquisitionCalls.push("getSearch");
+        return {};
+      },
+      getSearchResponses: async () => {
+        acquisitionCalls.push("getSearchResponses");
+        return [];
+      },
+      enqueueDownload: async () => {
+        acquisitionCalls.push("enqueueDownload");
+        return {};
+      },
+      listDownloads: async () => {
+        acquisitionCalls.push("listDownloads");
+        return [];
+      },
+      health: async () => {
+        acquisitionCalls.push("health");
+        return { ok: true, verifyStatus: "verified" as const, checked_at: "t" };
+      },
+    } as ProviderBundle["acquisition"];
+    const library = {
+      kind: "navidrome",
+      verifyStatus: "verified",
+      search3: async () => [],
+      getSong: async () => null,
+      startScan: async () => ({}),
+      getScanStatus: async () => ({}),
+      health: async () => ({ ok: true, verifyStatus: "verified" as const, checked_at: "t" }),
+    } as ProviderBundle["library"];
+    const request = createRequest(db, { rawQuery: "play a country ballad" });
+    enqueueJob(db, { type: "classify", requestId: request.id });
+    const ctx: WorkerContext = {
+      db,
+      config,
+      providers: { llm, library, radio, acquisition },
+      workerId: "worker-test",
+    };
+    expect(await claimAndRun(ctx)).toBe(true);
+    expect(getRequest(db, request.id)?.status).toBe("REJECTED");
+    expect(sayBodies).toHaveLength(1);
+
+    transitionRequest(db, {
+      requestId: request.id,
+      to: "APPROVED",
+      actor: "admin",
+      payload: { admin: "approve" },
+      patch: { error: null },
+    });
+    enqueueJob(db, { type: "check_library", requestId: request.id });
+    expect(sayBodies).toEqual([
+      {
+        text: "event: request_failed\ntrack: Artist - Track\nreason: out_of_format",
+        mode: "styled",
+        kind: "dj-speak",
+      },
+    ]);
+    expect(acquisitionCalls).toEqual([]);
+
+    expect(await claimAndRun(ctx)).toBe(true);
+    expect(getRequest(db, request.id)?.status).toBe("SEARCHING");
+    expect(sayBodies.map((body) => body.text)).toEqual([
+      "event: request_failed\ntrack: Artist - Track\nreason: out_of_format",
+      "event: request_received\ntrack: Artist - Track",
+    ]);
+    expect(sayBodies.every((body) => body.mode === "styled" && body.kind === "dj-speak")).toBe(true);
+    expect(sayBodies.filter((body) => body.text?.includes("reason: out_of_format"))).toHaveLength(1);
+    expect(acquisitionCalls).toEqual([]);
+    const claimed = db
+      .prepare(`SELECT event FROM listener_say_events WHERE request_id = ? ORDER BY event`)
+      .all(request.id) as Array<{ event: string }>;
+    expect(claimed.map((row) => row.event)).toEqual(["request_failed", "request_received"]);
+    expect(listJobsForRequest(db, request.id).map((job) => job.type)).toEqual(["classify", "check_library", "search_acquisition"]);
   });
 
   it("fails a filled but unverified Ollama config with an actionable message and does not call it", async () => {
