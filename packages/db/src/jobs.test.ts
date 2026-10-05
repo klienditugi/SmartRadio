@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "./client.js";
-import { claimEnqueueAttempt, claimJob, completeJob, createRequest, enqueueJob, getJob } from "./store.js";
+import { claimEnqueueAttempt, claimJob, claimListenerSay, completeJob, createRequest, enqueueJob, getJob } from "./store.js";
 
 describe("job lease", () => {
   it("lets one worker claim a job and holds the lease against a second worker", () => {
@@ -62,6 +62,18 @@ describe("job lease", () => {
     const saved = JSON.parse(getJob(db, first.id)?.payload_json ?? "{}");
     expect(saved.enqueue_attempted).toEqual(claimed.marker);
     expect(JSON.parse(getJob(db, second.id)?.payload_json ?? "{}").enqueue_attempted).toBeUndefined();
+  });
+
+  it("claims one listener say per request and event", () => {
+    const db = openDatabase(":memory:");
+    const request = createRequest(db, { rawQuery: "Artist - Track" });
+    expect(claimListenerSay(db, { requestId: request.id, event: "request_received" })).toBe(true);
+    expect(claimListenerSay(db, { requestId: request.id, event: "request_received" })).toBe(false);
+    expect(claimListenerSay(db, { requestId: request.id, event: "request_failed" })).toBe(true);
+    const rows = db.prepare(`SELECT event FROM listener_say_events WHERE request_id = ? ORDER BY event`).all(request.id) as Array<{
+      event: string;
+    }>;
+    expect(rows.map((row) => row.event)).toEqual(["request_failed", "request_received"]);
   });
 
   it("does not claim jobs scheduled in the future", () => {

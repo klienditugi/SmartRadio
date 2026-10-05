@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { providerId } from "./ids.js";
 import { describe, expect, it } from "vitest";
 import { CLASSIFICATION_JSON_SCHEMA, parseAppConfig, type RuntimeConfig } from "@subwave-ai/shared";
 import { createProviders } from "./factory.js";
@@ -108,6 +109,7 @@ describe("NavidromeProvider", () => {
     });
     const songs = await nd.search3("query");
     expect(songs[0]?.id).toBe("99");
+    expect(typeof songs[0]?.id).toBe("string");
     const u = seen[0];
     expect(u?.pathname).toBe("/rest/search3");
     expect(u?.searchParams.get("f")).toBe("json");
@@ -117,6 +119,43 @@ describe("NavidromeProvider", () => {
     const token = u?.searchParams.get("t") ?? "";
     expect(salt.length).toBeGreaterThanOrEqual(6);
     expect(token).toBe(createHash("md5").update(`secret${salt}`).digest("hex"));
+  });
+
+  it("coerces a numeric getMusicFolders folder id and a numeric song id to strings", async () => {
+    expect(providerId(1)).toBe("1");
+    expect(typeof providerId(1)).toBe("string");
+    const paths: string[] = [];
+    const fetchMock: FetchLike = async (url) => {
+      const pathname = new URL(String(url)).pathname;
+      paths.push(pathname);
+      if (pathname.endsWith("/getMusicFolders")) {
+        return jsonResponse({
+          "subsonic-response": {
+            status: "ok",
+            musicFolders: { musicFolder: { id: 1, name: "Music" } },
+          },
+        });
+      }
+      return jsonResponse({
+        "subsonic-response": {
+          status: "ok",
+          song: { id: 1, title: "Song", artist: "Act" },
+        },
+      });
+    };
+    const nd = new NavidromeProvider({
+      baseUrl: "http://navidrome.example",
+      username: "user",
+      password: "secret",
+      verifyStatus: "verified",
+      fetch: fetchMock,
+    });
+    const folders = await nd.getMusicFolders();
+    const song = await nd.getSong("1");
+    expect(folders).toEqual([{ id: "1", name: "Music" }]);
+    expect(song?.id).toBe("1");
+    expect(folders[0]?.id).toBe(song?.id);
+    expect(paths).toEqual(["/rest/getMusicFolders", "/rest/getSong"]);
   });
 
   it("uses verified scan methods only", async () => {

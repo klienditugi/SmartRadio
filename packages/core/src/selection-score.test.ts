@@ -659,4 +659,121 @@ describe("ordered selector", () => {
     expect(selected([remix, album, radio], { versionPreference: "original" }).pick.peer).toBe("album");
     expect(selected([remix, album, radio], { versionPreference: "radio_edit" }).pick.peer).toBe("radio");
   });
+
+  it("still rejects an acapella file as stem when only the classified title says acapella", () => {
+    const acapella = mp3("acapella", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Acapella\\Daft Punk - Get Lucky.mp3",
+      availability: { freeSlot: true, queueLength: 0, speedBps: 2_000_000 },
+    });
+    const album = mp3("album", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Album\\Daft Punk - Get Lucky.mp3",
+      availability: { freeSlot: false, queueLength: 4, speedBps: 1 },
+    });
+    const decision = selectTracks([acapella, album], {
+      query: { artist: "Daft Punk", title: "Get Lucky (Acapella)", text: "play Get Lucky by Daft Punk" },
+    });
+    expect(decision.outcome).toBe("selected");
+    if (decision.outcome !== "selected") return;
+    expect(decision.pick.peer).toBe("album");
+    expect(decision.removed.stem).toBe(1);
+  });
+
+  it("does not prefer extended when only the classified title says Extended Mix", () => {
+    const extendedFile = mp3("extended-slow", "Daft Punk - Get Lucky (Extended Mix).mp3", {
+      availability: { freeSlot: false, queueLength: 9, speedBps: 1 },
+    });
+    const remixFile = mp3("remix-free", "Daft Punk - Get Lucky (Remix).mp3", {
+      availability: { freeSlot: true, queueLength: 0, speedBps: 1 },
+    });
+    const ignored = selectTracks([extendedFile, remixFile], {
+      query: { artist: "Daft Punk", title: "Get Lucky (Extended Mix)", text: "Get Lucky" },
+    });
+    expect(ignored.outcome).toBe("selected");
+    if (ignored.outcome !== "selected") return;
+    expect(ignored.pick.peer).toBe("remix-free");
+    expect(ignored.breakdown.requestedVersion).toBe(0);
+
+    const fromTitle = selectTracks([extendedFile, remixFile], {
+      query: { artist: "Daft Punk", title: "Get Lucky (Extended Mix)" },
+    });
+    expect(fromTitle.outcome).toBe("selected");
+    if (fromTitle.outcome !== "selected") return;
+    expect(fromTitle.pick.peer).toBe("extended-slow");
+    expect(fromTitle.breakdown.requestedVersion).toBe(1);
+  });
+
+  it("still prefers a remix when the original request asks and the classified title drops it", () => {
+    const remixFile = mp3("remix-busy", "Daft Punk - Get Lucky (Remix).mp3", {
+      availability: { freeSlot: false, queueLength: 8, speedBps: 1 },
+    });
+    const extendedFile = mp3("extended-free", "Daft Punk - Get Lucky (Extended Mix).mp3", {
+      availability: { freeSlot: true, queueLength: 0, speedBps: 2_000_000 },
+    });
+    const decision = selectTracks([remixFile, extendedFile], {
+      query: { artist: "Daft Punk", title: "Get Lucky", text: "play the Get Lucky remix" },
+    });
+    expect(decision.outcome).toBe("selected");
+    if (decision.outcome !== "selected") return;
+    expect(decision.pick.peer).toBe("remix-busy");
+    expect(decision.breakdown.requestedVersion).toBe(1);
+  });
+
+  it("still waives the acapella stem reject when the original request asks for it", () => {
+    const acapella = mp3("acapella", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Acapella\\Daft Punk - Get Lucky.mp3",
+      availability: { freeSlot: true, queueLength: 0, speedBps: 2_000_000 },
+    });
+    const album = mp3("album", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Album\\Daft Punk - Get Lucky.mp3",
+      availability: { freeSlot: false, queueLength: 4, speedBps: 1 },
+    });
+    const decision = selectTracks([acapella, album], {
+      query: { artist: "Daft Punk", title: "Get Lucky", text: "Get Lucky acapella" },
+    });
+    expect(decision.outcome).toBe("selected");
+    if (decision.outcome !== "selected") return;
+    expect(decision.pick.peer).toBe("acapella");
+    expect(decision.removed.stem).toBe(0);
+  });
+
+  it("still rejects an instrument part when only the classified title names that part", () => {
+    const drums = mp3("drums", "Daft Punk - Drums.mp3", {
+      path: "music\\Daft Punk\\Get Lucky\\Daft Punk - Drums.mp3",
+    });
+    const decision = selectTracks([drums], {
+      query: { artist: "Daft Punk", title: "Drums", text: "play Get Lucky by Daft Punk" },
+    });
+    expect(decision.outcome).toBe("no_suitable_result");
+    if (decision.outcome !== "no_suitable_result") return;
+    expect(decision.removed.stem).toBe(1);
+
+    const blank = selectTracks([drums], {
+      query: { artist: "Daft Punk", title: "Drums", text: "" },
+    });
+    expect(blank.outcome).toBe("no_suitable_result");
+    if (blank.outcome === "no_suitable_result") expect(blank.removed.stem).toBe(1);
+  });
+
+  it("treats an empty original text as asking for nothing extra", () => {
+    const acapella = mp3("acapella", "Daft Punk - Get Lucky.mp3", {
+      path: "music\\Acapella\\Daft Punk - Get Lucky.mp3",
+    });
+    const blocked = selectTracks([acapella], {
+      query: { artist: "Daft Punk", title: "Get Lucky (Acapella)", text: "" },
+    });
+    expect(blocked.outcome).toBe("no_suitable_result");
+    if (blocked.outcome === "no_suitable_result") expect(blocked.removed.stem).toBe(1);
+
+    const extendedFile = mp3("extended-slow", "Daft Punk - Get Lucky (Extended Mix).mp3", {
+      availability: { freeSlot: false, queueLength: 9, speedBps: 1 },
+    });
+    const remixFile = mp3("remix-free", "Daft Punk - Get Lucky (Remix).mp3");
+    const decision = selectTracks([extendedFile, remixFile], {
+      query: { artist: "Daft Punk", title: "Get Lucky (Extended Mix)", text: "" },
+    });
+    expect(decision.outcome).toBe("selected");
+    if (decision.outcome !== "selected") return;
+    expect(decision.pick.peer).toBe("remix-free");
+    expect(decision.breakdown.requestedVersion).toBe(0);
+  });
 });

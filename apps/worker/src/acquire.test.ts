@@ -98,6 +98,13 @@ function advance(
   throw new Error(`unreachable status ${to}`);
 }
 
+function failedSay(track: string, reason: string): { text: string; kind: "dj-speak" } {
+  return {
+    text: `event: request_failed\ntrack: ${track}\nreason: ${reason}`,
+    kind: "dj-speak",
+  };
+}
+
 type AcqState = {
   searchComplete?: boolean;
   responses?: unknown[];
@@ -245,7 +252,9 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toEqual([{ user: "peer-a", files: [{ filename: "\\\\music\\\\track.flac", size: TRACK_SIZE }] }]);
     expect(order).toContain("enqueue");
     expect(order).toContain("say");
-    expect(say[0]?.text).toContain("REQUEST_ACCEPTED");
+    expect(say[0]?.text).toContain("event: copy_found_retrieval_started");
+    expect(say[0]?.text).toContain("track: Artist - Track");
+    expect(say[0]?.text).not.toContain("REQUEST_ACCEPTED");
     expect(getRequest(db, request.id)?.status).toBe("DOWNLOADING");
     const accepted = listRequestEvents(db, request.id).find((event) => event.to_status === "DOWNLOADING");
     expect(JSON.parse(accepted?.payload_json ?? "{}").event).toBe("REQUEST_ACCEPTED");
@@ -698,7 +707,7 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toHaveLength(1);
     expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
     expect(order.filter((step) => step === "list")).toHaveLength(1);
-    expect(say).toEqual([]);
+    expect(say).toEqual([failedSay("Artist - Track", "enqueue_failed")]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     expect(getRequest(db, request.id)?.error).toBe("enqueue_failed");
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
@@ -789,7 +798,7 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toHaveLength(1);
     expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
     expect(order.filter((step) => step === "list")).toHaveLength(2);
-    expect(say).toEqual([]);
+    expect(say).toEqual([failedSay("Artist - Track", "enqueue_failed")]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     expect(getRequest(db, request.id)?.error).toBe("enqueue_failed");
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
@@ -836,7 +845,7 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toHaveLength(1);
     expect(order.filter((step) => step === "enqueue")).toHaveLength(1);
     expect(order.filter((step) => step === "list")).toHaveLength(2);
-    expect(say).toEqual([]);
+    expect(say).toEqual([failedSay("Artist - Track", "enqueue_failed")]);
     expect(getRequest(db, request.id)?.status).toBe("FAILED");
     const saved = JSON.parse(getJob(db, job.id)?.payload_json ?? "{}") as { enqueue_attempted?: { size: number } };
     expect(saved.enqueue_attempted?.size).toBe(TRACK_SIZE);
@@ -983,7 +992,7 @@ describe("A5 acquisition worker", () => {
     );
     expect(result).toEqual({ failed: true, reason: "download_timeout" });
     expect(getRequest(db, request.id)?.error).toBe("download_timeout");
-    expect(order).toEqual([]);
+    expect(order).toEqual(["say"]);
     expect(listJobsForRequest(db, request.id).filter((job) => job.type === "download")).toHaveLength(1);
   });
 
@@ -1113,7 +1122,7 @@ describe("A5 acquisition worker", () => {
     expect(enqueued).toEqual([]);
     expect(order.filter((step) => step === "enqueue")).toEqual([]);
     expect(order.filter((step) => step === "get-search")).toEqual(["get-search"]);
-    expect(say).toEqual([]);
+    expect(say).toEqual([failedSay("Daft Punk - Get Lucky", "selected_missing_length")]);
     expect(listJobsForRequest(db, request.id).filter((job) => job.type === "download")).toHaveLength(1);
     const failed = listRequestEvents(db, request.id).find((event) => event.to_status === "FAILED");
     expect(JSON.parse(failed?.payload_json ?? "{}")).toMatchObject({
@@ -1198,6 +1207,43 @@ describe("A5 acquisition worker", () => {
     expect(asked.score?.breakdown.requestedVersion).toBeGreaterThan(0);
   });
 
+  it("does not let an acapella word that exists only on the classified title waive the stem reject", async () => {
+    const { config, db, cleanup } = fixture();
+    cleanups.push(cleanup);
+    const acapella = "\\\\music\\\\Acapella\\\\Daft Punk - Get Lucky.flac";
+    const album = "\\\\music\\\\Album\\\\Daft Punk - Get Lucky.flac";
+    const { acquisition, radio, library, enqueued } = harness({
+      responses: [
+        {
+          username: "acapella-peer",
+          hasFreeUploadSlot: true,
+          queueLength: 0,
+          uploadSpeed: 9_000_000,
+          files: [{ filename: acapella, size: 20_000_000, extension: "flac", bitDepth: 16, sampleRate: 44100, length: 248 }],
+        },
+        {
+          username: "album-peer",
+          hasFreeUploadSlot: false,
+          queueLength: 4,
+          uploadSpeed: 1,
+          files: [{ filename: album, size: 30_000_000, extension: "flac", bitDepth: 16, sampleRate: 44100, length: 248 }],
+        },
+      ],
+    });
+    const request = createRequest(db, { rawQuery: "play Get Lucky by Daft Punk" });
+    advance(db, request.id, "QUEUED", { artist: "Daft Punk", title: "Get Lucky (Acapella)" });
+    await handleDownload(
+      {
+        db,
+        config,
+        providers: { llm: {} as ProviderBundle["llm"], library, radio, acquisition },
+        workerId: "worker-test",
+      },
+      enqueueJob(db, { type: "download", requestId: request.id, payload: { searchId: "search-1" } }),
+    );
+    expect(enqueued).toEqual([{ user: "album-peer", files: [{ filename: album, size: 30_000_000 }] }]);
+  });
+
   it("fails QUEUED with no_suitable_result when filters remove every candidate and does not enqueue", async () => {
     const { config, db, cleanup } = fixture();
     cleanups.push(cleanup);
@@ -1266,8 +1312,9 @@ describe("A5 acquisition worker", () => {
       },
     });
     expect(enqueued).toEqual([]);
-    expect(say).toEqual([]);
-    expect(order).toEqual(["get-search"]);
+    expect(say).toEqual([failedSay("Daft Punk - Get Lucky", "no_suitable_result")]);
+    expect(say[0]?.text).not.toContain("locked=");
+    expect(order).toEqual(["get-search", "say"]);
     expect(listJobsForRequest(db, request.id).filter((item) => item.type === "download")).toHaveLength(1);
   });
 

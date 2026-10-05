@@ -1,6 +1,7 @@
-import { getRequest, transitionRequest } from "@subwave-ai/db";
+import { getRequest } from "@subwave-ai/db";
 import { CONFIGURED_UNVERIFIED_MESSAGE } from "@subwave-ai/shared";
 import type { JobHandler } from "../context.js";
+import { failRequest } from "./fail-request.js";
 
 /** Record the upgrade failure on the request, then rethrow so the job does not succeed. */
 export async function runIntegration<T>(
@@ -20,10 +21,9 @@ export async function runIntegration<T>(
         current.status !== "REJECTED" &&
         current.status !== "READY"
       ) {
-        transitionRequest(ctx.db, {
+        await failRequest(ctx, {
           requestId,
-          to: "FAILED",
-          actor: ctx.workerId,
+          reason: "configured_unverified",
           payload: { error: CONFIGURED_UNVERIFIED_MESSAGE, outcome: "configured_unverified" },
           patch: { error: CONFIGURED_UNVERIFIED_MESSAGE },
         });
