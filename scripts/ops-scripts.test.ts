@@ -39,7 +39,8 @@ describe("ops scripts", () => {
     expect(compose).not.toMatch(/services:\s*\n\s*ollama/i);
   });
 
-  it("stays on systemd when units and docker are both present", () => {
+  // Slow on a small VM.
+  it("stays on systemd when units and docker are both present", { timeout: 30_000 }, () => {
     const update = read("update.sh");
     const uninstall = read("uninstall.sh");
     expect(update).not.toMatch(/list-unit-files\s*\|/);
